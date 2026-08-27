@@ -1,6 +1,0 @@
-# DEPRECATED: This directory has been completely refactored.
-# All implementations have been moved to:
-# - lib/dbus_transport_base/ (generic D-Bus substrate for any service)
-# - services/rmc-inventory/publishers/ (inventory-specific transport implementations)
-#
-# This directory should be deleted entirely. Do not add new code here.
