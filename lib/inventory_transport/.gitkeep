@@ -1,0 +1,6 @@
+# DEPRECATED: This directory has been split:
+# - Generic D-Bus substrate: lib/dbus_transport_base/
+# - Inventory-specific: services/rmc-inventory/publishers/
+# - Inventory core: services/rmc-inventory/core/ (pending)
+#
+# Do not add new code here. This directory will be removed.
