@@ -1,7 +1,7 @@
 #include "dbus_transport_base/DbusTransportBase.h"
 #include "dbus_transport_base/DbusServiceAdapter.h"
 
-#include <inventory_service_api/IInventoryQueryService.h>
+#include <api/IInventoryQueryService.h>
 
 #include <dbus-cxx.h>
 #include <glog/logging.h>

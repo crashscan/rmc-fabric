@@ -1,5 +1,5 @@
 #include "DbusInventoryTransport.h"
-#include "inventory_transport/inventory/InventoryDbusAdapter.h"
+#include "InventoryDbusAdapter.h"
 
 namespace RSCGroup {
 

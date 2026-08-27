@@ -1,10 +1,10 @@
 #include "InventoryService.h"
 #include "InotifyFileWatcher.h"
 
-#include <inventory_core/InventoryFieldUtil.h>
+#include <core/InventoryFieldUtil.h>
 #include <interop_contract/inventory.hpp>
-#include <inventory_core/InventoryIssueUtil.h>
-#include <inventory_core/IWatchableInventorySource.h>
+#include <core/InventoryIssueUtil.h>
+#include <core/IWatchableInventorySource.h>
 
 #include <glog/logging.h>
 

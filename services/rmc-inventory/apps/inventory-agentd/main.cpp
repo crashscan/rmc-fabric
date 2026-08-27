@@ -1,7 +1,7 @@
-#include <inventory_core/DefaultInventoryManager.h>
-#include <inventory_core/DeviceMetaFileSource.h>
-#include <inventory_core/ScalarFileSource.h>
-#include <inventory_transport/TransportFactory.h>
+#include <core/DefaultInventoryManager.h>
+#include <core/DeviceMetaFileSource.h>
+#include <core/ScalarFileSource.h>
+#include "TransportFactory.h"
 
 #include "InventoryService.h"
 

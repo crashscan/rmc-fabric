@@ -1,4 +1,4 @@
-#include <inventory_transport/inventory/InventoryDbusCodec.h>
+#include "InventoryDbusCodec.h"
 #include <interop_contract/inventory.hpp>
 
 #include <cstdlib>

@@ -9,11 +9,11 @@
 #include <thread>
 #include <vector>
 
-#include <inventory_core/IInventoryManager.h>
-#include <inventory_service_api/IInventoryQueryService.h>
-#include <inventory_service_api/ITransport.h>
+#include <core/IInventoryManager.h>
+#include <api/IInventoryQueryService.h>
+#include <api/ITransport.h>
 #include <IFileWatcher.h>
-#include <inventory_core/IInventorySource.h>
+#include <core/IInventorySource.h>
 
 namespace RSCGroup {
 

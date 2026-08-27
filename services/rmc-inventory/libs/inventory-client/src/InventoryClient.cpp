@@ -1,6 +1,6 @@
 #include "InventoryClient.h"
 
-#include <inventory_transport/inventory/InventoryDbusCodec.h>
+#include "InventoryDbusCodec.h"
 
 #include <dbus-cxx.h>
 #include <glog/logging.h>

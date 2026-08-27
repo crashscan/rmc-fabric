@@ -2,7 +2,7 @@
 
 #include <dbus_transport_base/DbusTransportBase.h>
 
-#include "inventory_transport/inventory/InventoryDbusAdapter.h"
+#include "InventoryDbusAdapter.h"
 
 #include <memory>
 #include <string>

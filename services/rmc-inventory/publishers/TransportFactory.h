@@ -1,6 +1,6 @@
 #pragma once
 
-#include <inventory_service_api/ITransport.h>
+#include <api/ITransport.h>
 
 #include <memory>
 #include <string>
