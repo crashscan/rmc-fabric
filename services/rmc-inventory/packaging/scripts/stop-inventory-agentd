@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+CONF=/etc/inventory-agent/inventory-agentd.conf
+[ -f "$CONF" ] && . "$CONF"
+
+PIDFILE=${PIDFILE:-/run/inventory-agent/inventory-agentd.pid}
+STOP_WAIT_SEC=${STOP_WAIT_SEC:-20}
+
+[ -f "$PIDFILE" ] || exit 0
+PID=$(cat "$PIDFILE")
+
+kill -0 "$PID" 2>/dev/null || { rm -f "$PIDFILE"; exit 0; }
+
+kill "$PID"
+
+i=0
+while [ "$i" -lt "$STOP_WAIT_SEC" ]; do
+    kill -0 "$PID" 2>/dev/null || { rm -f "$PIDFILE"; exit 0; }
+    sleep 1; i=$((i+1))
+done
+
+kill -9 "$PID" 2>/dev/null || true
+rm -f "$PIDFILE"
+exit 0

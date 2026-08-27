@@ -1,0 +1,23 @@
+#!/bin/sh
+set -eu
+
+CONF=/etc/network-observation/network-observationd.conf
+[ -f "$CONF" ] && . "$CONF"
+
+PIDFILE="${PIDFILE:-/run/network-observation/network-observationd.pid}"
+DBUS_REPLY_TIMEOUT_MS="${DBUS_REPLY_TIMEOUT_MS:-3000}"
+
+[ -f "$PIDFILE" ] || exit 1
+PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+[ -n "${PID:-}" ] || exit 1
+kill -0 "$PID" 2>/dev/null || exit 1
+
+OUT="$(dbus-send --system \
+  --print-reply=literal \
+  --reply-timeout="$DBUS_REPLY_TIMEOUT_MS" \
+  --dest=org.rsc.NetworkObservation \
+  /org/rsc/NetworkObservation \
+  org.rsc.NetworkObservation.GetReady 2>/dev/null || true)"
+
+[ "$OUT" = "true" ] || exit 1
+exit 0

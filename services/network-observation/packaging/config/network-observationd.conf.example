@@ -1,0 +1,10 @@
+DAEMON=/usr/sbin/network-observationd
+CLI=/usr/bin/net-observe
+RUNDIR=/run/network-observation
+PIDFILE=/run/network-observation/network-observationd.pid
+LOGFILE=/var/log/network-observationd.log
+TRANSPORT=dbus
+TRANSPORT_CONFIG=system
+STARTUP_WAIT_SEC=20
+STOP_WAIT_SEC=20
+DBUS_REPLY_TIMEOUT_MS=3000

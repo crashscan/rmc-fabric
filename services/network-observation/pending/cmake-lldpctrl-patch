@@ -1,0 +1,70 @@
+@@
+ # LLDP Observer module
+ cmake_minimum_required(VERSION 3.16)
+
+ set(CMAKE_CXX_STANDARD 20)
+ set(CMAKE_CXX_STANDARD_REQUIRED ON)
++
++find_package(PkgConfig REQUIRED)
++pkg_check_modules(LLDPCTL REQUIRED IMPORTED_TARGET lldpctl)
+
+ # --- liblldp-observer.so — LLDP observation source ---
+ add_library(lldp-observer SHARED
+     LldpObserver.cpp
+     lldpd/LldpdSource.cpp
+ )
+
+-find_path(LLDP_CPP_INCLUDE_DIR
+-        NAMES lldpctl.h
+-        ONLY_CMAKE_FIND_ROOT_PATH
+-)
+-
+ target_include_directories(lldp-observer PUBLIC
+     ${CMAKE_CURRENT_SOURCE_DIR}
+     ${CMAKE_CURRENT_SOURCE_DIR}/public
+     ${CMAKE_CURRENT_SOURCE_DIR}/lldpd
+     ${OBS_BASE}/public
+-    ${LLDP_CPP_INCLUDE_DIR}
++    ${LLDPCTL_INCLUDE_DIRS}
+ )
+
+ add_subdirectory(manual-tests)
+-# Find lldpctl via pkg-config
+-#find_package(PkgConfig REQUIRED)
+-#pkg_check_modules(LLDPCTL REQUIRED lldpctl)
+-
+-#target_include_directories(lldp-observer PRIVATE
+-#    ${LLDPCTL_INCLUDE_DIRS}
+-#)
+-
+ target_link_libraries(lldp-observer PRIVATE
+-        liblldpctl.so
++        PkgConfig::LLDPCTL
+ )
+
+
+ -------------------
+
+ Why this is better
+ Using pkg-config here is more portable because liblldpctl-dev provides the package metadata and include/library paths, instead of you assuming a soname or install path. Debian package metadata shows lldpctl.pc is installed by liblldpctl-dev. (packages.debian.org)
+
+ One small note
+ If your environment does not define an imported target for PkgConfig::LLDPCTL for some reason, use the classic variables instead:
+
+ CMake
+ target_include_directories(lldp-observer PUBLIC ${LLDPCTL_INCLUDE_DIRS})
+ target_link_libraries(lldp-observer PRIVATE ${LLDPCTL_LIBRARIES})
+ target_link_directories(lldp-observer PRIVATE ${LLDPCTL_LIBRARY_DIRS})
+ target_compile_options(lldp-observer PRIVATE ${LLDPCTL_CFLAGS_OTHER})
+ But IMPORTED_TARGET is the cleaner modern form.
+
+ Recommended follow-up
+ After applying:
+
+ delete any old commented LLDP pkg-config code
+ configure from scratch
+ verify pkg-config --modversion lldpctl works in your build env
+ If you want, I can also generate a second CMake patch for:
+
+ checking request_name() result at runtime, and/or
+ cleaning up duplicated include/link patterns across these subdirectories.

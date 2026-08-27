@@ -1,0 +1,37 @@
+#!/bin/sh
+set -eu
+
+CONF=/etc/network-observation/network-observationd.conf
+[ -f "$CONF" ] && . "$CONF"
+
+PIDFILE="${PIDFILE:-/run/network-observation/network-observationd.pid}"
+STOP_WAIT_SEC="${STOP_WAIT_SEC:-20}"
+
+is_running() {
+    [ -f "$PIDFILE" ] || return 1
+    PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+    [ -n "${PID:-}" ] || return 1
+    kill -0 "$PID" 2>/dev/null
+}
+
+if ! is_running; then
+    rm -f "$PIDFILE"
+    exit 0
+fi
+
+PID="$(cat "$PIDFILE")"
+kill "$PID" 2>/dev/null || true
+
+i=0
+while [ "$i" -lt "$STOP_WAIT_SEC" ]; do
+    if ! kill -0 "$PID" 2>/dev/null; then
+        rm -f "$PIDFILE"
+        exit 0
+    fi
+    sleep 1
+    i=$((i+1))
+done
+
+kill -9 "$PID" 2>/dev/null || true
+rm -f "$PIDFILE"
+exit 0

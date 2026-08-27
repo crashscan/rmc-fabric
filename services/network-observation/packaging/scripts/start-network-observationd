@@ -1,0 +1,91 @@
+#!/bin/sh
+set -eu
+
+CONF=/etc/network-observation/network-observationd.conf
+[ -f "$CONF" ] && . "$CONF"
+
+DAEMON="${DAEMON:-/usr/sbin/network-observationd}"
+CLI="${CLI:-/usr/bin/net-observe}"
+RUNDIR="${RUNDIR:-/run/network-observation}"
+PIDFILE="${PIDFILE:-/run/network-observation/network-observationd.pid}"
+LOGFILE="${LOGFILE:-/var/log/network-observationd.log}"
+TRANSPORT="${TRANSPORT:-dbus}"
+TRANSPORT_CONFIG="${TRANSPORT_CONFIG:-system}"
+STARTUP_WAIT_SEC="${STARTUP_WAIT_SEC:-20}"
+DBUS_REPLY_TIMEOUT_MS="${DBUS_REPLY_TIMEOUT_MS:-3000}"
+
+DBUS_SOCKET=/run/dbus/system_bus_socket
+
+is_running() {
+    [ -f "$PIDFILE" ] || return 1
+    PID="$(cat "$PIDFILE" 2>/dev/null || true)"
+    [ -n "${PID:-}" ] || return 1
+    kill -0 "$PID" 2>/dev/null
+}
+
+wait_for_bus() {
+    i=0
+    while [ "$i" -lt "$STARTUP_WAIT_SEC" ]; do
+        [ -S "$DBUS_SOCKET" ] && return 0
+        sleep 1
+        i=$((i+1))
+    done
+    return 1
+}
+
+check_ready() {
+    tmp="/tmp/network-observationd.ready.$$"
+    /usr/bin/dbus-send --system --print-reply --reply-timeout=3000 \
+        --dest=org.rsc.NetworkObservation \
+        /org/rsc/NetworkObservation \
+        org.rsc.NetworkObservation.GetReady > "$tmp" 2>/dev/null || return 1
+
+    /bin/grep -Eq 'boolean[[:space:]]+true|(^|[[:space:]])true($|[[:space:]])' "$tmp"
+}
+
+wait_ready() {
+    i=0
+    while [ "$i" -lt "$STARTUP_WAIT_SEC" ]; do
+        is_running || return 1
+        if check_ready; then
+            rm -f /tmp/network-observationd.ready.$$
+            return 0
+        fi
+        sleep 1
+        i=$((i+1))
+    done
+    rm -f /tmp/network-observationd.ready.$$
+    return 1
+}
+
+if is_running; then
+    exit 0
+fi
+
+mkdir -p "$RUNDIR"
+
+if ! wait_for_bus; then
+    echo "network-observationd: system D-Bus not ready" >&2
+    exit 1
+fi
+
+"$DAEMON" \
+  --transport="$TRANSPORT" \
+  --transport_config="$TRANSPORT_CONFIG" \
+  >>"$LOGFILE" 2>&1 &
+PID=$!
+
+echo "$PID" > "$PIDFILE"
+
+if ! wait_ready; then
+    if kill -0 "$PID" 2>/dev/null; then
+        kill "$PID" 2>/dev/null || true
+        sleep 1
+        kill -9 "$PID" 2>/dev/null || true
+    fi
+    rm -f "$PIDFILE"
+    echo "network-observationd: failed readiness check after start" >&2
+    exit 1
+fi
+
+exit 0

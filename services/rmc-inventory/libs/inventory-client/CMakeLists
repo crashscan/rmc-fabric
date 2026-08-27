@@ -1,0 +1,39 @@
+add_library(inventory-client STATIC
+        src/InventoryClient.cpp
+        ${PUBLISHERS_BASE}/InventoryDbusCodec.cpp
+)
+
+target_include_directories(inventory-client PUBLIC
+        ${DBusCxx_INCLUDE_DIRS}
+        ${SigCxx_INCLUDE_DIRS}
+        include
+        ${INCLUDE_BASE}
+        ${INVENTORY_CORE_BASE}
+        ${PUBLISHERS_BASE}
+)
+
+if(BUILD_TESTING)
+    add_executable(inventory_dbus_codec_characterization_tests
+        tests/InventoryDbusCodecCharacterizationTests.cpp
+        ${PUBLISHERS_BASE}/InventoryDbusCodec.cpp
+    )
+
+    target_include_directories(inventory_dbus_codec_characterization_tests PRIVATE
+        ${DBusCxx_INCLUDE_DIRS}
+        ${SigCxx_INCLUDE_DIRS}
+        include
+        ${INCLUDE_BASE}
+        ${INVENTORY_CORE_BASE}
+        ${PUBLISHERS_BASE}
+    )
+
+    target_link_libraries(inventory_dbus_codec_characterization_tests
+        PRIVATE DBusCxx::DBusCxx
+                interop_contract
+                inventory_core
+    )
+endif()
+
+target_link_libraries(inventory-client
+    PUBLIC interop_contract
+)

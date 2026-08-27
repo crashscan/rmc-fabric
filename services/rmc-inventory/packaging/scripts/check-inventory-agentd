@@ -1,0 +1,25 @@
+#!/bin/sh
+set -eu
+
+# This check verifies only:
+#   1. the daemon process exists
+#   2. the D-Bus API is responsive
+#
+# It does NOT prove the background refresh loop is healthy.
+# Loop failure is reported via GetIssues() (e.g. "inventory.loop.stopped")
+# and/or daemon logs, and must be monitored separately if freshness matters.
+
+CONF=/etc/inventory-agent/inventory-agentd.conf
+[ -f "$CONF" ] && . "$CONF"
+
+PIDFILE=${PIDFILE:-/run/inventory-agent/inventory-agentd.pid}
+DBUS_REPLY_TIMEOUT_MS=${DBUS_REPLY_TIMEOUT_MS:-3000}
+
+[ -f "$PIDFILE" ] || exit 1
+
+PID=$(cat "$PIDFILE")
+kill -0 "$PID" 2>/dev/null || exit 1
+
+dbus-send --system --print-reply --reply-timeout="$DBUS_REPLY_TIMEOUT_MS" \
+    --dest=org.rsc.Inventory /org/rsc/Inventory org.rsc.Inventory.GetReady 2>/dev/null \
+    | grep -q "boolean"

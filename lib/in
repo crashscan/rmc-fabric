@@ -1,0 +1,216 @@
+#include "inventory_transport/DbusInventoryTransport.h"
+#include "inventory_transport/InventoryDbusCodec.h"
+
+#include <IInventoryQueryService.h>
+
+#include <dbus-cxx.h>
+#include <glog/logging.h>
+#include <sigc++/sigc++.h>
+
+#include <atomic>
+#include <cstdint>
+#include <map>
+#include <string>
+
+namespace RSCGroup {
+namespace {
+
+using namespace interop_contract::inventory;
+
+struct InventoryQueryHandler {
+    IInventoryQueryService* service = nullptr;
+
+    std::map<std::string, DBus::Variant> GetIdentity() {
+        if (!service) return {};
+        try {
+            return InventoryDbusCodec::encodeSnapshot(service->getIdentity());
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "GetIdentity failed: " << e.what();
+            return {};
+        }
+    }
+
+    std::map<std::string, DBus::Variant> GetField(std::string fieldName) {
+        if (!service) return {};
+        try {
+            return InventoryDbusCodec::encodeFields(service->getField(fieldName));
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "GetField failed: " << e.what();
+            return {};
+        }
+    }
+
+    std::map<std::string, std::map<std::string, DBus::Variant>> GetSourceStates() {
+        if (!service) return {};
+        try {
+            return InventoryDbusCodec::encodeSourceStates(service->getSourceStates());
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "GetSourceStates failed: " << e.what();
+            return {};
+        }
+    }
+
+    std::map<std::string, std::map<std::string, DBus::Variant>> GetIssues() {
+        if (!service) return {};
+        try {
+            return InventoryDbusCodec::encodeIssues(service->getIssues());
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "GetIssues failed: " << e.what();
+            return {};
+        }
+    }
+
+    bool GetReady() {
+        return service && service->getReady();
+    }
+
+    std::string GetPhase() {
+        if (!service) return "unknown";
+        return service->getPhase();
+    }
+
+    uint64_t GetVersion() {
+        return service ? service->getVersion() : 0;
+    }
+
+    void Refresh() {
+        if (service) service->refresh();
+    }
+};
+
+} // namespace
+
+struct DbusInventoryTransport::Impl {
+    std::shared_ptr<DBus::Connection> connection;
+    std::shared_ptr<DBus::Object> object;
+    InventoryQueryHandler handler;
+
+    std::string serviceName;
+    std::string objectPath;
+    std::string interfaceName;
+
+    std::shared_ptr<DBus::Signal<void(std::string)>> signalInventoryChanged;
+    std::shared_ptr<DBus::Signal<void(std::string)>> signalSourceStateChanged;
+    std::shared_ptr<DBus::Signal<void(bool)>> signalReadyChanged;
+
+    std::atomic<bool> running{false};
+};
+
+DbusInventoryTransport::DbusInventoryTransport(std::shared_ptr<DBus::Connection> connection,
+                                               std::string serviceName,
+                                               std::string objectPath,
+                                               std::string interfaceName)
+    : impl_(std::make_unique<Impl>()) {
+    if (!connection) {
+        throw std::invalid_argument("DbusInventoryTransport: connection is null");
+    }
+    impl_->connection = std::move(connection);
+    impl_->serviceName = std::move(serviceName);
+    impl_->objectPath = std::move(objectPath);
+    impl_->interfaceName = std::move(interfaceName);
+}
+
+DbusInventoryTransport::~DbusInventoryTransport() {
+    if (impl_->running.load()) {
+        stop();
+    }
+}
+
+void DbusInventoryTransport::start(IInventoryQueryService& queryService) {
+    if (impl_->running.load()) return;
+
+    impl_->handler.service = &queryService;
+
+    try {
+        const auto nameResult = impl_->connection->request_name(impl_->serviceName);
+        if (nameResult != DBus::RequestNameResponse::PrimaryOwner &&
+            nameResult != DBus::RequestNameResponse::AlreadyOwner) {
+            LOG(ERROR) << "DbusInventoryTransport: failed to acquire bus name '"
+                       << impl_->serviceName << "' (result="
+                       << static_cast<std::uint32_t>(nameResult) << ")";
+            impl_->handler.service = nullptr;
+            throw std::runtime_error("DbusInventoryTransport: bus name unavailable");
+        }
+
+        impl_->object = impl_->connection->create_object(impl_->objectPath);
+        impl_->connection->register_object(impl_->object);
+
+        auto& obj = impl_->object;
+        auto& h = impl_->handler;
+        const std::string& iface = impl_->interfaceName;
+
+        obj->create_method<std::map<std::string, DBus::Variant>()>(
+            iface, std::string(METHOD_GET_IDENTITY),
+            sigc::mem_fun(h, &InventoryQueryHandler::GetIdentity));
+        obj->create_method<std::map<std::string, DBus::Variant>(std::string)>(
+            iface, std::string(METHOD_GET_FIELD),
+            sigc::mem_fun(h, &InventoryQueryHandler::GetField));
+        obj->create_method<std::map<std::string, std::map<std::string, DBus::Variant>>()>(
+            iface, std::string(METHOD_GET_SOURCE_STATES),
+            sigc::mem_fun(h, &InventoryQueryHandler::GetSourceStates));
+        obj->create_method<bool()>(
+            iface, std::string(METHOD_GET_READY),
+            sigc::mem_fun(h, &InventoryQueryHandler::GetReady));
+        obj->create_method<std::string()>(
+            iface, std::string(METHOD_GET_PHASE),
+            sigc::mem_fun(h, &InventoryQueryHandler::GetPhase));
+        obj->create_method<uint64_t()>(
+            iface, std::string(METHOD_GET_VERSION),
+            sigc::mem_fun(h, &InventoryQueryHandler::GetVersion));
+        obj->create_method<void()>(
+            iface, std::string(METHOD_REFRESH),
+            sigc::mem_fun(h, &InventoryQueryHandler::Refresh));
+        obj->create_method<std::map<std::string, std::map<std::string, DBus::Variant>>()>(
+            iface, std::string(METHOD_GET_ISSUES),
+            sigc::mem_fun(h, &InventoryQueryHandler::GetIssues));
+
+        impl_->signalInventoryChanged = obj->create_signal<void(std::string)>(
+            iface, std::string(SIGNAL_INVENTORY_CHANGED));
+        impl_->signalSourceStateChanged = obj->create_signal<void(std::string)>(
+            iface, std::string(SIGNAL_SOURCE_STATE_CHANGED));
+        impl_->signalReadyChanged = obj->create_signal<void(bool)>(
+            iface, std::string(SIGNAL_READY_CHANGED));
+
+        impl_->running.store(true, std::memory_order_release);
+        LOG(INFO) << "DbusInventoryTransport started: " << impl_->serviceName;
+    } catch (const std::exception& e) {
+        impl_->running.store(false, std::memory_order_release);
+        impl_->object.reset();
+        impl_->handler.service = nullptr;
+        LOG(ERROR) << "DbusInventoryTransport start failed: " << e.what();
+        throw;
+    }
+}
+
+void DbusInventoryTransport::stop() {
+    if (!impl_->running.exchange(false, std::memory_order_acq_rel)) return;
+
+    if (impl_->object && impl_->connection) {
+        impl_->connection->unregister_object(impl_->objectPath);
+    }
+    impl_->object.reset();
+    impl_->signalInventoryChanged.reset();
+    impl_->signalSourceStateChanged.reset();
+    impl_->signalReadyChanged.reset();
+    impl_->handler.service = nullptr;
+}
+
+void DbusInventoryTransport::publishInventoryChanged(const std::string& fieldPath) {
+    if (!impl_->running.load(std::memory_order_acquire) || !impl_->signalInventoryChanged) return;
+    try { impl_->signalInventoryChanged->emit(fieldPath); }
+    catch (const std::exception& e) { LOG(ERROR) << "publishInventoryChanged failed: " << e.what(); }
+}
+
+void DbusInventoryTransport::publishSourceStateChanged(const std::string& sourceName) {
+    if (!impl_->running.load(std::memory_order_acquire) || !impl_->signalSourceStateChanged) return;
+    try { impl_->signalSourceStateChanged->emit(sourceName); }
+    catch (const std::exception& e) { LOG(ERROR) << "publishSourceStateChanged failed: " << e.what(); }
+}
+
+void DbusInventoryTransport::publishReadyChanged(bool ready) {
+    if (!impl_->running.load(std::memory_order_acquire) || !impl_->signalReadyChanged) return;
+    try { impl_->signalReadyChanged->emit(ready); }
+    catch (const std::exception& e) { LOG(ERROR) << "publishReadyChanged failed: " << e.what(); }
+}
+
+} // namespace RSCGroup
