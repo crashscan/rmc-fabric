@@ -5,7 +5,7 @@
 #include <optional>
 #include <string>
 
-#include <interop_contract/inventory/InventorySnapshot.hpp>
+#include <inventory/InventorySnapshot.hpp>
 
 namespace RSCGroup::InventoryFieldUtil {
 

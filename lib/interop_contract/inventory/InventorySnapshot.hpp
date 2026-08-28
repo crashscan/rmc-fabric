@@ -1,6 +1,6 @@
 #pragma once
 
-#include "interop_contract/inventory/InventoryTypes.hpp"
+#include "InventoryTypes.hpp"
 
 #include <cstdint>
 #include <string>

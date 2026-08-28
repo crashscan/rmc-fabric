@@ -1,5 +1,5 @@
-#include "dbus_transport_base/DbusTransportBase.h"
-#include "dbus_transport_base/DbusServiceAdapter.h"
+#include "DbusTransportBase.h"
+#include "DbusServiceAdapter.h"
 
 #include <IInventoryQueryService.h>
 

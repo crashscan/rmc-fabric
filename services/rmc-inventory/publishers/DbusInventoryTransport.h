@@ -1,6 +1,6 @@
 #pragma once
 
-#include <dbus_transport_base/DbusTransportBase.h>
+#include <DbusTransportBase.h>
 
 #include "InventoryDbusAdapter.h"
 

@@ -2,7 +2,7 @@ add_library(interop_contract INTERFACE)
 
 target_include_directories(interop_contract
     INTERFACE
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 # Intentionally no transport-library linkage here.

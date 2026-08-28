@@ -1,7 +1,7 @@
 #pragma once
 
-#include "interop_contract/inventory/InventoryMetadata.hpp"
-#include "interop_contract/inventory/InventoryTypes.hpp"
+#include "InventoryMetadata.hpp"
+#include "InventoryTypes.hpp"
 
 #include <algorithm>
 #include <ranges>

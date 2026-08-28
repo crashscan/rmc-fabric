@@ -1,6 +1,6 @@
 #pragma once
 
-#include "interop_contract/inventory/InventoryContracts.hpp"
+#include "InventoryContracts.hpp"
 
 #include <string>
 #include <string_view>

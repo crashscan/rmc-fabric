@@ -1,6 +1,6 @@
 #include "InventoryFieldUtil.h"
 
-#include <interop_contract/inventory.hpp>
+#include <inventory.hpp>
 
 namespace RSCGroup::InventoryFieldUtil {
 

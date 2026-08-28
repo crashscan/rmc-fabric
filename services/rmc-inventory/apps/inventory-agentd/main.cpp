@@ -5,7 +5,7 @@
 
 #include "InventoryService.h"
 
-#include <interop_contract/inventory.hpp>
+#include <inventory.hpp>
 
 #include <dbus-cxx.h>
 #include <gflags/gflags.h>

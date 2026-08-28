@@ -2,7 +2,7 @@
 
 #include "InventoryFields.h"
 
-#include <interop_contract/inventory/InventorySourceState.hpp>
+#include <inventory/InventorySourceState.hpp>
 
 namespace RSCGroup::InventoryIssueUtil {
 

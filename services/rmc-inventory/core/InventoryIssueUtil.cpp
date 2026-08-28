@@ -1,6 +1,6 @@
 #include "InventoryIssueUtil.h"
 
-#include <interop_contract/inventory.hpp>
+#include <inventory.hpp>
 
 namespace RSCGroup::InventoryIssueUtil {
 namespace {

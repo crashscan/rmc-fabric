@@ -1,4 +1,4 @@
-#include "interop_contract/Status.hpp"
+#include "Status.hpp"
 
 #include <cstdlib>
 #include <iostream>

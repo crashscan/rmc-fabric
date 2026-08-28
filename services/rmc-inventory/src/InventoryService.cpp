@@ -2,7 +2,7 @@
 #include <InotifyFileWatcher.h>
 
 #include <InventoryFieldUtil.h>
-#include <interop_contract/inventory.hpp>
+#include <inventory.hpp>
 #include <InventoryIssueUtil.h>
 #include <IWatchableInventorySource.h>
 
