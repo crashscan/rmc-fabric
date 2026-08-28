@@ -1,15 +1,15 @@
 add_library(inventory_core STATIC
-    src/DefaultInventoryManager.cpp
-    src/InventoryFieldUtil.cpp
-    src/InventoryIssueUtil.cpp
-    src/DeviceMetaFileSource.cpp
-    src/FileBackedInventorySource.cpp
-    src/InventorySourceUtil.cpp
+    DefaultInventoryManager.cpp
+    InventoryFieldUtil.cpp
+    InventoryIssueUtil.cpp
+    DeviceMetaFileSource.cpp
+    FileBackedInventorySource.cpp
+    InventorySourceUtil.cpp
 )
 
 target_include_directories(inventory_core
     PUBLIC
-        ${CMAKE_CURRENT_SOURCE_DIR}/include
+        ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
 target_link_libraries(inventory_core
