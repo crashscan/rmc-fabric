@@ -2,7 +2,7 @@
 #include "DbusInventoryTransport.h"
 #include "StdoutInventoryTransport.h"
 
-#include <interop_contract/inventory.hpp>
+#include <inventory.hpp>
 #include <glog/logging.h>
 
 namespace RSCGroup {

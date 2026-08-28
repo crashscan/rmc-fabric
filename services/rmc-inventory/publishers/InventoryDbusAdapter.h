@@ -1,6 +1,6 @@
 #pragma once
 
-#include <dbus_transport_base/DbusServiceAdapter.h>
+#include <DbusServiceAdapter.h>
 
 #include <memory>
 #include <string>

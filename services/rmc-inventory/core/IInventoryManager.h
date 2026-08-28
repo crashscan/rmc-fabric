@@ -7,8 +7,8 @@
 #include <vector>
 #include <string>
 
-#include <interop_contract/inventory/InventorySnapshot.hpp>
-#include <interop_contract/inventory/InventorySourceState.hpp>
+#include <inventory/InventorySnapshot.hpp>
+#include <inventory/InventorySourceState.hpp>
 
 namespace RSCGroup {
 

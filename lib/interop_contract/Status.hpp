@@ -1,6 +1,6 @@
 #pragma once
 
-#include "interop_contract/Error.hpp"
+#include "Error.hpp"
 
 #include <optional>
 #include <utility>

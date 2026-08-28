@@ -1,4 +1,4 @@
-#include "interop_contract/inventory.hpp"
+#include "inventory.hpp"
 
 #include <cstdlib>
 #include <iostream>

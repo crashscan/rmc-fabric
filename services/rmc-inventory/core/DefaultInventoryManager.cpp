@@ -3,7 +3,7 @@
 #include "InventoryFieldUtil.h"
 #include "InventorySourceUtil.h"
 
-#include <interop_contract/inventory.hpp>
+#include <inventory.hpp>
 
 #include <algorithm>
 #include <chrono>

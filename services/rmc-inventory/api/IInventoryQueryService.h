@@ -2,9 +2,9 @@
 
 #include <InventoryFields.h>
 
-#include <interop_contract/inventory/InventorySnapshot.hpp>
-#include <interop_contract/inventory/InventoryIssues.hpp>
-#include <interop_contract/inventory/InventorySourceState.hpp>
+#include <inventory/InventorySnapshot.hpp>
+#include <inventory/InventoryIssues.hpp>
+#include <inventory/InventorySourceState.hpp>
 
 #include <map>
 #include <string>

@@ -3,7 +3,7 @@
 #include "InventoryDbusCodec.h"
 #include <IInventoryQueryService.h>
 
-#include <interop_contract/inventory.hpp>
+#include <inventory.hpp>
 
 #include <dbus-cxx.h>
 #include <glog/logging.h>

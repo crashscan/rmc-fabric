@@ -1,4 +1,4 @@
-#include "dbus_transport_base/DbusServiceAdapter.h"
+#include "DbusServiceAdapter.h"
 
 #include <dbus-cxx.h>
 #include <glog/logging.h>

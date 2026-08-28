@@ -1,8 +1,8 @@
 #pragma once
 
-#include <interop_contract/inventory/InventoryIssues.hpp>
-#include <interop_contract/inventory/InventorySourceState.hpp>
-#include <interop_contract/inventory/InventoryTypes.hpp>
+#include <inventory/InventoryIssues.hpp>
+#include <inventory/InventorySourceState.hpp>
+#include <inventory/InventoryTypes.hpp>
 
 namespace RSCGroup {
 

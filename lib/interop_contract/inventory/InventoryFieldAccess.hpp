@@ -1,7 +1,7 @@
 #pragma once
 
-#include "interop_contract/inventory/InventoryContracts.hpp"
-#include "interop_contract/inventory/InventorySnapshot.hpp"
+#include "InventoryContracts.hpp"
+#include "InventorySnapshot.hpp"
 
 #include <optional>
 #include <string>

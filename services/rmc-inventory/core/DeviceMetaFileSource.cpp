@@ -1,6 +1,6 @@
 #include "DeviceMetaFileSource.h"
 
-#include <interop_contract/inventory.hpp>
+#include <inventory.hpp>
 #include <json/reader.h>
 
 #include <memory>
