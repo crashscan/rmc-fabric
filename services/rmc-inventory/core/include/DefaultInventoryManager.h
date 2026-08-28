@@ -6,9 +6,9 @@
 #include <string>
 #include <vector>
 
-#include "core/IInventoryManager.h"
-#include "core/IInventorySource.h"
-#include "core/InventoryFields.h"
+#include "IInventoryManager.h"
+#include "IInventorySource.h"
+#include "InventoryFields.h"
 
 namespace RSCGroup {
 

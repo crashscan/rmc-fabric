@@ -1,4 +1,4 @@
-#include "core/FileBackedInventorySource.h"
+#include "FileBackedInventorySource.h"
 
 #include <filesystem>
 #include <fstream>

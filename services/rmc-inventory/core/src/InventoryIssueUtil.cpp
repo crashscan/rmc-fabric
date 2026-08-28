@@ -1,4 +1,4 @@
-#include "core/InventoryIssueUtil.h"
+#include "InventoryIssueUtil.h"
 
 #include <interop_contract/inventory.hpp>
 

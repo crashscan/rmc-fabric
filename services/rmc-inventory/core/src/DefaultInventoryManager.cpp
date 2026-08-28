@@ -1,7 +1,7 @@
-#include "core/DefaultInventoryManager.h"
+#include "DefaultInventoryManager.h"
 
-#include "core/InventoryFieldUtil.h"
-#include "core/InventorySourceUtil.h"
+#include "InventoryFieldUtil.h"
+#include "InventorySourceUtil.h"
 
 #include <interop_contract/inventory.hpp>
 

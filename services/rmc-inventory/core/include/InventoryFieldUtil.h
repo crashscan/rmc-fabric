@@ -1,6 +1,6 @@
 #pragma once
 
-#include "core/InventoryFields.h"
+#include "InventoryFields.h"
 
 #include <optional>
 #include <string>
