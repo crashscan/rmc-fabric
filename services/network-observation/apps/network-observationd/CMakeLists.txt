@@ -3,6 +3,7 @@ add_executable(network-observationd
     ObservationService.cpp
     ${TRANSPORT_BASE}/TransportFactory.cpp
     ${TRANSPORT_BASE}/dbus/DbusTransport.cpp
+    ${TRANSPORT_BASE}/dbus/NetworkObservationDbusAdapter.cpp
     ${TRANSPORT_BASE}/stdout/StdoutTransport.cpp
 )
 
@@ -23,6 +24,7 @@ target_include_directories(network-observationd PRIVATE
 
 target_link_libraries(network-observationd
     PRIVATE
+        dbus_transport_base
         DBusCxx::DBusCxx
         SigCxx::SigCxx
     netlink-monitor

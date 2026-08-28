@@ -3,19 +3,28 @@
 //
 /**
  * @file DbusTransport.h
- * @brief D-Bus transport — typed signals + methods for network-observationd.
+ * @brief D-Bus transport for network-observationd.
+ *
+ * Delegates all D-Bus infrastructure to DbusTransportBase and all
+ * signal/method binding to NetworkObservationDbusAdapter.
  */
 #pragma once
 #include "ITransport.h"
+#include <DbusTransportBase.h>
 #include <memory>
 #include <string>
 
 namespace RSCGroup {
 
-class DbusTransport : public ITransport {
+class NetworkObservationDbusAdapter;
+
+class DbusTransport : public ITransport, public DbusTransportBase {
 public:
     explicit DbusTransport(const std::string& busType = "system");
-    ~DbusTransport() override;
+    ~DbusTransport() override = default;
+
+    DbusTransport(const DbusTransport&) = delete;
+    DbusTransport& operator=(const DbusTransport&) = delete;
 
     void setQueryProvider(IObservationQueryService* provider) override;
 
@@ -30,8 +39,7 @@ public:
     void publishReadyChanged(bool ready) override;
 
 private:
-    struct Impl;
-    std::unique_ptr<Impl> impl_;
+    [[nodiscard]] NetworkObservationDbusAdapter* obsAdapter() const;
 };
 
 } // namespace RSCGroup

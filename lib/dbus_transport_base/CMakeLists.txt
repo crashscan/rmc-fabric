@@ -9,8 +9,6 @@ target_include_directories(dbus_transport_base
 )
 
 target_link_libraries(dbus_transport_base
-    PUBLIC
-        inventory_service_api
     PRIVATE
         DBusCxx::DBusCxx
         glog

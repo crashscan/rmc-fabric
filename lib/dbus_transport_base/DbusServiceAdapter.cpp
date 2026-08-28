@@ -39,4 +39,20 @@ std::shared_ptr<DBus::Signal<void(bool)>> DbusServiceAdapter::createBoolSignal(
     }
 }
 
+std::shared_ptr<DBus::Signal<void()>> DbusServiceAdapter::createVoidSignal(
+    const std::shared_ptr<DBus::Object>& object,
+    const std::string& interfaceName,
+    const std::string& signalName)
+{
+    if (!object) {
+        throw std::invalid_argument("DbusServiceAdapter::createVoidSignal: object is null");
+    }
+    try {
+        return object->create_signal<void()>(interfaceName, signalName);
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "Failed to create void signal '" << signalName << "': " << e.what();
+        throw;
+    }
+}
+
 } // namespace RSCGroup
