@@ -47,7 +47,8 @@ bool DbusTransport::start()
 void DbusTransport::stop()
 {
     DbusTransportBase::stop();
-    obsAdapter()->setService(nullptr);
+    // onTransportStopping() (called by DbusTransportBase::stop()) already clears
+    // the service pointer via NetworkObservationDbusAdapter::onTransportStopping().
 }
 
 void DbusTransport::publishLocalStateChanged()

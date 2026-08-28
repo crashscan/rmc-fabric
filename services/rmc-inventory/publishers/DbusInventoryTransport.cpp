@@ -31,7 +31,8 @@ void DbusInventoryTransport::start(IInventoryQueryService& queryService)
 void DbusInventoryTransport::stop()
 {
     DbusTransportBase::stop();
-    inventoryAdapter()->setService(nullptr);
+    // onTransportStopping() (called by DbusTransportBase::stop()) already clears
+    // the service pointer via InventoryDbusAdapter::onTransportStopping().
 }
 
 void DbusInventoryTransport::publishInventoryChanged(const std::string& fieldPath)

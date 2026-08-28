@@ -38,7 +38,7 @@ constexpr auto K_REMOTE_PORT_ID     = "remotePortId";
 constexpr auto K_REMOTE_SYSTEM_NAME = "remoteSystemName";
 constexpr auto K_NEIGHBOR_IFACES    = "neighborIfaces";
 
-static std::string classificationToString(CandidateClassification c)
+std::string classificationToString(CandidateClassification c)
 {
     switch (c) {
         case CandidateClassification::Artifact:         return "Artifact";
@@ -53,7 +53,7 @@ static std::string classificationToString(CandidateClassification c)
     return "Unknown";
 }
 
-static std::string statusToString(CandidateStatus s)
+std::string statusToString(CandidateStatus s)
 {
     switch (s) {
         case CandidateStatus::Provisional: return "Provisional";
@@ -65,7 +65,7 @@ static std::string statusToString(CandidateStatus s)
     return "Unknown";
 }
 
-static std::map<std::string, DBus::Variant> toVariantMap(const LocalInterfaceState& iface)
+std::map<std::string, DBus::Variant> toVariantMap(const LocalInterfaceState& iface)
 {
     std::map<std::string, DBus::Variant> d;
     d[K_IFINDEX]   = DBus::Variant(static_cast<int32_t>(iface.ifindex));
@@ -87,7 +87,7 @@ static std::map<std::string, DBus::Variant> toVariantMap(const LocalInterfaceSta
     return d;
 }
 
-static std::map<std::string, DBus::Variant> toVariantMap(const RemoteCandidate& c)
+std::map<std::string, DBus::Variant> toVariantMap(const RemoteCandidate& c)
 {
     std::map<std::string, DBus::Variant> cand;
     cand[K_MAC]            = DBus::Variant(c.mac);
