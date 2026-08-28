@@ -1,4 +1,4 @@
-#include "inventory_core/InventorySourceUtil.h"
+#include "core/InventorySourceUtil.h"
 
 #include <algorithm>
 #include <ranges>

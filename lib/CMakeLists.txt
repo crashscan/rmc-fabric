@@ -1,4 +1,2 @@
 add_subdirectory(interop_contract)
-add_subdirectory(inventory_service_api)
-add_subdirectory(inventory_core)
 add_subdirectory(dbus_transport_base)

@@ -1,6 +1,6 @@
 #pragma once
 
-#include "inventory_core/FileBackedInventorySource.h"
+#include "core/FileBackedInventorySource.h"
 
 namespace RSCGroup {
 
