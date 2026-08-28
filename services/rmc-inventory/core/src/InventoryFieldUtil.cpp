@@ -1,4 +1,4 @@
-#include "inventory_core/InventoryFieldUtil.h"
+#include "core/InventoryFieldUtil.h"
 
 #include <interop_contract/inventory.hpp>
 

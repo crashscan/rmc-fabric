@@ -1,6 +1,6 @@
 #include "StdoutInventoryTransport.h"
 
-#include <inventory_service_api/IInventoryQueryService.h>
+#include <api/IInventoryQueryService.h>
 
 #include <iostream>
 #include <type_traits>

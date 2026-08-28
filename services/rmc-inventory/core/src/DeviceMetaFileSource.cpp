@@ -1,4 +1,4 @@
-#include "inventory_core/DeviceMetaFileSource.h"
+#include "core/DeviceMetaFileSource.h"
 
 #include <interop_contract/inventory.hpp>
 #include <json/reader.h>

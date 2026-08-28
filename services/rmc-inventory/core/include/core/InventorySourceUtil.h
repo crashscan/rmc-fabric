@@ -1,6 +1,6 @@
 #pragma once
 
-#include "inventory_core/InventoryFields.h"
+#include "core/InventoryFields.h"
 
 namespace RSCGroup::InventorySourceUtil {
 

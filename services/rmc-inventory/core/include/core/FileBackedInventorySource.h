@@ -1,7 +1,7 @@
 #pragma once
 
-#include "inventory_core/IInventorySource.h"
-#include "inventory_core/IWatchableInventorySource.h"
+#include "core/IInventorySource.h"
+#include "core/IWatchableInventorySource.h"
 
 #include <mutex>
 #include <string>
