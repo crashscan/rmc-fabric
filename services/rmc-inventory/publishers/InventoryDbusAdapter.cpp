@@ -1,7 +1,7 @@
 #include "InventoryDbusAdapter.h"
 
 #include "InventoryDbusCodec.h"
-#include <api/IInventoryQueryService.h>
+#include <IInventoryQueryService.h>
 
 #include <interop_contract/inventory.hpp>
 

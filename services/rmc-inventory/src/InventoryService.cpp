@@ -1,10 +1,10 @@
 #include "InventoryService.h"
-#include "InotifyFileWatcher.h"
+#include <InotifyFileWatcher.h>
 
-#include <core/InventoryFieldUtil.h>
+#include <InventoryFieldUtil.h>
 #include <interop_contract/inventory.hpp>
-#include <core/InventoryIssueUtil.h>
-#include <core/IWatchableInventorySource.h>
+#include <InventoryIssueUtil.h>
+#include <IWatchableInventorySource.h>
 
 #include <glog/logging.h>
 
@@ -409,4 +409,3 @@ interop_contract::inventory::InventoryIssues InventoryService::getIssues() const
 }
 
 } // namespace RSCGroup
-

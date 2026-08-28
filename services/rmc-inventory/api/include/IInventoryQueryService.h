@@ -1,6 +1,6 @@
 #pragma once
 
-#include <core/InventoryFields.h>
+#include <InventoryFields.h>
 
 #include <interop_contract/inventory/InventorySnapshot.hpp>
 #include <interop_contract/inventory/InventoryIssues.hpp>
