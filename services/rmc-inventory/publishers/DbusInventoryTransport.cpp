@@ -17,4 +17,40 @@ DbusInventoryTransport::DbusInventoryTransport(std::shared_ptr<DBus::Connection>
 
 DbusInventoryTransport::~DbusInventoryTransport() = default;
 
+InventoryDbusAdapter* DbusInventoryTransport::inventoryAdapter() const
+{
+    return static_cast<InventoryDbusAdapter*>(getAdapter());
+}
+
+void DbusInventoryTransport::start(IInventoryQueryService& queryService)
+{
+    inventoryAdapter()->setService(&queryService);
+    DbusTransportBase::start();
+}
+
+void DbusInventoryTransport::stop()
+{
+    DbusTransportBase::stop();
+    // onTransportStopping() (called by DbusTransportBase::stop()) already clears
+    // the service pointer via InventoryDbusAdapter::onTransportStopping().
+}
+
+void DbusInventoryTransport::publishInventoryChanged(const std::string& fieldPath)
+{
+    if (!isRunning()) return;
+    inventoryAdapter()->publishInventoryChanged(fieldPath);
+}
+
+void DbusInventoryTransport::publishSourceStateChanged(const std::string& sourceName)
+{
+    if (!isRunning()) return;
+    inventoryAdapter()->publishSourceStateChanged(sourceName);
+}
+
+void DbusInventoryTransport::publishReadyChanged(bool ready)
+{
+    if (!isRunning()) return;
+    inventoryAdapter()->publishReadyChanged(ready);
+}
+
 } // namespace RSCGroup

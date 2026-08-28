@@ -23,15 +23,17 @@ public:
     InventoryDbusAdapter(const InventoryDbusAdapter&) = delete;
     InventoryDbusAdapter& operator=(const InventoryDbusAdapter&) = delete;
 
-    void setService(IInventoryQueryService* service) override;
-    [[nodiscard]] IInventoryQueryService* getService() const override;
+    void setService(IInventoryQueryService* service);
+    [[nodiscard]] IInventoryQueryService* getService() const;
 
     void bind(const std::shared_ptr<DBus::Object>& object,
               const std::string& interfaceName) override;
 
-    void publishInventoryChanged(const std::string& fieldPath) override;
-    void publishSourceStateChanged(const std::string& sourceName) override;
-    void publishReadyChanged(bool ready) override;
+    void onTransportStopping() override;
+
+    void publishInventoryChanged(const std::string& fieldPath);
+    void publishSourceStateChanged(const std::string& sourceName);
+    void publishReadyChanged(bool ready);
 
 private:
     IInventoryQueryService* service_ = nullptr;

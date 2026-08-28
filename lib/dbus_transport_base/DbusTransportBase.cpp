@@ -1,8 +1,6 @@
 #include "DbusTransportBase.h"
 #include "DbusServiceAdapter.h"
 
-#include <IInventoryQueryService.h>
-
 #include <dbus-cxx.h>
 #include <glog/logging.h>
 
@@ -13,6 +11,8 @@ namespace RSCGroup {
 
 struct DbusTransportBase::Impl {
     std::atomic<bool> registered{false};
+    // Owned dispatcher/connection used when the busType constructor is invoked.
+    std::shared_ptr<DBus::StandaloneDispatcher> dispatcher;
 };
 
 DbusTransportBase::DbusTransportBase(std::shared_ptr<DBus::Connection> connection,
@@ -35,6 +35,26 @@ DbusTransportBase::DbusTransportBase(std::shared_ptr<DBus::Connection> connectio
     }
 }
 
+DbusTransportBase::DbusTransportBase(std::string busType,
+                                     std::unique_ptr<DbusServiceAdapter> adapter,
+                                     std::string serviceName,
+                                     std::string objectPath,
+                                     std::string interfaceName)
+    : impl_(std::make_unique<Impl>())
+    , adapter_(std::move(adapter))
+    , busType_(std::move(busType))
+    , serviceName_(std::move(serviceName))
+    , objectPath_(std::move(objectPath))
+    , interfaceName_(std::move(interfaceName))
+{
+    if (!adapter_) {
+        throw std::invalid_argument("DbusTransportBase: adapter is null");
+    }
+    if (busType_.empty()) {
+        throw std::invalid_argument("DbusTransportBase: busType is empty");
+    }
+}
+
 DbusTransportBase::~DbusTransportBase()
 {
     if (running_.load()) {
@@ -42,11 +62,20 @@ DbusTransportBase::~DbusTransportBase()
     }
 }
 
-void DbusTransportBase::start(IInventoryQueryService& queryService)
+void DbusTransportBase::start()
 {
     if (running_.load()) return;
 
-    adapter_->setService(&queryService);
+    // If no external connection was provided, create one from busType_.
+    // For externally-managed connections (connection_-constructor), connection_ is
+    // always set at construction time and this branch is never taken.
+    if (!connection_) {
+        impl_->dispatcher = DBus::StandaloneDispatcher::create();
+        const auto busT = (busType_ == "session") ? DBus::BusType::SESSION
+                                                   : DBus::BusType::SYSTEM;
+        connection_ = impl_->dispatcher->create_connection(busT);
+    }
+
     adapter_->onTransportStarting();
 
     try {
@@ -56,7 +85,6 @@ void DbusTransportBase::start(IInventoryQueryService& queryService)
             LOG(ERROR) << "DbusTransportBase: failed to acquire bus name '"
                        << serviceName_ << "' (result="
                        << static_cast<std::uint32_t>(nameResult) << ")";
-            adapter_->setService(nullptr);
             throw std::runtime_error("DbusTransportBase: bus name unavailable");
         }
 
@@ -76,7 +104,10 @@ void DbusTransportBase::start(IInventoryQueryService& queryService)
             impl_->registered.store(false);
         }
         object_.reset();
-        adapter_->setService(nullptr);
+        if (impl_->dispatcher) {
+            connection_.reset();
+            impl_->dispatcher.reset();
+        }
         LOG(ERROR) << "DbusTransportBase start failed: " << e.what();
         throw;
     }
@@ -93,25 +124,12 @@ void DbusTransportBase::stop()
         impl_->registered.store(false);
     }
     object_.reset();
-    adapter_->setService(nullptr);
-}
 
-void DbusTransportBase::publishInventoryChanged(const std::string& fieldPath)
-{
-    if (!running_.load(std::memory_order_acquire)) return;
-    adapter_->publishInventoryChanged(fieldPath);
-}
-
-void DbusTransportBase::publishSourceStateChanged(const std::string& sourceName)
-{
-    if (!running_.load(std::memory_order_acquire)) return;
-    adapter_->publishSourceStateChanged(sourceName);
-}
-
-void DbusTransportBase::publishReadyChanged(bool ready)
-{
-    if (!running_.load(std::memory_order_acquire)) return;
-    adapter_->publishReadyChanged(ready);
+    // Release internally-owned dispatcher and connection if applicable.
+    if (impl_->dispatcher) {
+        connection_.reset();
+        impl_->dispatcher.reset();
+    }
 }
 
 } // namespace RSCGroup

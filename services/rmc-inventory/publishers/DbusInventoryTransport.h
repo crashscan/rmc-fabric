@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ITransport.h>
 #include <DbusTransportBase.h>
 
 #include "InventoryDbusAdapter.h"
@@ -15,7 +16,7 @@ namespace RSCGroup {
 
 class IInventoryQueryService;
 
-class DbusInventoryTransport final : public DbusTransportBase {
+class DbusInventoryTransport final : public ITransport, public DbusTransportBase {
 public:
     DbusInventoryTransport(std::shared_ptr<DBus::Connection> connection,
                            std::string serviceName,
@@ -25,6 +26,16 @@ public:
 
     DbusInventoryTransport(const DbusInventoryTransport&) = delete;
     DbusInventoryTransport& operator=(const DbusInventoryTransport&) = delete;
+
+    void start(IInventoryQueryService& queryService) override;
+    void stop() override;
+
+    void publishInventoryChanged(const std::string& fieldPath) override;
+    void publishSourceStateChanged(const std::string& sourceName) override;
+    void publishReadyChanged(bool ready) override;
+
+private:
+    [[nodiscard]] InventoryDbusAdapter* inventoryAdapter() const;
 };
 
 } // namespace RSCGroup

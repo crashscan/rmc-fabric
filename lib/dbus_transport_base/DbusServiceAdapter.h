@@ -2,17 +2,21 @@
 
 #include <memory>
 #include <string>
-#include <map>
 
 namespace DBus {
 class Object;
-class Signal;
+template<typename> class Signal;
 }
 
 namespace RSCGroup {
 
-class IInventoryQueryService;
-
+/**
+ * @brief Abstract adapter that binds a service domain to a D-Bus object.
+ *
+ * Concrete subclasses register D-Bus methods and signals for their specific
+ * service. DbusTransportBase calls bind() once during start() and the
+ * lifecycle hooks at start/stop time.
+ */
 class DbusServiceAdapter {
 public:
     DbusServiceAdapter() = default;
@@ -21,17 +25,15 @@ public:
     DbusServiceAdapter(const DbusServiceAdapter&) = delete;
     DbusServiceAdapter& operator=(const DbusServiceAdapter&) = delete;
 
-    virtual void setService(IInventoryQueryService* service) = 0;
-    [[nodiscard]] virtual IInventoryQueryService* getService() const = 0;
-
+    /**
+     * @brief Register D-Bus methods and create signals on the given object.
+     *
+     * Called once by DbusTransportBase::start() after the object is created.
+     */
     virtual void bind(const std::shared_ptr<DBus::Object>& object,
                       const std::string& interfaceName) = 0;
 
-    virtual void publishInventoryChanged(const std::string& fieldPath) = 0;
-    virtual void publishSourceStateChanged(const std::string& sourceName) = 0;
-    virtual void publishReadyChanged(bool ready) = 0;
-
-    // Adapter lifecycle: called by transport
+    // Adapter lifecycle hooks: called by DbusTransportBase
     virtual void onTransportStarting() {}
     virtual void onTransportStopping() {}
 
@@ -42,6 +44,11 @@ protected:
         const std::string& signalName);
 
     [[nodiscard]] std::shared_ptr<DBus::Signal<void(bool)>> createBoolSignal(
+        const std::shared_ptr<DBus::Object>& object,
+        const std::string& interfaceName,
+        const std::string& signalName);
+
+    [[nodiscard]] std::shared_ptr<DBus::Signal<void()>> createVoidSignal(
         const std::shared_ptr<DBus::Object>& object,
         const std::string& interfaceName,
         const std::string& signalName);

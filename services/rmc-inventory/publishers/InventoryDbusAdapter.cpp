@@ -74,6 +74,12 @@ struct InventoryQueryHandler {
 
 } // namespace
 
+void InventoryDbusAdapter::onTransportStopping()
+{
+    service_ = nullptr;
+    if (handler_) handler_->service = nullptr;
+}
+
 void InventoryDbusAdapter::setService(IInventoryQueryService* service)
 {
     service_ = service;
