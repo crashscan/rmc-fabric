@@ -27,6 +27,7 @@ target_link_libraries(network-observationd
         dbus_transport_base
         interop_contract
         dbus_client_support
+        daemon_support
         DBusCxx::DBusCxx
         SigCxx::SigCxx
     netlink-monitor

@@ -4,24 +4,13 @@
 #include "ObservationService.h"
 #include "TransportFactory.h"
 #include "ModelConfig.h"
+#include <DaemonSignals.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include <csignal>
 #include <memory>
-#include <thread>
 
 DEFINE_string(transport, "dbus", "Transport type: dbus, stdout");
 DEFINE_string(transport_config, "system", "Transport-specific config (e.g. D-Bus bus type)");
-
-namespace {
-
-volatile sig_atomic_t g_running = 1;
-
-void handleSignal(int) {
-    g_running = 0;
-}
-
-}
 
 int main(int argc, char* argv[])
 {
@@ -29,8 +18,7 @@ int main(int argc, char* argv[])
     gflags::SetUsageMessage("Network Observation Daemon");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    signal(SIGINT, handleSignal);
-    signal(SIGTERM, handleSignal);
+    RSCGroup::daemon_support::installSignalHandlers();
 
     RSCGroup::ModelConfig config;
 
@@ -49,9 +37,7 @@ int main(int argc, char* argv[])
 
     LOG(INFO) << "network-observationd started";
 
-    while (g_running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
+    RSCGroup::daemon_support::waitForShutdown();
 
     LOG(INFO) << "Shutting down...";
     service.stop();
