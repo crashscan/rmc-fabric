@@ -1,6 +1,6 @@
 #pragma once
 
-#include "InventoryFields.h"
+#include "InventoryTypes.h"
 
 #include <inventory/InventorySourceState.hpp>
 
