@@ -116,13 +116,6 @@ void NetworkObservationDbusAdapter::setService(IObservationQueryService* service
     binding_.bind(service);
 }
 
-IObservationQueryService* NetworkObservationDbusAdapter::getService() const
-{
-    // Provided for inspection only (not thread-safe against concurrent detach).
-    // Use binding_.acquire() for handler-safe access.
-    return nullptr;
-}
-
 void NetworkObservationDbusAdapter::bind(const std::shared_ptr<DBus::Object>& object,
                                          const std::string& interfaceName)
 {

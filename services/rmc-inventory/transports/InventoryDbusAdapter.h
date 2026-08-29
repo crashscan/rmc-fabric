@@ -25,7 +25,6 @@ public:
     InventoryDbusAdapter& operator=(const InventoryDbusAdapter&) = delete;
 
     void setService(IInventoryQueryService* service);
-    [[nodiscard]] IInventoryQueryService* getService() const;
 
     void bind(const std::shared_ptr<DBus::Object>& object,
               const std::string& interfaceName) override;

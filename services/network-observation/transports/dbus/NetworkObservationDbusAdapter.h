@@ -39,7 +39,6 @@ public:
     NetworkObservationDbusAdapter& operator=(const NetworkObservationDbusAdapter&) = delete;
 
     void setService(IObservationQueryService* service);
-    [[nodiscard]] IObservationQueryService* getService() const;
 
     void bind(const std::shared_ptr<DBus::Object>& object,
               const std::string& interfaceName) override;

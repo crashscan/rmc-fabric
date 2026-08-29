@@ -41,8 +41,14 @@ public:
     ServiceBinding& operator=(const ServiceBinding&) = delete;
 
     /**
-     * @brief Register the service pointer.  May be called from the transport
-     *        start path before bind() or concurrently with handler calls.
+     * @brief Register the service pointer.
+     *
+     * Must be called *before* D-Bus handler methods can be dispatched
+     * (i.e., before the adapter's bind() step that registers methods on the
+     * bus object).  Calling bind() while handler threads hold shared locks
+     * via acquire() will stall until those locks are released — this is safe
+     * but callers should avoid it by following the start-order contract:
+     *   setService() → DbusTransportBase::start() (which calls adapter bind()).
      */
     void bind(T* service) noexcept
     {
