@@ -16,11 +16,12 @@ WorkerThread::~WorkerThread()
 
 bool WorkerThread::start()
 {
-    if (running_.load(std::memory_order_acquire)) {
+    bool expected = false;
+    if (!running_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+        // Already running.
         return false;
     }
 
-    running_.store(true, std::memory_order_release);
     try {
         thread_ = std::jthread([this](std::stop_token st) {
             LOG(INFO) << "WorkerThread '" << name_ << "': started";
