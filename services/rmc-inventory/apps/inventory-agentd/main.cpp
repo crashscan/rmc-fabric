@@ -87,6 +87,9 @@ int main(int argc, char* argv[])
 
     auto transport = TransportFactory::create(transportName, connection);
     if (!transport) {
+        // Logging not yet initialised — write directly to stderr.
+        fprintf(stderr, "inventory-agentd: unknown transport '%s'\n",
+                transportName.c_str());
         return 1;
     }
     service.addTransport(transport);

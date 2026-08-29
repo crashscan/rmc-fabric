@@ -25,7 +25,9 @@ int GflagsConfig::getInt(const std::string& key, int defaultVal) const
     if (!gflags::GetCommandLineFlagInfo(key.c_str(), &info)) {
         return defaultVal;
     }
-    if (info.type != "int32" && info.type != "int64") {
+    if (info.type != "int32") {
+        // Only int32 flags are safely representable as int.
+        // int64 flags may exceed int range; callers should use a wider type.
         return defaultVal;
     }
     try {

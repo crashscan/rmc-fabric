@@ -33,6 +33,10 @@ int DaemonRunner::run(const std::string& appName,
         LOG(ERROR) << appName << ": exception during service start: " << e.what();
         LoggingInitializer::shutdown();
         return 1;
+    } catch (...) {
+        LOG(ERROR) << appName << ": unknown exception during service start";
+        LoggingInitializer::shutdown();
+        return 1;
     }
 
     LOG(INFO) << appName << " started";
