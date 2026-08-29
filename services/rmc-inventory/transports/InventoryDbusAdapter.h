@@ -1,6 +1,7 @@
 #pragma once
 
 #include <DbusServiceAdapter.h>
+#include <ServiceBinding.h>
 
 #include <memory>
 #include <string>
@@ -18,7 +19,7 @@ struct InventoryQueryHandler;
 
 class InventoryDbusAdapter : public DbusServiceAdapter {
 public:
-    InventoryDbusAdapter() = default;
+    InventoryDbusAdapter();
 
     InventoryDbusAdapter(const InventoryDbusAdapter&) = delete;
     InventoryDbusAdapter& operator=(const InventoryDbusAdapter&) = delete;
@@ -29,6 +30,11 @@ public:
     void bind(const std::shared_ptr<DBus::Object>& object,
               const std::string& interfaceName) override;
 
+    /**
+     * @brief Revokes handler access to the service and waits for in-flight
+     *        D-Bus calls to complete.  Safe to call concurrently with handler
+     *        method invocations.
+     */
     void onTransportStopping() override;
 
     void publishInventoryChanged(const std::string& fieldPath);
@@ -36,7 +42,10 @@ public:
     void publishReadyChanged(bool ready);
 
 private:
-    IInventoryQueryService* service_ = nullptr;
+    /// Synchronized binding: guards concurrent handler access vs shutdown.
+    /// @see ServiceBinding for the ownership/lifetime invariant.
+    ServiceBinding<IInventoryQueryService> binding_;
+
     std::shared_ptr<InventoryQueryHandler> handler_;
 
     std::shared_ptr<DBus::Signal<void(std::string)>> signalInventoryChanged_;

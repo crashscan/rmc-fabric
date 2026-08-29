@@ -13,3 +13,14 @@ target_link_libraries(dbus_transport_base
         DBusCxx::DBusCxx
         glog
 )
+
+if(BUILD_TESTING)
+    add_executable(service_binding_tests
+        tests/ServiceBindingTest.cpp
+    )
+    target_include_directories(service_binding_tests PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+    )
+    target_link_libraries(service_binding_tests PRIVATE pthread)
+    add_test(NAME service_binding_tests COMMAND service_binding_tests)
+endif()

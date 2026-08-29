@@ -22,25 +22,21 @@ The long-term goal is to make it easier for RMC components on a system to discov
 
 This repository is organized as a modular monorepo.
 
-Typical top-level structure:
+Actual top-level structure:
 
 ```text
 services/
-  network-observation/
-  rmc-discovery/
-  rmc-inventory/
+  network-observation/      — network topology observation service
+  rmc-inventory/            — device inventory service
 
-libs/
-  dbus-support/
-  fabric-contracts/
-  <service-specific clients>
-
-tools/
-  <cli and debug utilities>
-
-tests/
-  unit/
-  integration/
+lib/
+  interop_contract/         — header-only wire types and contracts
+  dbus_transport_base/      — reusable D-Bus service adapter base
+  dbus_client_support/      — reusable D-Bus client helpers (header-only)
+  service_framework/        — service lifecycle, config, health, event bus
+  lifecycle_runner/         — Startable, StopToken, LifecycleManager, WorkerThread
+  daemon_support/           — signal handling for daemon processes
+  file_watcher/             — inotify file watcher
 ```
 
 > Exact directory names may evolve as the project grows.
@@ -137,3 +133,39 @@ Possible future areas include:
 ## Status
 
 This repository is under active development, and both structure and APIs may evolve as the fabric model becomes more clearly defined.
+
+---
+
+## Architecture Notes
+
+### D-Bus Adapter Lifetime Invariant (Phase 1)
+
+Both `InventoryDbusAdapter` and `NetworkObservationDbusAdapter` expose service
+query methods over D-Bus.  The D-Bus dispatcher calls handler methods on its
+own thread(s) while the service lifecycle thread may call `onTransportStopping()`
+concurrently.
+
+**Invariant:** the query-service pointer must not be dereferenced after
+`onTransportStopping()` returns.  Null-checking the pointer without
+synchronization is insufficient because the check and dereference are not
+atomic with respect to the racing write.
+
+**Implementation:** `ServiceBinding<T>` (`lib/dbus_transport_base/ServiceBinding.h`)
+uses a `std::shared_mutex`:
+- `acquire()` takes a *shared* lock for the duration of one handler call.
+- `detach()` takes a *unique* lock, blocking until all in-flight shared holders
+  release.  When `detach()` returns, no handler can access the service.
+- Deadlock risk is absent because service methods never call back into the
+  transport layer.
+
+### Phase 2 (deferred)
+
+The following improvements are scoped to a later phase:
+
+- Extract `InventoryDbusCodec` to `lib/` so `inventory-client` no longer
+  depends on `inventory_transport` (layering violation).
+- Make `InventoryService` a proper static library target for unit-testability.
+- Reorganize network-observation transports into a CMake library target instead
+  of compiling sources directly into the daemon executable.
+- Rename `services/rmc-inventory/publishers/` → `transports/` for naming
+  consistency with `network-observation`.

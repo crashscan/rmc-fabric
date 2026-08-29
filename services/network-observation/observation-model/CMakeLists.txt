@@ -24,3 +24,24 @@ target_include_directories(observation-model PRIVATE
     ${NETLINK_BASE}/state
 )
 target_link_libraries(observation-model pthread glog rsc_util lldp-observer netlink-monitor liblldpctl.so interop_contract)
+
+if(BUILD_TESTING)
+    find_package(GTest CONFIG)
+    if(GTest_FOUND)
+        add_executable(observation_model_tests
+            tests/EngineLifecycleTest.cpp
+            tests/LldpIngestionTest.cpp
+        )
+        target_include_directories(observation_model_tests PRIVATE
+            public
+            engine
+            classifier
+        )
+        target_link_libraries(observation_model_tests PRIVATE
+            observation-model
+            GTest::gtest
+            GTest::gtest_main
+        )
+        add_test(NAME observation_model_tests COMMAND observation_model_tests)
+    endif()
+endif()
