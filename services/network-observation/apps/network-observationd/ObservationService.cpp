@@ -52,8 +52,8 @@ void ObservationService::stop()
         agingThread_.join();
     }
     if (ServiceBase::isReady()) {
-        transport_->publishReadyChanged(false);
         ServiceBase::setReady(false);
+        transport_->publishReadyChanged(false);
     }
     adapter_->stop();
     transport_->stop();
