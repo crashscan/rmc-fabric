@@ -1,4 +1,5 @@
 #include "ServiceBase.h"
+#include "ITransport.h"
 
 #include <glog/logging.h>
 
@@ -7,6 +8,8 @@ namespace RSCGroup {
 ServiceBase::ServiceBase(const std::string& serviceName)
     : serviceName_(serviceName)
 {}
+
+ServiceBase::~ServiceBase() = default;
 
 std::string ServiceBase::name() const
 {
@@ -23,12 +26,12 @@ bool ServiceBase::isRunning() const
     return running_;
 }
 
-void ServiceBase::addTransport(std::shared_ptr<ITransport> transport)
+void ServiceBase::addTransport(std::shared_ptr<IServiceTransport> transport)
 {
     transports_.push_back(std::move(transport));
 }
 
-const std::vector<std::shared_ptr<ITransport>>& ServiceBase::transports() const
+const std::vector<std::shared_ptr<IServiceTransport>>& ServiceBase::transports() const
 {
     return transports_;
 }

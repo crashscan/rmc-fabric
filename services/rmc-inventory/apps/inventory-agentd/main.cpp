@@ -85,7 +85,10 @@ int main(int argc, char* argv[])
     service.addTransport(transport);
 
     try {
-        service.start();
+        if (!service.start()) {
+            LOG(ERROR) << "Failed to start inventory-agentd";
+            return 1;
+        }
     } catch (const std::exception& e) {
         LOG(ERROR) << "Failed to start inventory-agentd: " << e.what();
         return 1;

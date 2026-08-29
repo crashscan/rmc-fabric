@@ -2,13 +2,15 @@
 
 #include <Startable.h>
 
-#include "ITransport.h"
-
 #include <memory>
 #include <string>
 #include <vector>
 
 namespace RSCGroup {
+
+// Forward declaration: callers must include the appropriate transport header
+// for the concrete type they wish to register.
+class IServiceTransport;
 
 /**
  * @brief Foundation class for all RMC services.
@@ -44,7 +46,7 @@ namespace RSCGroup {
 class ServiceBase : public Startable {
 public:
     explicit ServiceBase(const std::string& serviceName);
-    ~ServiceBase() override = default;
+    ~ServiceBase() override;
 
     ServiceBase(const ServiceBase&) = delete;
     ServiceBase& operator=(const ServiceBase&) = delete;
@@ -117,16 +119,16 @@ public:
      * @brief Register a transport. Can be called before or during
      *        initializeComponents().
      */
-    void addTransport(std::shared_ptr<ITransport> transport);
+    void addTransport(std::shared_ptr<IServiceTransport> transport);
 
     /**
      * @brief Read-only access to the registered transports.
      */
-    [[nodiscard]] const std::vector<std::shared_ptr<ITransport>>& transports() const;
+    [[nodiscard]] const std::vector<std::shared_ptr<IServiceTransport>>& transports() const;
 
 private:
     std::string serviceName_;
-    std::vector<std::shared_ptr<ITransport>> transports_;
+    std::vector<std::shared_ptr<IServiceTransport>> transports_;
     bool running_{false};
     bool ready_{false};
 };

@@ -8,13 +8,18 @@ namespace RSCGroup {
 ObservationService::ObservationService(
     std::unique_ptr<NetworkObservationAdapter> adapter,
     std::unique_ptr<ITransport> transport)
-    : adapter_(std::move(adapter))
+    : ServiceBase("observation-service")
+    , adapter_(std::move(adapter))
     , transport_(std::move(transport))
 {}
 
-bool ObservationService::start()
+void ObservationService::validateConfiguration()
 {
-    ready_ = false;
+    // Adapter and transport are validated at construction time via unique_ptr.
+}
+
+bool ObservationService::initializeComponents()
+{
     adapter_->setEventSink(this);
     transport_->setQueryProvider(this);
     if (!transport_->start()) {
@@ -24,9 +29,18 @@ bool ObservationService::start()
         transport_->stop();
         return false;
     }
-    ready_ = true;
+    ServiceBase::setReady(true);
     transport_->publishReadyChanged(true);
+    return true;
+}
 
+bool ObservationService::start()
+{
+    // ServiceBase::start() calls validateConfiguration(), then initializeComponents()
+    // (which binds adapter/transport, starts them, and sets ready=true).
+    if (!ServiceBase::start()) {
+        return false;
+    }
     agingThread_ = std::jthread([this](std::stop_token st) { agingLoop(st); });
     return true;
 }
@@ -37,11 +51,14 @@ void ObservationService::stop()
         agingThread_.request_stop();   // wakes the cv wait immediately
         agingThread_.join();
     }
-    if (ready_.exchange(false)) {
+    if (ServiceBase::isReady()) {
+        ServiceBase::setReady(false);
         transport_->publishReadyChanged(false);
     }
     adapter_->stop();
     transport_->stop();
+    // Clear ServiceBase running_ state.
+    ServiceBase::stop();
 }
 
 void ObservationService::agingLoop(std::stop_token st)

@@ -17,10 +17,13 @@ namespace RSCGroup {
  *
  * The default no-op implementations of publishReadyChanged() allow
  * transports to opt-in only to the events they need.
+ *
+ * Service-specific transport types (e.g. IInventoryTransport) may extend
+ * this interface with additional publish methods.
  */
-class ITransport {
+class IServiceTransport {
 public:
-    virtual ~ITransport() = default;
+    virtual ~IServiceTransport() = default;
 
     /**
      * @brief Open the transport channel.
