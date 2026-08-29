@@ -7,14 +7,14 @@
 
 #include <inventory.hpp>
 
+#include <DaemonSignals.h>
+
 #include <dbus-cxx.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 
 #include <chrono>
-#include <csignal>
 #include <memory>
-#include <thread>
 
 DEFINE_string(transport, "dbus",
     "Transport: dbus, stdout");
@@ -30,19 +30,13 @@ DEFINE_string(firmware_path,  "/etc/rmc/firmware",             "Firmware version
 DEFINE_string(uuid_path,      "/etc/rmc/uuid",                 "Device UUID file");
 DEFINE_string(software_path,  "/etc/rmc/software",             "Software version file");
 
-namespace {
-volatile sig_atomic_t g_running = 1;
-void handleSignal(int) { g_running = 0; }
-}
-
 int main(int argc, char* argv[])
 {
     google::InitGoogleLogging(argv[0]);
     gflags::SetUsageMessage("Inventory Agent Daemon");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    ::signal(SIGINT, handleSignal);
-    ::signal(SIGTERM, handleSignal);
+    RSCGroup::daemon_support::installSignalHandlers();
 
     using namespace RSCGroup;
     using namespace interop_contract::inventory;
@@ -99,9 +93,7 @@ int main(int argc, char* argv[])
 
     LOG(INFO) << "inventory-agentd started";
 
-    while (g_running) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-    }
+    RSCGroup::daemon_support::waitForShutdown();
 
     LOG(INFO) << "Shutting down...";
     service.stop();
