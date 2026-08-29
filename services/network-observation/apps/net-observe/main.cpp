@@ -2,7 +2,7 @@
 // Created by vvass on 21-Jul-26.
 //
 #include "DbusClient.h"
-#include <interop_contract/network_observation/NetworkObservationTypes.hpp>
+#include <interop_contract/network_observation/NetworkObservationVariantMaps.hpp>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <json/writer.h>
@@ -27,39 +27,6 @@ DEFINE_bool(lldp, false,
 namespace {
 
 namespace contract = interop_contract::network_observation;
-
-// ---------------------------------------------------------------------------
-// Local string helpers (mirror server-side serialization)
-// ---------------------------------------------------------------------------
-
-static std::string classificationToString(contract::CandidateClassification c)
-{
-    using enum contract::CandidateClassification;
-    switch (c) {
-        case Artifact:         return "Artifact";
-        case LocalSelf:        return "LocalSelf";
-        case WeakCandidate:    return "WeakCandidate";
-        case ProbableEndpoint: return "ProbableEndpoint";
-        case RemoteEndpoint:   return "RemoteEndpoint";
-        case GatewayLike:      return "GatewayLike";
-        case TopologyPeer:     return "TopologyPeer";
-        case Unknown:          return "Unknown";
-    }
-    return "Unknown";
-}
-
-static std::string statusToString(contract::CandidateStatus s)
-{
-    using enum contract::CandidateStatus;
-    switch (s) {
-        case Provisional: return "Provisional";
-        case Confirmed:   return "Confirmed";
-        case Aged:        return "Aged";
-        case Expired:     return "Expired";
-        case Removed:     return "Removed";
-    }
-    return "Unknown";
-}
 
 // ---------------------------------------------------------------------------
 // JSON output helpers
@@ -99,8 +66,8 @@ Json::Value candidateToJson(const contract::RemoteCandidate& c)
 {
     Json::Value j;
     j["mac"]            = c.mac;
-    j["classification"] = classificationToString(c.classification);
-    j["status"]         = statusToString(c.status);
+    j["classification"] = contract::classificationToString(c.classification);
+    j["status"]         = contract::statusToString(c.status);
     j["seenInFdb"]      = c.seenInFdb;
     j["seenInNeigh"]    = c.seenInNeigh;
     j["seenInLldp"]     = c.seenInLldp;

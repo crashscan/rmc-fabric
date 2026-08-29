@@ -1,7 +1,6 @@
 #include "InventoryService.h"
 #include <InotifyFileWatcher.h>
 
-#include <InventoryFieldUtil.h>
 #include <inventory.hpp>
 #include <InventoryIssueUtil.h>
 #include <IWatchableInventorySource.h>
@@ -248,7 +247,7 @@ interop_contract::inventory::InventorySnapshot InventoryService::getIdentity() c
 }
 
 InventoryFields InventoryService::getField(const std::string& fieldName) const {
-    return InventoryFieldUtil::makeSingleFieldMap(manager_->getSnapshot(), fieldName);
+    return interop_contract::inventory::make_single_field_map(manager_->getSnapshot(), fieldName);
 }
 
 interop_contract::inventory::SourceStateMap InventoryService::getSourceStates() const {

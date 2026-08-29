@@ -9,7 +9,6 @@ set(LIBS_CLIENT_BASE "${CMAKE_CURRENT_SOURCE_DIR}/libs/inventory-client")
 set(PUBLISHERS_BASE  "${CMAKE_CURRENT_SOURCE_DIR}/publishers")
 set(SRC_BASE         "${CMAKE_CURRENT_SOURCE_DIR}/src")
 
-add_subdirectory(io)
 add_subdirectory(core)
 add_subdirectory(api)
 add_subdirectory(publishers)
