@@ -5,4 +5,4 @@ target_include_directories(inventory_service_api
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-target_link_libraries(inventory_service_api INTERFACE interop_contract inventory_core)
+target_link_libraries(inventory_service_api INTERFACE interop_contract inventory_core service_framework)

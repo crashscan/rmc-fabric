@@ -27,6 +27,9 @@ public:
     [[nodiscard]] virtual std::string getPhase() const = 0;
     [[nodiscard]] virtual uint64_t getVersion() const = 0;
 
+    /// Satisfies the QueryService concept: delegates to getReady().
+    [[nodiscard]] virtual bool isReady() const { return getReady(); }
+
     virtual void refresh() = 0;
 };
 

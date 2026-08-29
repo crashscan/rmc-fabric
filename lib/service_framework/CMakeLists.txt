@@ -5,6 +5,9 @@ add_library(service_framework STATIC
     ServiceTransportFactory.cpp
     ServiceHealthTracker.cpp
     DaemonRunner.cpp
+    # Header-only — listed for IDE visibility
+    QueryServiceConcept.h
+    ITypedTransport.h
 )
 
 target_include_directories(service_framework

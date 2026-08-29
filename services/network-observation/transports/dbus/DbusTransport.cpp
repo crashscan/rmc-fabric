@@ -24,7 +24,7 @@ DbusTransport::DbusTransport(const std::string& busType)
 
 NetworkObservationDbusAdapter* DbusTransport::obsAdapter() const
 {
-    return static_cast<NetworkObservationDbusAdapter*>(getAdapter());
+    return getTypedAdapter<NetworkObservationDbusAdapter>();
 }
 
 void DbusTransport::setQueryProvider(IObservationQueryService* provider)

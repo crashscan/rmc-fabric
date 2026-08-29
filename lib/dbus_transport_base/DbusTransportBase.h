@@ -3,6 +3,7 @@
 #include <memory>
 #include <string>
 #include <atomic>
+#include <type_traits>
 
 namespace DBus {
 class Connection;
@@ -67,6 +68,22 @@ protected:
     [[nodiscard]] std::shared_ptr<DBus::Connection> getConnection() const { return connection_; }
     [[nodiscard]] std::shared_ptr<DBus::Object> getObject() const { return object_; }
     [[nodiscard]] DbusServiceAdapter* getAdapter() const { return adapter_.get(); }
+
+    /**
+     * @brief Type-safe adapter accessor.
+     *
+     * Returns the stored adapter cast to AdapterT, which must derive from
+     * DbusServiceAdapter.  The static_assert enforces the constraint at
+     * compile time; the cast itself is safe because the concrete subclass
+     * always passes an AdapterT instance to our constructor.
+     */
+    template <typename AdapterT>
+    [[nodiscard]] AdapterT* getTypedAdapter() const
+    {
+        static_assert(std::is_base_of_v<DbusServiceAdapter, AdapterT>,
+                      "AdapterT must derive from DbusServiceAdapter");
+        return static_cast<AdapterT*>(adapter_.get());
+    }
 
     virtual void onAdapterBound() {}
 

@@ -20,6 +20,7 @@ target_link_libraries(inventory_transport
         interop_contract
         inventory_service_api
         inventory_core
+        service_framework
     PRIVATE
         DBusCxx::DBusCxx
         SigCxx::SigCxx
