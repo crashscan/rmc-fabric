@@ -64,7 +64,8 @@ std::unique_ptr<IFileWatcher> InventoryService::makeDefaultFileWatcher()
 InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
                                    Settings settings,
                                    FileWatcherFactory fileWatcherFactory)
-    : manager_(std::move(manager))
+    : ServiceBase("inventory-service")
+    , manager_(std::move(manager))
     , settings_(settings) {
     if (!manager_) {
         throw std::invalid_argument("InventoryService: manager is null");
@@ -85,7 +86,7 @@ void InventoryService::addSource(std::shared_ptr<IInventorySource> source) {
     }
 
     std::scoped_lock lock(lifecycleMutex_);
-    if (running_) {
+    if (ServiceBase::isRunning()) {
         throw std::runtime_error("InventoryService::addSource: cannot add sources after start");
     }
 
@@ -102,31 +103,25 @@ void InventoryService::addTransport(std::shared_ptr<ITransport> transport) {
     }
 
     std::scoped_lock lock(lifecycleMutex_);
-    if (running_) {
+    if (ServiceBase::isRunning()) {
         throw std::runtime_error("InventoryService::addTransport: cannot add transports after start");
     }
 
     transports_.push_back(std::move(transport));
 }
 
-void InventoryService::start() {
-    std::scoped_lock lock(lifecycleMutex_);
-    if (running_) {
-        if (loopFailed_.load(std::memory_order_acquire)) {
-            LOG(ERROR) << "InventoryService: loop thread is dead; call stop() before start()";
-            throw std::logic_error(
-                "InventoryService: restart after crash requires stop() first");
-        }
-        return;
-    }
-    if (loopThread_.joinable()) {
-        throw std::logic_error("InventoryService: internal error: loop thread must be reaped by stop() before start()");
-    }
+void InventoryService::validateConfiguration()
+{
+    // Manager is validated at construction time; nothing further to check.
+}
 
+bool InventoryService::initializeComponents()
+{
     if (refreshEventFd_ < 0) {
         refreshEventFd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
         if (refreshEventFd_ < 0) {
-            throw std::runtime_error("InventoryService: failed to create refresh eventfd");
+            LOG(ERROR) << "InventoryService: failed to create refresh eventfd";
+            return false;
         }
     }
 
@@ -147,15 +142,33 @@ void InventoryService::start() {
                 LOG(ERROR) << "InventoryService: transport rollback stop failed with unknown exception";
             }
         }
-
-        if (refreshEventFd_ >= 0) {
-            ::close(refreshEventFd_);
-            refreshEventFd_ = -1;
-        }
+        ::close(refreshEventFd_);
+        refreshEventFd_ = -1;
         throw;
     }
+    return true;
+}
 
-    running_ = true;
+bool InventoryService::start() {
+    std::scoped_lock lock(lifecycleMutex_);
+    if (ServiceBase::isRunning()) {
+        if (loopFailed_.load(std::memory_order_acquire)) {
+            LOG(ERROR) << "InventoryService: loop thread is dead; call stop() before start()";
+            throw std::logic_error(
+                "InventoryService: restart after crash requires stop() first");
+        }
+        return true;
+    }
+    if (loopThread_.joinable()) {
+        throw std::logic_error("InventoryService: internal error: loop thread must be reaped by stop() before start()");
+    }
+
+    // ServiceBase::start() calls validateConfiguration(), then initializeComponents()
+    // (which creates the eventfd and starts transports), then sets running_=true.
+    if (!ServiceBase::start()) {
+        return false;
+    }
+
     loopFailed_.store(false, std::memory_order_release);
     loopAlive_.store(true, std::memory_order_release);
     nextReconcileTs_ = std::chrono::steady_clock::now();
@@ -173,19 +186,25 @@ void InventoryService::start() {
             loopAlive_.store(false, std::memory_order_release);
         });
     } catch (...) {
-        running_ = false;
         loopAlive_.store(false, std::memory_order_release);
         loopFailed_.store(false, std::memory_order_release);
+        for (auto& transport : transports_) {
+            try { transport->stop(); } catch (...) {}
+        }
+        if (refreshEventFd_ >= 0) {
+            ::close(refreshEventFd_);
+            refreshEventFd_ = -1;
+        }
+        ServiceBase::stop();
         throw;
     }
+    return true;
 }
 
 void InventoryService::stop() {
-    {
-        std::scoped_lock lock(lifecycleMutex_);
-        if (!running_.exchange(false)) {
-            return;
-        }
+    std::scoped_lock lock(lifecycleMutex_);
+    if (!ServiceBase::isRunning()) {
+        return;
     }
 
     if (loopThread_.joinable()) {
@@ -210,10 +229,13 @@ void InventoryService::stop() {
     for (auto& transport : transports_) {
         transport->stop();
     }
+
+    // Clear ServiceBase running_ state.
+    ServiceBase::stop();
 }
 
 bool InventoryService::isRunning() const {
-    return running_.load();
+    return ServiceBase::isRunning();
 }
 
 interop_contract::inventory::InventorySnapshot InventoryService::getIdentity() const {

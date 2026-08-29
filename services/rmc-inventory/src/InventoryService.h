@@ -1,5 +1,7 @@
 #pragma once
 
+#include <ServiceBase.h>
+
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -43,7 +45,7 @@ namespace RSCGroup {
 //                 MUST NOT depend on the loop thread being alive.
 //
 // Consumers requiring freshness MUST combine signals: GetReady() && !hasIssue("inventory.loop.stopped").
-class InventoryService final : public IInventoryQueryService {
+class InventoryService final : public ServiceBase, public IInventoryQueryService {
 public:
     struct Settings {
         Settings(){};
@@ -67,8 +69,12 @@ public:
     void addSource(std::shared_ptr<IInventorySource> source);
     void addTransport(std::shared_ptr<ITransport> transport);
 
-    void start();
-    void stop();
+    // ServiceBase extension points
+    bool initializeComponents() override;
+    void validateConfiguration() override;
+
+    bool start() override;
+    void stop() override;
 
     [[nodiscard]] bool isRunning() const;
 
@@ -101,9 +107,6 @@ private:
     Settings settings_;
 
     std::vector<std::shared_ptr<ITransport>> transports_;
-
-    // Service intent: written only by start()/stop().
-    std::atomic<bool> running_{false};
 
     // Loop operational state: written by the worker thread, observed elsewhere.
     std::atomic<bool> loopAlive_{false};
