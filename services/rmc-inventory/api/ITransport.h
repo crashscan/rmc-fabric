@@ -1,16 +1,24 @@
 #pragma once
 
+#include <ITypedTransport.h>
 #include <string>
 
 namespace RSCGroup {
 
 class IInventoryQueryService;
 
-class ITransport {
+/**
+ * @brief Transport interface for the rmc-inventory service.
+ *
+ * Inherits ITypedTransport<IInventoryQueryService> which provides the
+ * compile-time-verified bindQueryService() binding step.  Binding must
+ * happen before start().
+ */
+class ITransport : public ITypedTransport<IInventoryQueryService> {
 public:
-    virtual ~ITransport() = default;
+    ~ITransport() override = default;
 
-    virtual void start(IInventoryQueryService& queryService) = 0;
+    virtual void start() = 0;
     virtual void stop() = 0;
 
     virtual void publishInventoryChanged(const std::string& fieldPath) = 0;

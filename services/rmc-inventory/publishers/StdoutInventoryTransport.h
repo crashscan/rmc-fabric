@@ -10,7 +10,8 @@ class IInventoryQueryService;
 
 class StdoutInventoryTransport final : public ITransport {
 public:
-    void start(IInventoryQueryService& queryService) override;
+    void bindQueryService(IInventoryQueryService& queryService) override;
+    void start() override;
     void stop() override;
 
     void publishInventoryChanged(const std::string& fieldPath) override;

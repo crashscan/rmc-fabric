@@ -27,7 +27,11 @@ public:
     DbusInventoryTransport(const DbusInventoryTransport&) = delete;
     DbusInventoryTransport& operator=(const DbusInventoryTransport&) = delete;
 
-    void start(IInventoryQueryService& queryService) override;
+    // ITypedTransport<IInventoryQueryService> (inherited via ITransport)
+    void bindQueryService(IInventoryQueryService& queryService) override;
+
+    // ITransport
+    void start() override;
     void stop() override;
 
     void publishInventoryChanged(const std::string& fieldPath) override;

@@ -30,9 +30,13 @@ std::string fieldValueToString(const interop_contract::inventory::FieldValue& v)
 
 } // namespace
 
-void StdoutInventoryTransport::start(IInventoryQueryService& queryService)
+void StdoutInventoryTransport::bindQueryService(IInventoryQueryService& queryService)
 {
     query_ = &queryService;
+}
+
+void StdoutInventoryTransport::start()
+{
     running_.store(true, std::memory_order_release);
     std::cout << "[transport] StdoutInventoryTransport started" << std::endl;
 }

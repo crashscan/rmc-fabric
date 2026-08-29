@@ -19,12 +19,16 @@ DbusInventoryTransport::~DbusInventoryTransport() = default;
 
 InventoryDbusAdapter* DbusInventoryTransport::inventoryAdapter() const
 {
-    return static_cast<InventoryDbusAdapter*>(getAdapter());
+    return getTypedAdapter<InventoryDbusAdapter>();
 }
 
-void DbusInventoryTransport::start(IInventoryQueryService& queryService)
+void DbusInventoryTransport::bindQueryService(IInventoryQueryService& queryService)
 {
     inventoryAdapter()->setService(&queryService);
+}
+
+void DbusInventoryTransport::start()
+{
     DbusTransportBase::start();
 }
 

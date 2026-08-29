@@ -129,7 +129,12 @@ bool InventoryService::initializeComponents()
     startedTransports.reserve(transports_.size());
     try {
         for (auto& transport : transports_) {
-            transport->start(*this);
+            // Bind before start: if start() throws, the transport has not been
+            // registered and will be destroyed with the service.
+            // bindQueryService() only stores a pointer and is safe to abandon
+            // (the adapter is destroyed along with the transport object).
+            transport->bindQueryService(*this);
+            transport->start();
             startedTransports.push_back(transport);
         }
     } catch (...) {
