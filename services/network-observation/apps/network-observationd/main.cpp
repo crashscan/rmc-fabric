@@ -4,7 +4,8 @@
 #include "ObservationService.h"
 #include "TransportFactory.h"
 #include "ModelConfig.h"
-#include <DaemonSignals.h>
+#include <GflagsConfig.h>
+#include <DaemonRunner.h>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <memory>
@@ -14,33 +15,24 @@ DEFINE_string(transport_config, "system", "Transport-specific config (e.g. D-Bus
 
 int main(int argc, char* argv[])
 {
-    google::InitGoogleLogging(argv[0]);
     gflags::SetUsageMessage("Network Observation Daemon");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
-    RSCGroup::daemon_support::installSignalHandlers();
+    RSCGroup::GflagsConfig cfg;
 
-    RSCGroup::ModelConfig config;
+    const std::string transportName   = cfg.getString("transport", "dbus");
+    const std::string transportConfig = cfg.getString("transport_config", "system");
 
-    auto transport = RSCGroup::createTransport(FLAGS_transport, FLAGS_transport_config);
+    auto transport = RSCGroup::createTransport(transportName, transportConfig);
     if (!transport) {
-        LOG(ERROR) << "Unknown transport type: " << FLAGS_transport;
+        // Cannot use LOG() yet — logging not initialised.
+        // Use stderr directly so the error is visible.
+        fprintf(stderr, "Unknown transport type: %s\n", transportName.c_str());
         return 1;
     }
-    auto adapter = std::make_unique<RSCGroup::NetworkObservationAdapter>(std::move(config));
+    RSCGroup::ModelConfig modelConfig;
+    auto adapter = std::make_unique<RSCGroup::NetworkObservationAdapter>(std::move(modelConfig));
     RSCGroup::ObservationService service(std::move(adapter), std::move(transport));
 
-    if (!service.start()) {
-        LOG(ERROR) << "Failed to start observation service";
-        return 1;
-    }
-
-    LOG(INFO) << "network-observationd started";
-
-    RSCGroup::daemon_support::waitForShutdown();
-
-    LOG(INFO) << "Shutting down...";
-    service.stop();
-    google::ShutdownGoogleLogging();
-    return 0;
+    return RSCGroup::DaemonRunner::run(argv[0], service, cfg);
 }
