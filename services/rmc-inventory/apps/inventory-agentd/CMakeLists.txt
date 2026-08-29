@@ -15,7 +15,6 @@ target_link_libraries(inventory-agentd
         interop_contract
         inventory_core
         inventory_service_api
-        inventory_io
         inventory_transport
         service_framework
         daemon_support

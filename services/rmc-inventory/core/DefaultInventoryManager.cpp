@@ -1,6 +1,5 @@
 #include "DefaultInventoryManager.h"
 
-#include "InventoryFieldUtil.h"
 #include "InventorySourceUtil.h"
 
 #include <inventory.hpp>
@@ -69,7 +68,7 @@ InventoryDiff DefaultInventoryManager::refreshAll() {
             InventoryFields rawFields = source->collect();
 
             for (const auto &field: rawFields | std::views::keys) {
-                if (InventoryFieldUtil::isMetadataField(field)) {
+                if (interop_contract::inventory::is_metadata_field(field)) {
                     throw std::runtime_error(
                         "Inventory source '" + result.name +
                         "' returned reserved metadata field '" + field + "'");
@@ -193,7 +192,7 @@ void DefaultInventoryManager::validateSourceRegistration(const std::shared_ptr<I
     for (const auto &field: ownedFields) {
         if (field.empty()) throw std::runtime_error(
             "Inventory source '" + sourceName + "' declares an empty owned field");
-        if (InventoryFieldUtil::isMetadataField(field)) {
+        if (interop_contract::inventory::is_metadata_field(field)) {
             throw std::runtime_error(
                 "Inventory source '" + sourceName + "' attempts to own reserved metadata field '" + field + "'");
         }

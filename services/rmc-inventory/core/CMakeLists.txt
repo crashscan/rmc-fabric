@@ -1,6 +1,5 @@
 add_library(inventory_core STATIC
     DefaultInventoryManager.cpp
-    InventoryFieldUtil.cpp
     InventoryIssueUtil.cpp
     DeviceMetaFileSource.cpp
     FileBackedInventorySource.cpp
