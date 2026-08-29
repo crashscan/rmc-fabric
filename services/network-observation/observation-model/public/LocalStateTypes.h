@@ -4,28 +4,27 @@
 /**
  * @file LocalStateTypes.h
  * @brief Local network state types for the observation model.
+ *
+ * Wire-compatible types (LocalInterfaceState) are defined in
+ * lib/interop_contract/network_observation/ and re-exported here.
+ * The extended LocalNetworkSnapshot (with internal tracking sets) is
+ * defined below.
  */
 #pragma once
-#include <optional>
+
+#include <interop_contract/network_observation/NetworkObservationTypes.hpp>
+
 #include <set>
 #include <string>
 #include <unordered_map>
-#include <vector>
 
 namespace RSCGroup {
 
-struct LocalInterfaceState {
-    int ifindex = 0;
-    std::string ifname;
-    std::string mac;
-    bool adminUp = false;
-    bool running = false;
-    std::string operstate;
-    std::optional<std::string> masterIfname;
-    std::set<std::string> ipv4;
-    std::set<std::string> ipv6;
-};
+using interop_contract::network_observation::LocalInterfaceState;
 
+/// Extended snapshot used internally by the observation model.
+/// Adds localMacs/localIps tracking sets that are not part of the D-Bus wire
+/// contract (LocalNetworkSnapshot in the interop_contract has only interfaces).
 struct LocalNetworkSnapshot {
     std::unordered_map<std::string, LocalInterfaceState> interfaces;
     std::set<std::string> localMacs;

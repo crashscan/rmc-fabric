@@ -23,4 +23,4 @@ target_include_directories(observation-model PRIVATE
     ${NETLINK_BASE}/parser
     ${NETLINK_BASE}/state
 )
-target_link_libraries(observation-model pthread glog rsc_util lldp-observer netlink-monitor liblldpctl.so)
+target_link_libraries(observation-model pthread glog rsc_util lldp-observer netlink-monitor liblldpctl.so interop_contract)

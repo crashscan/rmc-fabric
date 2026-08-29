@@ -1,2 +1,4 @@
 add_subdirectory(interop_contract)
 add_subdirectory(dbus_transport_base)
+add_subdirectory(dbus_client_support)
+add_subdirectory(file_watcher)

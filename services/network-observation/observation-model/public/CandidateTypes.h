@@ -4,8 +4,16 @@
 /**
  * @file CandidateTypes.h
  * @brief Remote candidate types for the network observation model.
+ *
+ * CandidateClassification and CandidateStatus are defined in
+ * lib/interop_contract/network_observation/ and re-exported here.
+ * RSCGroup::RemoteCandidate is the full internal type; the wire-only
+ * version is interop_contract::network_observation::RemoteCandidate.
  */
 #pragma once
+
+#include <interop_contract/network_observation/NetworkObservationTypes.hpp>
+
 #include <chrono>
 #include <optional>
 #include <set>
@@ -14,24 +22,8 @@
 
 namespace RSCGroup {
 
-enum class CandidateClassification {
-    Artifact,
-    LocalSelf,
-    WeakCandidate,
-    ProbableEndpoint,
-    RemoteEndpoint,
-    GatewayLike,
-    TopologyPeer,
-    Unknown
-};
-
-enum class CandidateStatus {
-    Provisional,
-    Confirmed,
-    Aged,
-    Expired,
-    Removed
-};
+using interop_contract::network_observation::CandidateClassification;
+using interop_contract::network_observation::CandidateStatus;
 
 struct CandidateScore {
     int total = 0;
@@ -62,6 +54,8 @@ struct FdbEvidenceKey {
     }
 };
 
+/// Full internal remote candidate — extends the D-Bus wire type with
+/// per-source evidence sets and model-internal tracking fields.
 struct RemoteCandidate {
     std::string mac;
     std::set<std::string> ipv4;
