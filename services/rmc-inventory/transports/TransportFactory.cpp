@@ -1,6 +1,8 @@
 #include "TransportFactory.h"
 #include "DbusInventoryTransport.h"
+#ifdef INVENTORY_ENABLE_STDOUT_TRANSPORT
 #include "StdoutInventoryTransport.h"
+#endif
 
 #include <inventory.hpp>
 #include <glog/logging.h>
@@ -14,9 +16,11 @@ std::shared_ptr<ITransport> TransportFactory::create(
     std::string objectPath,
     std::string interfaceName)
 {
+#ifdef INVENTORY_ENABLE_STDOUT_TRANSPORT
     if (name == "stdout") {
         return std::make_shared<StdoutInventoryTransport>();
     }
+#endif
 
     if (name == "dbus") {
         if (!connection) {

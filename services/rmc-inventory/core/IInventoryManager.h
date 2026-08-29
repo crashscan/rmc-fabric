@@ -1,7 +1,7 @@
 #pragma once
 
 #include "IInventorySource.h"
-#include "InventoryFields.h"
+#include "InventoryTypes.h"
 
 #include <memory>
 #include <vector>

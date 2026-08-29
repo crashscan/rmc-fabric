@@ -8,7 +8,7 @@
 
 #include "IInventoryManager.h"
 #include "IInventorySource.h"
-#include "InventoryFields.h"
+#include "InventoryTypes.h"
 
 namespace RSCGroup {
 

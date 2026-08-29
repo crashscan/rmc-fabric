@@ -1,13 +1,19 @@
 # Inventory-specific transport implementations
 # These are not reusable and should not be moved to lib/
 
-add_library(inventory_transport STATIC
+set(TRANSPORT_SOURCES
     DbusInventoryTransport.cpp
     InventoryDbusAdapter.cpp
     InventoryDbusCodec.cpp
-    StdoutInventoryTransport.cpp
     TransportFactory.cpp
 )
+
+if(INVENTORY_ENABLE_STDOUT_TRANSPORT)
+    list(APPEND TRANSPORT_SOURCES StdoutInventoryTransport.cpp)
+    add_compile_definitions(INVENTORY_ENABLE_STDOUT_TRANSPORT)
+endif()
+
+add_library(inventory_transport STATIC ${TRANSPORT_SOURCES})
 
 target_include_directories(inventory_transport
     PUBLIC
