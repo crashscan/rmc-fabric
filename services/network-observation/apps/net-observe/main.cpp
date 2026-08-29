@@ -25,29 +25,31 @@ DEFINE_bool(lldp, false,
 
 namespace {
 
+namespace contract = interop_contract::network_observation;
+
 // ---------------------------------------------------------------------------
 // Local string helpers (mirror server-side serialization)
 // ---------------------------------------------------------------------------
 
-static std::string classificationToString(RSCGroup::CandidateClassification c)
+static std::string classificationToString(contract::CandidateClassification c)
 {
-    using enum RSCGroup::CandidateClassification;
+    using enum contract::CandidateClassification;
     switch (c) {
-        case Artifact:       return "Artifact";
-        case LocalSelf:      return "LocalSelf";
-        case WeakCandidate:  return "WeakCandidate";
+        case Artifact:         return "Artifact";
+        case LocalSelf:        return "LocalSelf";
+        case WeakCandidate:    return "WeakCandidate";
         case ProbableEndpoint: return "ProbableEndpoint";
-        case RemoteEndpoint: return "RemoteEndpoint";
-        case GatewayLike:    return "GatewayLike";
-        case TopologyPeer:   return "TopologyPeer";
-        case Unknown:        return "Unknown";
+        case RemoteEndpoint:   return "RemoteEndpoint";
+        case GatewayLike:      return "GatewayLike";
+        case TopologyPeer:     return "TopologyPeer";
+        case Unknown:          return "Unknown";
     }
     return "Unknown";
 }
 
-static std::string statusToString(RSCGroup::CandidateStatus s)
+static std::string statusToString(contract::CandidateStatus s)
 {
-    using enum RSCGroup::CandidateStatus;
+    using enum contract::CandidateStatus;
     switch (s) {
         case Provisional: return "Provisional";
         case Confirmed:   return "Confirmed";
@@ -69,18 +71,17 @@ void printJson(const Json::Value& root)
     std::cout << Json::writeString(builder, root) << '\n';
 }
 
-Json::Value ifaceToJson(const RSCGroup::LocalInterfaceState& iface)
+Json::Value ifaceToJson(const contract::LocalInterfaceState& iface)
 {
     Json::Value j;
-    j["ifindex"] = iface.ifindex;
-    j["ifname"] = iface.ifname;
-    j["mac"] = iface.mac;
-    j["adminUp"] = iface.adminUp;
-    j["running"] = iface.running;
+    j["ifindex"]   = iface.ifindex;
+    j["ifname"]    = iface.ifname;
+    j["mac"]       = iface.mac;
+    j["adminUp"]   = iface.adminUp;
+    j["running"]   = iface.running;
     j["operstate"] = iface.operstate;
-    if (iface.masterIfname) {
+    if (iface.masterIfname)
         j["master"] = *iface.masterIfname;
-    }
 
     Json::Value ipv4Arr;
     for (const auto& a : iface.ipv4) ipv4Arr.append(a);
@@ -93,18 +94,18 @@ Json::Value ifaceToJson(const RSCGroup::LocalInterfaceState& iface)
     return j;
 }
 
-Json::Value candidateToJson(const RSCGroup::RemoteCandidate& c)
+Json::Value candidateToJson(const contract::RemoteCandidate& c)
 {
     Json::Value j;
-    j["mac"] = c.mac;
+    j["mac"]            = c.mac;
     j["classification"] = classificationToString(c.classification);
-    j["status"] = statusToString(c.status);
-    j["seenInFdb"] = c.seenInFdb;
-    j["seenInNeigh"] = c.seenInNeigh;
-    j["seenInLldp"] = c.seenInLldp;
-    if (c.bridgePort) j["bridgePort"] = *c.bridgePort;
-    if (c.remoteChassisId) j["remoteChassisId"] = *c.remoteChassisId;
-    if (c.remotePortId) j["remotePortId"] = *c.remotePortId;
+    j["status"]         = statusToString(c.status);
+    j["seenInFdb"]      = c.seenInFdb;
+    j["seenInNeigh"]    = c.seenInNeigh;
+    j["seenInLldp"]     = c.seenInLldp;
+    if (c.bridgePort)       j["bridgePort"]       = *c.bridgePort;
+    if (c.remoteChassisId)  j["remoteChassisId"]  = *c.remoteChassisId;
+    if (c.remotePortId)     j["remotePortId"]     = *c.remotePortId;
     if (c.remoteSystemName) j["remoteSystemName"] = *c.remoteSystemName;
 
     Json::Value ipv4Arr;
@@ -125,9 +126,9 @@ Json::Value candidateToJson(const RSCGroup::RemoteCandidate& c)
 /**
  * @brief Fetch all remote candidates using two-phase fetch (MACs then per-MAC).
  */
-static std::vector<RSCGroup::RemoteCandidate> fetchAllCandidates(RSCGroup::DbusClient& client)
+static std::vector<contract::RemoteCandidate> fetchAllCandidates(RSCGroup::DbusClient& client)
 {
-    std::vector<RSCGroup::RemoteCandidate> candidates;
+    std::vector<contract::RemoteCandidate> candidates;
     for (const auto& mac : client.getRemoteCandidateMacs()) {
         if (auto c = client.getCandidateByMac(mac))
             candidates.push_back(std::move(*c));
@@ -140,7 +141,7 @@ static std::vector<RSCGroup::RemoteCandidate> fetchAllCandidates(RSCGroup::DbusC
  */
 Json::Value getLldpNeighbors(
     const std::string& ifname,
-    const std::vector<RSCGroup::RemoteCandidate>& candidates)
+    const std::vector<contract::RemoteCandidate>& candidates)
 {
     Json::Value arr;
     for (const auto& c : candidates) {
@@ -180,18 +181,15 @@ void printStatus(RSCGroup::DbusClient& client)
         }
     } else {
         auto snap = client.getLocalSnapshot();
-        std::vector<RSCGroup::RemoteCandidate> candidates;
-        if (FLAGS_lldp) {
+        std::vector<contract::RemoteCandidate> candidates;
+        if (FLAGS_lldp)
             candidates = fetchAllCandidates(client);
-        }
 
         Json::Value root;
         for (const auto& [name, iface] : snap.interfaces) {
             root[name] = ifaceToJson(iface);
-            if (FLAGS_lldp) {
-                root[name]["lldpNeighbors"] =
-                    getLldpNeighbors(name, candidates);
-            }
+            if (FLAGS_lldp)
+                root[name]["lldpNeighbors"] = getLldpNeighbors(name, candidates);
         }
         printJson(root);
     }

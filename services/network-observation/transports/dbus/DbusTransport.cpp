@@ -4,22 +4,22 @@
 #include "DbusTransport.h"
 #include "NetworkObservationDbusAdapter.h"
 
+#include <interop_contract/network_observation/NetworkObservationContracts.hpp>
+
 #include <glog/logging.h>
 
 namespace RSCGroup {
 
 namespace {
-constexpr auto DBUS_SERVICE   = "org.rsc.NetworkObservation";
-constexpr auto DBUS_PATH      = "/org/rsc/NetworkObservation";
-constexpr auto DBUS_INTERFACE = "org.rsc.NetworkObservation";
+using namespace interop_contract::network_observation;
 } // namespace
 
 DbusTransport::DbusTransport(const std::string& busType)
     : DbusTransportBase(busType,
                         std::make_unique<NetworkObservationDbusAdapter>(),
-                        DBUS_SERVICE,
-                        DBUS_PATH,
-                        DBUS_INTERFACE)
+                        std::string(SERVICE_NAME),
+                        std::string(OBJECT_PATH),
+                        std::string(INTERFACE))
 {}
 
 NetworkObservationDbusAdapter* DbusTransport::obsAdapter() const

@@ -6,8 +6,7 @@
  * @brief Client-side typed D-Bus proxy for network-observationd.
  */
 #pragma once
-#include "LocalStateTypes.h"
-#include "CandidateTypes.h"
+#include <interop_contract/network_observation/NetworkObservationTypes.hpp>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -15,6 +14,8 @@
 #include <vector>
 
 namespace RSCGroup {
+
+namespace contract = interop_contract::network_observation;
 
 class DbusClient {
 public:
@@ -31,10 +32,10 @@ public:
     [[nodiscard]] bool connect();
 
     // --- Typed query methods ---
-    LocalNetworkSnapshot getLocalSnapshot();
-    std::optional<LocalInterfaceState> getInterface(const std::string& ifname);
+    contract::LocalNetworkSnapshot getLocalSnapshot();
+    std::optional<contract::LocalInterfaceState> getInterface(const std::string& ifname);
     std::vector<std::string> getRemoteCandidateMacs();
-    std::optional<RemoteCandidate> getCandidateByMac(const std::string& mac);
+    std::optional<contract::RemoteCandidate> getCandidateByMac(const std::string& mac);
     bool getReady();
     std::string getPhase();
 

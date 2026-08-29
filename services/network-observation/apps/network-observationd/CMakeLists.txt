@@ -25,6 +25,7 @@ target_include_directories(network-observationd PRIVATE
 target_link_libraries(network-observationd
     PRIVATE
         dbus_transport_base
+        interop_contract
         DBusCxx::DBusCxx
         SigCxx::SigCxx
     netlink-monitor
