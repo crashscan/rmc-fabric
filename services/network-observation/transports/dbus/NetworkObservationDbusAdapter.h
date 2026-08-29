@@ -1,6 +1,7 @@
 #pragma once
 
 #include <DbusServiceAdapter.h>
+#include <ServiceBinding.h>
 
 #include <memory>
 #include <string>
@@ -21,6 +22,13 @@ struct NetworkObservationHandler;
  * Implements DbusServiceAdapter for the network-observation domain:
  * registers D-Bus methods (GetLocalSnapshot, GetInterface, etc.) and
  * creates typed signals (LocalStateChanged, InterfaceChanged, etc.).
+ *
+ * Ownership/lifetime invariant
+ * ----------------------------
+ * The query service is externally owned.  setService() registers the pointer
+ * via ServiceBinding.  onTransportStopping() calls binding_.detach(), which
+ * blocks until all in-flight D-Bus handler calls complete, then revokes
+ * access.  Any call arriving after detach() returns the safe default.
  */
 class NetworkObservationDbusAdapter : public DbusServiceAdapter {
 public:
@@ -31,11 +39,15 @@ public:
     NetworkObservationDbusAdapter& operator=(const NetworkObservationDbusAdapter&) = delete;
 
     void setService(IObservationQueryService* service);
-    [[nodiscard]] IObservationQueryService* getService() const;
 
     void bind(const std::shared_ptr<DBus::Object>& object,
               const std::string& interfaceName) override;
 
+    /**
+     * @brief Revokes handler access to the service and waits for in-flight
+     *        D-Bus calls to complete.  Safe to call concurrently with handler
+     *        method invocations.
+     */
     void onTransportStopping() override;
 
     void publishLocalStateChanged();
@@ -46,7 +58,10 @@ public:
     void publishReadyChanged(bool ready);
 
 private:
-    IObservationQueryService* service_ = nullptr;
+    /// Synchronized binding: guards concurrent handler access vs shutdown.
+    /// @see ServiceBinding for the ownership/lifetime invariant.
+    ServiceBinding<IObservationQueryService> binding_;
+
     std::shared_ptr<NetworkObservationHandler> handler_;
 
     std::shared_ptr<DBus::Signal<void()>>           signalLocalStateChanged_;

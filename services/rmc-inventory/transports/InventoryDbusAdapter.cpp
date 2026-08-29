@@ -20,78 +20,86 @@ namespace {
 using namespace interop_contract::inventory;
 
 struct InventoryQueryHandler {
-    IInventoryQueryService* service = nullptr;
+    /// Thread-safe service access: shared lock held during the call, exclusive
+    /// lock taken by onTransportStopping() to clear the binding.
+    ServiceBinding<IInventoryQueryService>* binding = nullptr;
 
     std::map<std::string, DBus::Variant> GetIdentity()
     {
-        if (!service) return {};
-        try {
-            return InventoryDbusCodec::encodeSnapshot(service->getIdentity());
-        } catch (const std::exception& e) {
-            LOG(ERROR) << "GetIdentity failed: " << e.what();
-            return {};
+        if (auto guard = binding->acquire()) {
+            try { return InventoryDbusCodec::encodeSnapshot(guard->getIdentity()); }
+            catch (const std::exception& e) { LOG(ERROR) << "GetIdentity failed: " << e.what(); }
         }
+        return {};
     }
 
     std::map<std::string, DBus::Variant> GetField(std::string fieldName)
     {
-        if (!service) return {};
-        try {
-            return InventoryDbusCodec::encodeFields(service->getField(fieldName));
-        } catch (const std::exception& e) {
-            LOG(ERROR) << "GetField failed: " << e.what();
-            return {};
+        if (auto guard = binding->acquire()) {
+            try { return InventoryDbusCodec::encodeFields(guard->getField(fieldName)); }
+            catch (const std::exception& e) { LOG(ERROR) << "GetField failed: " << e.what(); }
         }
+        return {};
     }
 
     std::map<std::string, std::map<std::string, DBus::Variant>> GetSourceStates()
     {
-        if (!service) return {};
-        try {
-            return InventoryDbusCodec::encodeSourceStates(service->getSourceStates());
-        } catch (const std::exception& e) {
-            LOG(ERROR) << "GetSourceStates failed: " << e.what();
-            return {};
+        if (auto guard = binding->acquire()) {
+            try { return InventoryDbusCodec::encodeSourceStates(guard->getSourceStates()); }
+            catch (const std::exception& e) { LOG(ERROR) << "GetSourceStates failed: " << e.what(); }
         }
+        return {};
     }
 
     std::map<std::string, std::map<std::string, DBus::Variant>> GetIssues()
     {
-        if (!service) return {};
-        try {
-            return InventoryDbusCodec::encodeIssues(service->getIssues());
-        } catch (const std::exception& e) {
-            LOG(ERROR) << "GetIssues failed: " << e.what();
-            return {};
+        if (auto guard = binding->acquire()) {
+            try { return InventoryDbusCodec::encodeIssues(guard->getIssues()); }
+            catch (const std::exception& e) { LOG(ERROR) << "GetIssues failed: " << e.what(); }
         }
+        return {};
     }
 
-    bool GetReady() { return service && service->getReady(); }
-    std::string GetPhase() { return service ? service->getPhase() : "unknown"; }
-    uint64_t GetVersion() { return service ? service->getVersion() : 0; }
-    void Refresh() { if (service) service->refresh(); }
+    bool GetReady()
+    {
+        if (auto guard = binding->acquire()) return guard->getReady();
+        return false;
+    }
+
+    std::string GetPhase()
+    {
+        if (auto guard = binding->acquire()) return guard->getPhase();
+        return "unknown";
+    }
+
+    uint64_t GetVersion()
+    {
+        if (auto guard = binding->acquire()) return guard->getVersion();
+        return 0;
+    }
+
+    void Refresh()
+    {
+        if (auto guard = binding->acquire()) guard->refresh();
+    }
 };
 
 } // namespace
 
+InventoryDbusAdapter::InventoryDbusAdapter()
+    : handler_(std::make_shared<InventoryQueryHandler>())
+{
+    handler_->binding = &binding_;
+}
+
 void InventoryDbusAdapter::onTransportStopping()
 {
-    service_ = nullptr;
-    if (handler_) handler_->service = nullptr;
+    binding_.detach();
 }
 
 void InventoryDbusAdapter::setService(IInventoryQueryService* service)
 {
-    service_ = service;
-    if (!handler_) {
-        handler_ = std::make_shared<InventoryQueryHandler>();
-    }
-    handler_->service = service_;
-}
-
-IInventoryQueryService* InventoryDbusAdapter::getService() const
-{
-    return service_;
+    binding_.bind(service);
 }
 
 void InventoryDbusAdapter::bind(const std::shared_ptr<DBus::Object>& object,
@@ -99,11 +107,6 @@ void InventoryDbusAdapter::bind(const std::shared_ptr<DBus::Object>& object,
 {
     if (!object) {
         throw std::invalid_argument("InventoryDbusAdapter::bind: object is null");
-    }
-
-    if (!handler_) {
-        handler_ = std::make_shared<InventoryQueryHandler>();
-        handler_->service = service_;
     }
 
     createSignals(object, interfaceName);

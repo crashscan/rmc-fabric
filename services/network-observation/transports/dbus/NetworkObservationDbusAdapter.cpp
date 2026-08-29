@@ -46,66 +46,74 @@ contract::RemoteCandidate toWireCandidate(const RemoteCandidate& c)
 } // anonymous namespace
 
 struct NetworkObservationHandler {
-    IObservationQueryService* service = nullptr;
+    /// Thread-safe service access: shared lock held during the call, exclusive
+    /// lock taken by onTransportStopping() to clear the binding.
+    ServiceBinding<IObservationQueryService>* binding = nullptr;
 
     std::map<std::string, DBus::Variant> GetLocalSnapshot()
     {
         std::map<std::string, DBus::Variant> result;
-        if (!service) return result;
-        auto snapshot = service->localSnapshot();
-        for (const auto& [name, iface] : snapshot.interfaces)
-            result[name] = DBus::Variant(contract::toVariantMap(iface));
+        if (auto guard = binding->acquire()) {
+            auto snapshot = guard->localSnapshot();
+            for (const auto& [name, iface] : snapshot.interfaces)
+                result[name] = DBus::Variant(contract::toVariantMap(iface));
+        }
         return result;
     }
 
     std::map<std::string, DBus::Variant> GetInterface(std::string ifname)
     {
-        if (!service) return {};
-        auto iface = service->getInterface(ifname);
-        if (!iface) return {};
-        return contract::toVariantMap(*iface);
+        if (auto guard = binding->acquire()) {
+            auto iface = guard->getInterface(ifname);
+            if (iface) return contract::toVariantMap(*iface);
+        }
+        return {};
     }
 
     std::vector<std::string> GetRemoteCandidateMacs()
     {
         std::vector<std::string> result;
-        if (!service) return result;
-        for (const auto& c : service->remoteCandidates())
-            result.push_back(c.mac);
+        if (auto guard = binding->acquire()) {
+            for (const auto& c : guard->remoteCandidates())
+                result.push_back(c.mac);
+        }
         return result;
     }
 
     std::map<std::string, DBus::Variant> GetCandidateByMac(std::string mac)
     {
-        if (!service) return {};
-        auto c = service->getCandidateByMac(mac);
-        if (!c) return {};
-        return contract::toVariantMap(toWireCandidate(*c));
+        if (auto guard = binding->acquire()) {
+            auto c = guard->getCandidateByMac(mac);
+            if (c) return contract::toVariantMap(toWireCandidate(*c));
+        }
+        return {};
     }
 
-    bool GetReady() { return service && service->isReady(); }
+    bool GetReady()
+    {
+        if (auto guard = binding->acquire()) return guard->isReady();
+        return false;
+    }
 
     std::string GetPhase()
     {
-        if (!service) return std::string(contract::PHASE_STOPPED);
-        return service->isReady() ? std::string(contract::PHASE_LIVE)
-                                  : std::string(contract::PHASE_INITIALIZING);
+        if (auto guard = binding->acquire()) {
+            return guard->isReady() ? std::string(contract::PHASE_LIVE)
+                                    : std::string(contract::PHASE_INITIALIZING);
+        }
+        return std::string(contract::PHASE_STOPPED);
     }
 };
 
 NetworkObservationDbusAdapter::NetworkObservationDbusAdapter()
     : handler_(std::make_shared<NetworkObservationHandler>())
-{}
+{
+    handler_->binding = &binding_;
+}
 
 void NetworkObservationDbusAdapter::setService(IObservationQueryService* service)
 {
-    service_ = service;
-    handler_->service = service_;
-}
-
-IObservationQueryService* NetworkObservationDbusAdapter::getService() const
-{
-    return service_;
+    binding_.bind(service);
 }
 
 void NetworkObservationDbusAdapter::bind(const std::shared_ptr<DBus::Object>& object,
@@ -120,8 +128,7 @@ void NetworkObservationDbusAdapter::bind(const std::shared_ptr<DBus::Object>& ob
 
 void NetworkObservationDbusAdapter::onTransportStopping()
 {
-    service_ = nullptr;
-    handler_->service = nullptr;
+    binding_.detach();
 }
 
 void NetworkObservationDbusAdapter::createSignals(const std::shared_ptr<DBus::Object>& object,

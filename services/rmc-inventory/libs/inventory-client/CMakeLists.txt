@@ -24,6 +24,11 @@ if(BUILD_TESTING)
                 interop_contract
                 inventory_transport
     )
+
+    add_test(
+        NAME inventory_dbus_codec_characterization_tests
+        COMMAND inventory_dbus_codec_characterization_tests
+    )
 endif()
 
 target_link_libraries(inventory-client
