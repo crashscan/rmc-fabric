@@ -2,6 +2,7 @@
 // Created by vvass on 21-Jul-26.
 //
 #include "DbusClient.h"
+#include <interop_contract/network_observation/NetworkObservationTypes.hpp>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
 #include <json/writer.h>

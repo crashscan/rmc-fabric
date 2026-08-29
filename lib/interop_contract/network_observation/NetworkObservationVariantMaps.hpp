@@ -6,6 +6,7 @@
 #include "NetworkObservationContracts.hpp"
 #include "NetworkObservationTypes.hpp"
 
+#include <DbusVariantMapReader.h>
 #include <dbus-cxx.h>
 
 #include <map>
@@ -131,79 +132,46 @@ inline std::map<std::string, DBus::Variant> toVariantMap(const RemoteCandidate& 
 // fromVariantMap — deserialize D-Bus a{sv} to domain types
 // ---------------------------------------------------------------------------
 
-/// Helper: read a string-keyed variant map using a DbusVariantMapReader-style API.
-/// Avoids pulling in DbusVariantMapReader for the contract header.
-namespace detail {
-
-inline int getInt(const std::map<std::string, DBus::Variant>& m, std::string_view k)
-{
-    auto key = std::string(k);
-    return m.contains(key) ? static_cast<int>(m.at(key).to_int32()) : 0;
-}
-
-inline std::string getStr(const std::map<std::string, DBus::Variant>& m, std::string_view k)
-{
-    auto key = std::string(k);
-    return m.contains(key) ? m.at(key).to_string() : std::string{};
-}
-
-inline bool getBool(const std::map<std::string, DBus::Variant>& m, std::string_view k)
-{
-    auto key = std::string(k);
-    return m.contains(key) && m.at(key).to_bool();
-}
-
-inline std::set<std::string> getStrSet(const std::map<std::string, DBus::Variant>& m,
-                                       std::string_view k)
-{
-    auto key = std::string(k);
-    if (!m.contains(key)) return {};
-    std::set<std::string> out;
-    auto varCopy = m.at(key);
-    for (const auto& v : varCopy.to_vector<DBus::Variant>())
-        out.insert(v.to_string());
-    return out;
-}
-
-} // namespace detail
-
 inline LocalInterfaceState fromVariantMapIface(const std::map<std::string, DBus::Variant>& m)
 {
+    RSCGroup::DbusVariantMapReader r(m);
     LocalInterfaceState s;
-    s.ifindex   = detail::getInt(m, K_IFINDEX);
-    s.ifname    = detail::getStr(m, K_IFNAME);
-    s.mac       = detail::getStr(m, K_MAC);
-    s.adminUp   = detail::getBool(m, K_ADMINUP);
-    s.running   = detail::getBool(m, K_RUNNING);
-    s.operstate = detail::getStr(m, K_OPERSTATE);
+    s.ifindex   = r.getInt(std::string(K_IFINDEX).c_str());
+    s.ifname    = r.getStr(std::string(K_IFNAME).c_str());
+    s.mac       = r.getStr(std::string(K_MAC).c_str());
+    s.adminUp   = r.getBool(std::string(K_ADMINUP).c_str());
+    s.running   = r.getBool(std::string(K_RUNNING).c_str());
+    s.operstate = r.getStr(std::string(K_OPERSTATE).c_str());
     if (m.contains(std::string(K_MASTER)))
-        s.masterIfname = detail::getStr(m, K_MASTER);
-    s.ipv4 = detail::getStrSet(m, K_IPV4);
-    s.ipv6 = detail::getStrSet(m, K_IPV6);
+        s.masterIfname = r.getStr(std::string(K_MASTER).c_str());
+    s.ipv4 = r.getStrSet(std::string(K_IPV4).c_str());
+    s.ipv6 = r.getStrSet(std::string(K_IPV6).c_str());
     return s;
 }
 
 inline RemoteCandidate fromVariantMapCandidate(const std::map<std::string, DBus::Variant>& m)
 {
+    RSCGroup::DbusVariantMapReader r(m);
     RemoteCandidate c;
-    c.mac             = detail::getStr(m, K_MAC);
-    c.classification  = classificationFromString(detail::getStr(m, K_CLASSIFICATION));
-    c.status          = statusFromString(detail::getStr(m, K_STATUS));
-    c.seenInFdb       = detail::getBool(m, K_SEEN_IN_FDB);
-    c.seenInNeigh     = detail::getBool(m, K_SEEN_IN_NEIGH);
-    c.seenInLldp      = detail::getBool(m, K_SEEN_IN_LLDP);
+    c.mac            = r.getStr(std::string(K_MAC).c_str());
+    c.classification = classificationFromString(r.getStr(std::string(K_CLASSIFICATION).c_str()));
+    c.status         = statusFromString(r.getStr(std::string(K_STATUS).c_str()));
+    c.seenInFdb      = r.getBool(std::string(K_SEEN_IN_FDB).c_str());
+    c.seenInNeigh    = r.getBool(std::string(K_SEEN_IN_NEIGH).c_str());
+    c.seenInLldp     = r.getBool(std::string(K_SEEN_IN_LLDP).c_str());
     if (m.contains(std::string(K_BRIDGE_PORT)))
-        c.bridgePort       = detail::getStr(m, K_BRIDGE_PORT);
+        c.bridgePort       = r.getStr(std::string(K_BRIDGE_PORT).c_str());
     if (m.contains(std::string(K_REMOTE_CHASSIS_ID)))
-        c.remoteChassisId  = detail::getStr(m, K_REMOTE_CHASSIS_ID);
+        c.remoteChassisId  = r.getStr(std::string(K_REMOTE_CHASSIS_ID).c_str());
     if (m.contains(std::string(K_REMOTE_PORT_ID)))
-        c.remotePortId     = detail::getStr(m, K_REMOTE_PORT_ID);
+        c.remotePortId     = r.getStr(std::string(K_REMOTE_PORT_ID).c_str());
     if (m.contains(std::string(K_REMOTE_SYSTEM_NAME)))
-        c.remoteSystemName = detail::getStr(m, K_REMOTE_SYSTEM_NAME);
-    c.neighborIfaces  = detail::getStrSet(m, K_NEIGHBOR_IFACES);
-    c.ipv4            = detail::getStrSet(m, K_IPV4);
-    c.ipv6            = detail::getStrSet(m, K_IPV6);
+        c.remoteSystemName = r.getStr(std::string(K_REMOTE_SYSTEM_NAME).c_str());
+    c.neighborIfaces = r.getStrSet(std::string(K_NEIGHBOR_IFACES).c_str());
+    c.ipv4           = r.getStrSet(std::string(K_IPV4).c_str());
+    c.ipv6           = r.getStrSet(std::string(K_IPV6).c_str());
     return c;
 }
 
 } // namespace interop_contract::network_observation
+

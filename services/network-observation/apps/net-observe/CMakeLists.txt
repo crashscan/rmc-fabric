@@ -14,6 +14,7 @@ target_include_directories(net-observe PRIVATE
 target_link_libraries(net-observe
     PRIVATE
         interop_contract
+        dbus_client_support
         DBusCxx::DBusCxx
         SigCxx::SigCxx
     pthread
