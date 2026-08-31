@@ -35,7 +35,29 @@ public:
 
     // Adapter lifecycle hooks: called by DbusTransportBase
     virtual void onTransportStarting() {}
-    virtual void onTransportStopping() {}
+
+    /**
+     * @brief Close query admission and wait for in-flight query handlers to
+     *        drain.  Called by DbusTransportBase::quiesceQueries() and by
+     *        the default onTransportStopping() implementation.
+     *
+     * Postcondition: no query handler is executing; no new query can be
+     * admitted; publication resources remain open.
+     *
+     * Default is a no-op for adapters without query methods.
+     */
+    virtual void quiesceQueries() {}
+
+    /**
+     * @brief Called by DbusTransportBase::stop() just before the D-Bus object
+     *        is unregistered.  The default implementation delegates to
+     *        quiesceQueries() so concrete adapters only need to override
+     *        quiesceQueries().
+     *
+     * Implementations that need additional teardown beyond query drain should
+     * override onTransportStopping() and call quiesceQueries() explicitly.
+     */
+    virtual void onTransportStopping() { quiesceQueries(); }
 
 protected:
     [[nodiscard]] std::shared_ptr<DBus::Signal<void(std::string)>> createStringSignal(

@@ -23,6 +23,7 @@ public:
 
     [[nodiscard]] bool start() override;
     void stop() override;
+    void quiesceQueries() override;
     [[nodiscard]] std::string name() const override;
 
     void publishLocalStateChanged() override;

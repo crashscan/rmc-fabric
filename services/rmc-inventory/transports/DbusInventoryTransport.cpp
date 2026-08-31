@@ -47,6 +47,11 @@ void DbusInventoryTransport::stop()
     DbusTransportBase::stop();
 }
 
+void DbusInventoryTransport::quiesceQueries()
+{
+    DbusTransportBase::quiesceQueries();
+}
+
 std::string DbusInventoryTransport::name() const
 {
     return "dbus";

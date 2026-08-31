@@ -48,6 +48,11 @@ void DbusTransport::stop()
     DbusTransportBase::stop();
 }
 
+void DbusTransport::quiesceQueries()
+{
+    DbusTransportBase::quiesceQueries();
+}
+
 std::string DbusTransport::name() const
 {
     return "dbus";

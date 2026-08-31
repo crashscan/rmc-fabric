@@ -154,14 +154,21 @@ bool NetworkObservationAdapter::start()
 
 void NetworkObservationAdapter::stop()
 {
+    // Ordering: stop netlink monitor first (its callbacks may call into LLDP),
+    // then drain LLDP, then detach the event sink.  This ensures no
+    // IModelEventSink callback fires after stop() returns.
+
     if (monitor_) {
         monitor_->stop();
         monitor_.reset();
     }
     if (lldpObserver_) {
-        lldpObserver_->stop();
+        lldpObserver_->stop();  // drains in-flight LLDP callbacks
         lldpObserver_.reset();
     }
+
+    // Detach event sink only after all producers have drained.
+    model_->setEventSink(nullptr);
 }
 
 bool NetworkObservationAdapter::isRunning() const

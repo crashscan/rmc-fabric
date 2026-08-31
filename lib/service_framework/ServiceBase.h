@@ -110,6 +110,10 @@ public:
      *
      * Calls transport->publishReadyChanged(ready) for each registered
      * transport when the value changes.
+     *
+     * setReady(true) is rejected after shutdown has been claimed (i.e. after
+     * stop() begins) and the call is a no-op.  This prevents event producers
+     * draining after shutdown from re-asserting readiness.
      */
     void setReady(bool ready);
 
@@ -127,6 +131,32 @@ public:
      */
     [[nodiscard]] const std::vector<std::shared_ptr<IServiceTransport>>& transports() const;
 
+protected:
+    /**
+     * @brief Quiesce query admission on all registered transports.
+     *
+     * Iterates transports in registration order and calls
+     * transport->quiesceQueries() on each.  A failure is a safety-barrier
+     * failure and is re-thrown after logging; it must not be silently
+     * swallowed.
+     *
+     * Callers must not hold the service lifecycle mutex while calling this,
+     * as each quiesce may block waiting for in-flight handlers to drain.
+     *
+     * Postcondition: no new externally-initiated query is admitted; all
+     * previously admitted query calls have returned.
+     */
+    void quiesceQueriesOnTransports();
+
+    /**
+     * @brief Stop all registered transports without touching the ready state.
+     *
+     * This is the "final close" step after ReadyChanged(false) has been
+     * emitted.  Called by stop() and available to subclasses that need
+     * fine-grained shutdown ordering.
+     */
+    void stopTransports() noexcept;
+
 private:
     void rollbackStartedTransports(std::size_t startedCount, IServiceTransport* currentTransport = nullptr) noexcept;
     void stopAllTransports() noexcept;
@@ -135,6 +165,8 @@ private:
     std::vector<std::shared_ptr<IServiceTransport>> transports_;
     std::atomic<bool> running_{false};
     std::atomic<bool> ready_{false};
+    /// Set at the start of stop() to block subsequent setReady(true) calls.
+    std::atomic<bool> shutdownClaimed_{false};
 };
 
 } // namespace RSCGroup

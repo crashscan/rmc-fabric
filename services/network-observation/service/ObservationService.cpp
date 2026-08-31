@@ -138,16 +138,53 @@ bool ObservationService::start()
 
 void ObservationService::stop()
 {
-    std::scoped_lock lock(lifecycleMutex_);
-    if (!ServiceBase::isRunning() && !agingThread_.joinable()) {
-        return;
+    // Claim shutdown.
+    {
+        std::scoped_lock lock(lifecycleMutex_);
+        if (stopping_) return;
+        if (!ServiceBase::isRunning() && !agingThread_.joinable()) return;
+        stopping_ = true;
     }
-    stopOwnedState();
+
+    // Step 1: Quiesce D-Bus query admission — snapshot/query calls drain.
+    // Must NOT hold lifecycleMutex_ while blocking on query drain.
+    quiesceQueriesOnTransports();
+
+    // Step 2: Stop and join the aging worker.
+    // Self-join guard: if stop() is called from the aging thread itself,
+    // detach instead of joining to avoid a deadlock.
+    if (agingThread_.joinable()) {
+        agingThread_.request_stop();
+        {
+            std::scoped_lock agingLock(agingMutex_);
+            agingCv_.notify_all();
+        }
+        if (agingThread_.get_id() == std::this_thread::get_id()) {
+            LOG(WARNING) << "ObservationService::stop() called from aging thread; join skipped";
+            agingThread_.detach();
+        } else {
+            agingThread_.join();
+        }
+    }
+
+    // Step 3: Stop the runtime (drains netlink + LLDP producers, detaches sink).
+    runtime_->stop();
+
+    // Step 4: Clear runtime issue state.
     {
         std::scoped_lock lock(issuesMutex_);
         issues_.clear();
     }
+
+    // Step 5: Emit terminal ReadyChanged(false) and fully stop transports.
+    // ServiceBase::stop() emits setReady(false) before stopping transports.
     ServiceBase::stop();
+
+    // Reset stopping_ for potential restart.
+    {
+        std::scoped_lock lock(lifecycleMutex_);
+        stopping_ = false;
+    }
 }
 
 void ObservationService::agingLoop(std::stop_token st)

@@ -179,6 +179,107 @@ void testConcurrentAcquires()
     expect(errors.load() == 0, "all concurrent acquires should succeed");
 }
 
+// Verify that detach() closes admission so that late acquires after detach()
+// are all rejected, even under a continuous stream of new callers.
+void testAdmissionClosedAfterDetach()
+{
+    ServiceBinding<FakeService> binding;
+    FakeService svc{"admission"};
+    binding.bind(&svc);
+    binding.detach();
+
+    // Many concurrent attempts to acquire after detach should all fail.
+    constexpr int kThreads = 16;
+    std::atomic<int> acquired{0};
+
+    std::vector<std::thread> threads;
+    threads.reserve(kThreads);
+    for (int i = 0; i < kThreads; ++i) {
+        threads.emplace_back([&] {
+            auto guard = binding.acquire();
+            if (guard) ++acquired;
+        });
+    }
+    for (auto& t : threads) t.join();
+
+    expect(acquired.load() == 0, "no acquire should succeed after detach");
+}
+
+// Verify that detach() cannot be starved: once it closes admission, even a
+// continuous stream of new readers cannot delay it indefinitely.
+void testDetachNotStarvedByContinuousReaders()
+{
+    ServiceBinding<FakeService> binding;
+    FakeService svc{"no-starvation"};
+    binding.bind(&svc);
+
+    std::atomic<bool> stopReaders{false};
+    std::atomic<bool> detachCompleted{false};
+
+    // Background reader threads that continually attempt to acquire.
+    constexpr int kReaders = 4;
+    std::vector<std::thread> readers;
+    readers.reserve(kReaders);
+    for (int i = 0; i < kReaders; ++i) {
+        readers.emplace_back([&] {
+            while (!stopReaders.load()) {
+                auto g = binding.acquire();
+                // hold briefly then release
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+            }
+        });
+    }
+
+    // Give readers time to start, then detach.
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+    std::thread detachThread([&] {
+        binding.detach();
+        detachCompleted.store(true);
+    });
+
+    // detach should complete within a generous bound even with continuous readers.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    while (!detachCompleted.load() && std::chrono::steady_clock::now() < deadline) {
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+
+    stopReaders.store(true);
+    for (auto& t : readers) t.join();
+    detachThread.join();
+
+    expect(detachCompleted.load(), "detach should complete despite continuous reader stream");
+
+    // After detach completes, all new acquires should fail.
+    auto guard = binding.acquire();
+    expect(!static_cast<bool>(guard), "acquire should fail after detach");
+}
+
+// bind() after detach() re-opens admission.
+void testRebindAfterDetachReopensAdmission()
+{
+    ServiceBinding<FakeService> binding;
+    FakeService svc1{"first"};
+    FakeService svc2{"second"};
+
+    binding.bind(&svc1);
+    binding.detach();
+
+    // Admission is closed — acquire should fail.
+    {
+        auto g = binding.acquire();
+        expect(!static_cast<bool>(g), "should not acquire after detach");
+    }
+
+    // Re-bind with new service — admission should be re-opened.
+    binding.bind(&svc2);
+    {
+        auto g = binding.acquire();
+        expect(static_cast<bool>(g), "should acquire after rebind");
+        expect(g->query() == "second", "should point to second service");
+    }
+}
+
 } // namespace
 } // namespace RSCGroup
 
@@ -193,6 +294,9 @@ int main()
     testGuardAllowsMultipleAccesses();
     testDetachWaitsForInFlight();
     testConcurrentAcquires();
+    testAdmissionClosedAfterDetach();
+    testDetachNotStarvedByContinuousReaders();
+    testRebindAfterDetachReopensAdmission();
 
     std::cout << "All ServiceBinding tests passed.\n";
     return EXIT_SUCCESS;
