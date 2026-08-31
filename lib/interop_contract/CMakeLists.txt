@@ -2,10 +2,29 @@ add_library(interop_contract INTERFACE)
 
 target_include_directories(interop_contract
     INTERFACE
-        ${CMAKE_CURRENT_SOURCE_DIR}
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
 # Intentionally no transport-library linkage here.
+
+install(
+    TARGETS interop_contract
+    EXPORT  rmc_fabricTargets
+    COMPONENT dev
+)
+
+install(
+    DIRECTORY
+        ${CMAKE_CURRENT_SOURCE_DIR}/
+    DESTINATION
+        ${CMAKE_INSTALL_INCLUDEDIR}
+    COMPONENT dev
+    FILES_MATCHING
+        PATTERN "*.h"
+        PATTERN "*.hpp"
+        PATTERN "tests" EXCLUDE
+)
 
 if(BUILD_TESTING)
     add_executable(interop_contract_tests

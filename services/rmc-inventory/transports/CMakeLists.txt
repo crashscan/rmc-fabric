@@ -25,7 +25,7 @@ target_include_directories(inventory_transport
 target_include_directories(inventory_dbus_codec
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<INSTALL_INTERFACE:include/rmc-inventory/transports>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/inventory>
 )
 
 target_link_libraries(inventory_transport
@@ -67,3 +67,17 @@ if(BUILD_TESTING)
         COMMAND inventory_dbus_codec_characterization_tests
     )
 endif()
+
+install(
+    TARGETS inventory_dbus_codec
+    EXPORT  rmc_fabricTargets
+    ARCHIVE COMPONENT dev
+)
+
+install(
+    FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/InventoryDbusCodec.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/inventory
+    COMPONENT   dev
+)
+

@@ -6,7 +6,7 @@ target_include_directories(network_observation_client
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../transports/dbus>
-        $<INSTALL_INTERFACE:include/network-observation/transports/dbus>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/network_observation>
 )
 target_link_libraries(network_observation_client
     PUBLIC
@@ -17,4 +17,16 @@ target_link_libraries(network_observation_client
         DBusCxx::DBusCxx
         SigCxx::SigCxx
         glog
+)
+
+install(
+    TARGETS network_observation_client
+    EXPORT  rmc_fabricTargets
+    ARCHIVE COMPONENT dev
+)
+
+install(
+    FILES   ${CMAKE_CURRENT_SOURCE_DIR}/DbusClient.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/network_observation
+    COMPONENT   dev
 )
