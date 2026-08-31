@@ -73,6 +73,8 @@ Both services inherit `ServiceBase` which provides:
 - `stop()` — stops service-owned workers before transport teardown; idempotent.
 - Destructor — calls `stop()` to prevent dangling threads.
 - Readiness — published via the D-Bus `ReadyChanged` signal. Emitted at most once per `start()`/`stop()` cycle.
+- Health/issues — service-owned degradation is surfaced through service-specific issue queries rather than
+  by redefining readiness semantics.
 
 **Failed `start()`:** any transport or worker-thread creation failure rolls back already-started transports in reverse order exactly once, clears service-owned startup state, and leaves the service restartable.
 
@@ -100,9 +102,10 @@ See [ADR-0001](adr/ADR-0001-transport-neutral-contract-layer.md),
 ```
 cmake >= 3.25
 ninja
-libgoogle-glog-dev libgflags-dev libjsoncpp-dev nlohmann-json3-dev
+libgoogle-glog-dev libgflags-dev libjsoncpp-dev nlohmann-json3-dev libunwind-dev
 libsigc++-3.0-dev liblldpctl-dev
 # DBusCxx is required and may need to be built from source where no distro package exists.
+# network-observation also expects rsc_util and the LLDP C++ wrapper header (lldpctl.hpp).
 ```
 
 ### Using CMake presets
@@ -131,6 +134,16 @@ Additional opt-in presets:
 - `fuzz`
 - `release-package`
 - `benchmark`
+
+CTest labels:
+
+- `unit`
+- `architecture`
+- `integration`
+- `resilience`
+- `soak-short`
+- `package`
+- `fuzz-smoke`
 
 ### Manual configure
 
@@ -174,3 +187,6 @@ See also:
 - [testing](testing.md)
 - [performance baselines](performance.md)
 - [security boundaries](security.md)
+- [operations](operations.md)
+- [resilience](resilience.md)
+- [dependency policy](dependencies.md)

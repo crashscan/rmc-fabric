@@ -5,6 +5,8 @@ on:
     branches: [main, "copilot/**"]
   pull_request:
     branches: [main]
+  schedule:
+    - cron: "0 4 * * 1"
   workflow_dispatch:
 
 concurrency:
@@ -41,6 +43,7 @@ jobs:
           sudo apt-get install -y \
             cmake ninja-build pkg-config curl dbus dbus-user-session \
             libdbus-1-dev \
+            libunwind-dev \
             libgoogle-glog-dev libgflags-dev \
             libjsoncpp-dev \
             nlohmann-json3-dev \
@@ -104,6 +107,7 @@ jobs:
           sudo apt-get install -y \
             cmake ninja-build pkg-config curl dbus dbus-user-session \
             libdbus-1-dev \
+            libunwind-dev \
             libgoogle-glog-dev libgflags-dev \
             libjsoncpp-dev \
             nlohmann-json3-dev \
@@ -170,6 +174,7 @@ jobs:
           sudo apt-get install -y \
             cmake ninja-build pkg-config curl clang dbus dbus-user-session \
             libdbus-1-dev \
+            libunwind-dev \
             libgoogle-glog-dev libgflags-dev \
             libjsoncpp-dev \
             nlohmann-json3-dev \
@@ -233,6 +238,7 @@ jobs:
           sudo apt-get install -y \
             cmake ninja-build pkg-config curl dbus dbus-user-session \
             libdbus-1-dev \
+            libunwind-dev \
             libgoogle-glog-dev libgflags-dev \
             libjsoncpp-dev \
             nlohmann-json3-dev \
@@ -295,9 +301,8 @@ jobs:
       - name: Component boundary enforcement
         run: sh tools/check_component_boundaries.sh .
 
-  benchmark:
-    name: Benchmark build
-    if: github.event_name == 'workflow_dispatch'
+  resilience:
+    name: Resilience
     runs-on: ubuntu-22.04
     timeout-minutes: 30
 
@@ -315,6 +320,73 @@ jobs:
           sudo apt-get install -y \
             cmake ninja-build pkg-config curl dbus dbus-user-session \
             libdbus-1-dev \
+            libunwind-dev \
+            libgoogle-glog-dev libgflags-dev \
+            libjsoncpp-dev \
+            nlohmann-json3-dev \
+            "$SIGC_PKG" \
+            libgtest-dev \
+            liblldpctl-dev
+
+      - name: Build and install DBusCxx
+        run: |
+          set -euxo pipefail
+          curl -L https://github.com/dbus-cxx/dbus-cxx/archive/refs/tags/${DBUSCXX_VERSION}.tar.gz \
+            -o /tmp/dbus-cxx-${DBUSCXX_VERSION}.tar.gz
+          tar -C /tmp -xzf /tmp/dbus-cxx-${DBUSCXX_VERSION}.tar.gz
+          cmake -S /tmp/dbus-cxx-${DBUSCXX_VERSION} -B /tmp/dbus-cxx-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TOOLS=OFF \
+            -DENABLE_GLIB_SUPPORT=OFF \
+            -DENABLE_QT_SUPPORT=OFF \
+            -DENABLE_UV_SUPPORT=OFF
+          cmake --build /tmp/dbus-cxx-build
+          sudo cmake --install /tmp/dbus-cxx-build
+          sudo ldconfig
+
+      - name: Configure resilience
+        run: cmake --preset dev
+
+      - name: Build resilience
+        run: cmake --build --preset dev --target inventory_service_tests network_observation_service_tests service_soak_short_tests
+
+      - name: Run resilience tests
+        run: ctest --preset dev --tests-regex 'inventory_service_tests|network_observation_service_tests' -L resilience --output-on-failure --no-tests=error
+
+      - name: Run short soak
+        run: ctest --test-dir build/dev -L soak-short --output-on-failure --no-tests=error
+
+      - name: Upload resilience artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resilience-logs
+          path: |
+            build/dev/Testing/Temporary/**
+
+  benchmark:
+    name: Benchmark build
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          SIGC_PKG=libsigc++-3.0-dev
+          if ! apt-cache show "$SIGC_PKG" >/dev/null 2>&1; then
+            SIGC_PKG=libsigc++-2.0-dev
+          fi
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config curl dbus dbus-user-session \
+            libdbus-1-dev \
+            libunwind-dev \
             libgoogle-glog-dev libgflags-dev \
             libjsoncpp-dev \
             nlohmann-json3-dev \
@@ -354,3 +426,134 @@ jobs:
           name: benchmark-results
           path: |
             build/benchmark/benchmark-results.jsonl
+
+  soak-long:
+    name: Soak long
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          SIGC_PKG=libsigc++-3.0-dev
+          if ! apt-cache show "$SIGC_PKG" >/dev/null 2>&1; then
+            SIGC_PKG=libsigc++-2.0-dev
+          fi
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config curl dbus dbus-user-session \
+            libdbus-1-dev \
+            libunwind-dev \
+            libgoogle-glog-dev libgflags-dev \
+            libjsoncpp-dev \
+            nlohmann-json3-dev \
+            "$SIGC_PKG" \
+            libgtest-dev \
+            liblldpctl-dev
+
+      - name: Build and install DBusCxx
+        run: |
+          set -euxo pipefail
+          curl -L https://github.com/dbus-cxx/dbus-cxx/archive/refs/tags/${DBUSCXX_VERSION}.tar.gz \
+            -o /tmp/dbus-cxx-${DBUSCXX_VERSION}.tar.gz
+          tar -C /tmp -xzf /tmp/dbus-cxx-${DBUSCXX_VERSION}.tar.gz
+          cmake -S /tmp/dbus-cxx-${DBUSCXX_VERSION} -B /tmp/dbus-cxx-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TOOLS=OFF \
+            -DENABLE_GLIB_SUPPORT=OFF \
+            -DENABLE_QT_SUPPORT=OFF \
+            -DENABLE_UV_SUPPORT=OFF
+          cmake --build /tmp/dbus-cxx-build
+          sudo cmake --install /tmp/dbus-cxx-build
+          sudo ldconfig
+
+      - name: Configure soak-long
+        run: cmake --preset dev
+
+      - name: Build soak-long
+        run: cmake --build --preset dev --target service_soak_short_tests
+
+      - name: Run soak-long
+        env:
+          RMC_FABRIC_SOAK_CYCLES: 2000
+        run: ./build/dev/tests/service_soak_short_tests > build/dev/soak-long-results.jsonl
+
+      - name: Upload soak artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: soak-long-results
+          path: |
+            build/dev/soak-long-results.jsonl
+
+  fuzz-long:
+    name: Fuzz long
+    if: github.event_name == 'workflow_dispatch' || github.event_name == 'schedule'
+    runs-on: ubuntu-22.04
+    timeout-minutes: 45
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          set -euxo pipefail
+          sudo apt-get update -y
+          SIGC_PKG=libsigc++-3.0-dev
+          if ! apt-cache show "$SIGC_PKG" >/dev/null 2>&1; then
+            SIGC_PKG=libsigc++-2.0-dev
+          fi
+          sudo apt-get install -y \
+            cmake ninja-build pkg-config curl clang dbus dbus-user-session \
+            libdbus-1-dev \
+            libunwind-dev \
+            libgoogle-glog-dev libgflags-dev \
+            libjsoncpp-dev \
+            nlohmann-json3-dev \
+            "$SIGC_PKG" \
+            liblldpctl-dev
+
+      - name: Build and install DBusCxx
+        env:
+          CC: clang
+          CXX: clang++
+        run: |
+          set -euxo pipefail
+          curl -L https://github.com/dbus-cxx/dbus-cxx/archive/refs/tags/${DBUSCXX_VERSION}.tar.gz \
+            -o /tmp/dbus-cxx-${DBUSCXX_VERSION}.tar.gz
+          tar -C /tmp -xzf /tmp/dbus-cxx-${DBUSCXX_VERSION}.tar.gz
+          cmake -S /tmp/dbus-cxx-${DBUSCXX_VERSION} -B /tmp/dbus-cxx-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TOOLS=OFF \
+            -DENABLE_GLIB_SUPPORT=OFF \
+            -DENABLE_QT_SUPPORT=OFF \
+            -DENABLE_UV_SUPPORT=OFF
+          cmake --build /tmp/dbus-cxx-build
+          sudo cmake --install /tmp/dbus-cxx-build
+          sudo ldconfig
+
+      - name: Configure fuzz-long
+        run: cmake --preset fuzz
+
+      - name: Build fuzz-long
+        run: cmake --build --preset fuzz
+
+      - name: Run fuzz-long
+        run: |
+          ./build/fuzz/tests/fuzz/inventory_dbus_codec_fuzz -runs=5000 tests/fuzz/corpus/inventory
+          ./build/fuzz/tests/fuzz/network_observation_dbus_codec_fuzz -runs=5000 tests/fuzz/corpus/network-observation
+
+      - name: Upload fuzz artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-long-logs
+          path: |
+            build/fuzz/Testing/Temporary/**

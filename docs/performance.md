@@ -27,3 +27,7 @@ cmake --build --preset benchmark
 
 The output format is one JSON object per benchmark so CI or local tooling can archive
 and diff it without scraping human-oriented text.
+
+Phase 7 also adds a bounded short-soak report (`service_soak_short_tests`) for repeated
+service lifecycle cycles and file-descriptor growth. It is intended as a broad operability
+guardrail, not a machine-specific latency gate.

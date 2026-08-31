@@ -115,6 +115,20 @@ struct DbusClient::Impl
     std::shared_ptr<DBus::SignalProxy<void(std::string)>> sigInterfaceRemoved;
     std::shared_ptr<DBus::SignalProxy<void(std::string)>> sigCandidateRemoved;
     std::shared_ptr<DBus::SignalProxy<void(bool)>> sigReadyChanged;
+    void reset()
+    {
+        sigLocalStateChanged.reset();
+        sigInterfaceChanged.reset();
+        sigCandidateChanged.reset();
+        sigInterfaceRemoved.reset();
+        sigCandidateRemoved.reset();
+        sigReadyChanged.reset();
+        iface.reset();
+        proxy.reset();
+        connection.reset();
+        dispatcher.reset();
+        connected = false;
+    }
 };
 
 DbusClient::DbusClient(const std::string& busType)
@@ -128,6 +142,7 @@ DbusClient::~DbusClient() = default;
 interop_contract::ClientResult<void> DbusClient::tryConnect()
 {
     return invokeQuery<void>("DbusClient::tryConnect", [&] {
+        impl_->reset();
         impl_->dispatcher = DBus::StandaloneDispatcher::create();
         impl_->connection = impl_->dispatcher->create_connection(toBusType(impl_->busType));
         impl_->proxy = DBus::ObjectProxy::create(
@@ -232,6 +247,23 @@ DbusClient::tryGetCandidateByMac(const std::string& mac)
         });
 }
 
+interop_contract::ClientResult<contract::ObservationIssues> DbusClient::tryGetIssues()
+{
+    if (!impl_->iface) {
+        return interop_contract::ClientError{
+            interop_contract::ClientErrorCode::service_unavailable,
+            "network observation interface proxy is unavailable",
+        };
+    }
+
+    return invokeQuery<contract::ObservationIssues>("DbusClient::tryGetIssues", [&] {
+        auto method = impl_->iface->create_method<
+            std::map<std::string, std::map<std::string, DBus::Variant>>()>(
+                std::string(contract::METHOD_GET_ISSUES));
+        return NetworkObservationDbusCodec::decodeIssues((*method)());
+    });
+}
+
 interop_contract::ClientResult<bool> DbusClient::tryGetReady()
 {
     if (!impl_->iface) {
@@ -284,6 +316,12 @@ std::optional<contract::RemoteCandidate> DbusClient::getCandidateByMac(const std
 {
     const auto result = tryGetCandidateByMac(mac);
     return result ? result.value() : std::nullopt;
+}
+
+contract::ObservationIssues DbusClient::getIssues()
+{
+    const auto result = tryGetIssues();
+    return result ? result.value() : contract::ObservationIssues{};
 }
 
 bool DbusClient::getReady()

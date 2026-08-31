@@ -1,6 +1,7 @@
 #include "InventoryService.h"
 
 #include <InotifyFileWatcher.h>
+#include <OperationalDiagnostics.h>
 
 #include <InventoryIssueUtil.h>
 #include <IWatchableInventorySource.h>
@@ -144,7 +145,7 @@ bool InventoryService::initializeComponents()
         const int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
         refreshEventFd_.reset(fd);
         if (!refreshEventFd_) {
-            LOG(ERROR) << "InventoryService: failed to create refresh eventfd";
+            diagnostics::logError(name(), "worker.refresh", "create_eventfd", "worker_start_failed", "refresh-eventfd", "failed to create refresh eventfd");
             return false;
         }
     }
@@ -161,7 +162,7 @@ bool InventoryService::start()
     std::scoped_lock lock(lifecycleMutex_);
     if (ServiceBase::isRunning()) {
         if (loopFailed_.load(std::memory_order_acquire)) {
-            LOG(ERROR) << "InventoryService: loop thread is dead; call stop() before start()";
+            diagnostics::logError(name(), "worker.refresh", "start", "restart_requires_stop", "refresh-loop", "loop thread is dead; call stop() before start()");
             throw std::logic_error("InventoryService: restart after crash requires stop() first");
         }
         return true;
@@ -184,10 +185,10 @@ bool InventoryService::start()
                 runLoop(st);
             } catch (const std::exception& e) {
                 loopFailed_.store(true, std::memory_order_release);
-                LOG(ERROR) << "InventoryService: loop thread crashed: " << e.what();
+                diagnostics::logError(name(), "worker.refresh", "run_loop", "worker_loop_failed", "refresh-loop", e.what());
             } catch (...) {
                 loopFailed_.store(true, std::memory_order_release);
-                LOG(ERROR) << "InventoryService: loop thread crashed with unknown exception";
+                diagnostics::logError(name(), "worker.refresh", "run_loop", "worker_loop_failed", "refresh-loop", "unknown exception");
             }
             loopAlive_.store(false, std::memory_order_release);
         });
@@ -196,14 +197,14 @@ bool InventoryService::start()
         loopFailed_.store(false, std::memory_order_release);
         refreshEventFd_.reset();
         ServiceBase::stop();
-        LOG(ERROR) << "InventoryService: failed to start loop thread: " << e.what();
+        diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", e.what());
         return false;
     } catch (...) {
         loopAlive_.store(false, std::memory_order_release);
         loopFailed_.store(false, std::memory_order_release);
         refreshEventFd_.reset();
         ServiceBase::stop();
-        LOG(ERROR) << "InventoryService: failed to start loop thread";
+        diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", "unknown exception");
         return false;
     }
     return true;
@@ -384,10 +385,20 @@ void InventoryService::publishDiff(const InventoryDiff& diff,
 
         if (transitioned) {
             if (newState.health == SourceHealth::FAILED && newState.lastError) {
-                LOG(ERROR) << "Inventory source '" << sourceName << "' failed: " << *newState.lastError;
+                diagnostics::logError(name(),
+                                      "source." + diagnostics::sanitizeField(sourceName),
+                                      "refresh",
+                                      "source_failed",
+                                      sourceName,
+                                      *newState.lastError);
             } else if (oldIt != oldStates.end() && oldIt->second.health == SourceHealth::FAILED &&
                        newState.health == SourceHealth::OK) {
-                LOG(INFO) << "Inventory source '" << sourceName << "' recovered";
+                diagnostics::logInfo(name(),
+                                     "source." + diagnostics::sanitizeField(sourceName),
+                                     "refresh",
+                                     "source_recovered",
+                                     sourceName,
+                                     "source recovered");
             }
             for (const auto& transport : typedTransports) {
                 publishSourceStateChange(transport, sourceName);
@@ -424,11 +435,19 @@ void InventoryService::publishInventoryChange(const std::shared_ptr<IInventoryTr
     try {
         transport->publishInventoryChanged(fieldName);
     } catch (const std::exception& e) {
-        LOG(ERROR) << "InventoryService: publishInventoryChanged failed for transport "
-                   << transport->name() << " and field '" << fieldName << "': " << e.what();
+        diagnostics::logError(name(),
+                              "transport." + diagnostics::sanitizeField(transport->name()),
+                              "publish_inventory_changed",
+                              "transport_publish_failed",
+                              fieldName,
+                              e.what());
     } catch (...) {
-        LOG(ERROR) << "InventoryService: publishInventoryChanged failed for transport "
-                   << transport->name() << " and field '" << fieldName << "'";
+        diagnostics::logError(name(),
+                              "transport." + diagnostics::sanitizeField(transport->name()),
+                              "publish_inventory_changed",
+                              "transport_publish_failed",
+                              fieldName,
+                              "unknown exception");
     }
 }
 
@@ -438,11 +457,19 @@ void InventoryService::publishSourceStateChange(const std::shared_ptr<IInventory
     try {
         transport->publishSourceStateChanged(sourceName);
     } catch (const std::exception& e) {
-        LOG(ERROR) << "InventoryService: publishSourceStateChanged failed for transport "
-                   << transport->name() << " and source '" << sourceName << "': " << e.what();
+        diagnostics::logError(name(),
+                              "transport." + diagnostics::sanitizeField(transport->name()),
+                              "publish_source_state_changed",
+                              "transport_publish_failed",
+                              sourceName,
+                              e.what());
     } catch (...) {
-        LOG(ERROR) << "InventoryService: publishSourceStateChanged failed for transport "
-                   << transport->name() << " and source '" << sourceName << "'";
+        diagnostics::logError(name(),
+                              "transport." + diagnostics::sanitizeField(transport->name()),
+                              "publish_source_state_changed",
+                              "transport_publish_failed",
+                              sourceName,
+                              "unknown exception");
     }
 }
 

@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "project": "rmc-fabric",
+  "directDependencies": [
+    { "name": "cmake", "kind": "build", "minimumVersion": "3.25.0" },
+    { "name": "ninja-build", "kind": "build" },
+    { "name": "pkg-config", "kind": "build" },
+    { "name": "curl", "kind": "build" },
+    { "name": "DBusCxx", "kind": "build+runtime", "version": "2.6.2" },
+    { "name": "dbus", "kind": "runtime+test" },
+    { "name": "dbus-user-session", "kind": "test" },
+    { "name": "libdbus-1-dev", "kind": "build" },
+    { "name": "libunwind-dev", "kind": "build" },
+    { "name": "rsc_util", "kind": "build+runtime", "source": "external environment" },
+    { "name": "libgoogle-glog-dev", "kind": "build+runtime" },
+    { "name": "libgflags-dev", "kind": "build+runtime" },
+    { "name": "libjsoncpp-dev", "kind": "build+runtime" },
+    { "name": "nlohmann-json3-dev", "kind": "build+test" },
+    { "name": "libsigc++-3.0-dev", "kind": "build", "fallbackPackage": "libsigc++-2.0-dev" },
+    { "name": "libgtest-dev", "kind": "test" },
+    { "name": "liblldpctl-dev", "kind": "build+runtime" },
+    { "name": "lldpctl.hpp", "kind": "build", "source": "external environment" },
+    { "name": "clang", "kind": "fuzz+ci" },
+    { "name": "lcov", "kind": "coverage+ci" }
+  ]
+}

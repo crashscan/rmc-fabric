@@ -1,5 +1,6 @@
 #include "ServiceBase.h"
 #include "ITransport.h"
+#include "OperationalDiagnostics.h"
 
 #include <glog/logging.h>
 
@@ -49,11 +50,19 @@ void ServiceBase::setReady(bool ready)
         try {
             transport->publishReadyChanged(ready_);
         } catch (const std::exception& e) {
-            LOG(ERROR) << serviceName_ << ": publishReadyChanged(" << ready_
-                       << ") failed for transport " << transport->name() << ": " << e.what();
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(transport->name()),
+                                  "publish_ready_changed",
+                                  "transport_publish_failed",
+                                  transport->name(),
+                                  e.what());
         } catch (...) {
-            LOG(ERROR) << serviceName_ << ": publishReadyChanged(" << ready_
-                       << ") failed for transport " << transport->name() << ": unknown exception";
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(transport->name()),
+                                  "publish_ready_changed",
+                                  "transport_publish_failed",
+                                  transport->name(),
+                                  "unknown exception");
         }
     }
 }
@@ -61,59 +70,82 @@ void ServiceBase::setReady(bool ready)
 bool ServiceBase::start()
 {
     if (running_) {
-        LOG(WARNING) << serviceName_ << ": start() called while already running";
+        LOG(WARNING) << diagnostics::formatError(serviceName_,
+                                                 "service.lifecycle",
+                                                 "start",
+                                                 "already_running",
+                                                 serviceName_,
+                                                 "start() called while already running");
         return true;
     }
 
     try {
         validateConfiguration();
     } catch (const std::exception& e) {
-        LOG(ERROR) << serviceName_ << ": configuration validation failed: " << e.what();
+        diagnostics::logError(serviceName_, "service.configuration", "validate", "validation_failed", serviceName_, e.what());
         return false;
     }
 
     try {
         if (!initializeComponents()) {
-            LOG(ERROR) << serviceName_ << ": initializeComponents() failed";
+            diagnostics::logError(serviceName_, "service.lifecycle", "initialize_components", "initialization_failed", serviceName_, "initializeComponents() failed");
             return false;
         }
     } catch (const std::exception& e) {
-        LOG(ERROR) << serviceName_ << ": initializeComponents() threw: " << e.what();
+        diagnostics::logError(serviceName_, "service.lifecycle", "initialize_components", "initialization_failed", serviceName_, e.what());
         return false;
     } catch (...) {
-        LOG(ERROR) << serviceName_ << ": initializeComponents() threw an unknown exception";
+        diagnostics::logError(serviceName_, "service.lifecycle", "initialize_components", "initialization_failed", serviceName_, "unknown exception");
         return false;
     }
 
     // Start transports in registration order; roll back on failure.
     std::size_t started = 0;
     for (auto& transport : transports_) {
-        LOG(INFO) << serviceName_ << ": starting transport " << transport->name();
+        diagnostics::logInfo(serviceName_,
+                             "transport." + diagnostics::sanitizeField(transport->name()),
+                             "start",
+                             "transport_lifecycle",
+                             transport->name(),
+                             "starting transport");
         try {
             if (transport->start()) {
                 ++started;
                 continue;
             }
         } catch (const std::exception& e) {
-            LOG(ERROR) << serviceName_ << ": transport " << transport->name()
-                       << " threw during start(): " << e.what();
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(transport->name()),
+                                  "start",
+                                  "transport_start_failed",
+                                  transport->name(),
+                                  e.what());
             rollbackStartedTransports(started, transport.get());
             return false;
         } catch (...) {
-            LOG(ERROR) << serviceName_ << ": transport " << transport->name()
-                       << " threw during start(): unknown exception";
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(transport->name()),
+                                  "start",
+                                  "transport_start_failed",
+                                  transport->name(),
+                                  "unknown exception");
             rollbackStartedTransports(started, transport.get());
             return false;
         }
 
-        LOG(ERROR) << serviceName_ << ": transport " << transport->name() << " failed to start";
+        diagnostics::logError(serviceName_,
+                              "transport." + diagnostics::sanitizeField(transport->name()),
+                              "start",
+                              "transport_start_failed",
+                              transport->name(),
+                              "transport returned failure");
         rollbackStartedTransports(started, transport.get());
         return false;
     }
 
     running_ = true;
     ready_ = false;
-    LOG(INFO) << serviceName_ << ": started";
+    diagnostics::logInfo(serviceName_, "service.lifecycle", "start", "service_started", serviceName_, "started");
     return true;
 }
 
@@ -130,35 +162,61 @@ void ServiceBase::stop()
     stopAllTransports();
 
     running_ = false;
-    LOG(INFO) << serviceName_ << ": stopped";
+    diagnostics::logInfo(serviceName_, "service.lifecycle", "stop", "service_stopped", serviceName_, "stopped");
 }
 
 void ServiceBase::rollbackStartedTransports(std::size_t startedCount, IServiceTransport* currentTransport) noexcept
 {
     if (currentTransport) {
         try {
-            LOG(INFO) << serviceName_ << ": rolling back transport " << currentTransport->name();
+            diagnostics::logInfo(serviceName_,
+                                 "transport." + diagnostics::sanitizeField(currentTransport->name()),
+                                 "rollback_stop",
+                                 "transport_lifecycle",
+                                 currentTransport->name(),
+                                 "rolling back transport");
             currentTransport->stop();
         } catch (const std::exception& e) {
-            LOG(ERROR) << serviceName_ << ": rollback stop failed for transport "
-                       << currentTransport->name() << ": " << e.what();
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(currentTransport->name()),
+                                  "rollback_stop",
+                                  "transport_stop_failed",
+                                  currentTransport->name(),
+                                  e.what());
         } catch (...) {
-            LOG(ERROR) << serviceName_ << ": rollback stop failed for transport "
-                       << currentTransport->name() << ": unknown exception";
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(currentTransport->name()),
+                                  "rollback_stop",
+                                  "transport_stop_failed",
+                                  currentTransport->name(),
+                                  "unknown exception");
         }
     }
 
     for (std::size_t i = startedCount; i > 0; --i) {
         auto& transport = transports_[i - 1];
         try {
-            LOG(INFO) << serviceName_ << ": rolling back transport " << transport->name();
+            diagnostics::logInfo(serviceName_,
+                                 "transport." + diagnostics::sanitizeField(transport->name()),
+                                 "rollback_stop",
+                                 "transport_lifecycle",
+                                 transport->name(),
+                                 "rolling back transport");
             transport->stop();
         } catch (const std::exception& e) {
-            LOG(ERROR) << serviceName_ << ": rollback stop failed for transport "
-                       << transport->name() << ": " << e.what();
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(transport->name()),
+                                  "rollback_stop",
+                                  "transport_stop_failed",
+                                  transport->name(),
+                                  e.what());
         } catch (...) {
-            LOG(ERROR) << serviceName_ << ": rollback stop failed for transport "
-                       << transport->name() << ": unknown exception";
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(transport->name()),
+                                  "rollback_stop",
+                                  "transport_stop_failed",
+                                  transport->name(),
+                                  "unknown exception");
         }
     }
 }
@@ -167,14 +225,27 @@ void ServiceBase::stopAllTransports() noexcept
 {
     for (auto it = transports_.rbegin(); it != transports_.rend(); ++it) {
         try {
-            LOG(INFO) << serviceName_ << ": stopping transport " << (*it)->name();
+            diagnostics::logInfo(serviceName_,
+                                 "transport." + diagnostics::sanitizeField((*it)->name()),
+                                 "stop",
+                                 "transport_lifecycle",
+                                 (*it)->name(),
+                                 "stopping transport");
             (*it)->stop();
         } catch (const std::exception& e) {
-            LOG(ERROR) << serviceName_ << ": stop() failed for transport "
-                       << (*it)->name() << ": " << e.what();
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField((*it)->name()),
+                                  "stop",
+                                  "transport_stop_failed",
+                                  (*it)->name(),
+                                  e.what());
         } catch (...) {
-            LOG(ERROR) << serviceName_ << ": stop() failed for transport "
-                       << (*it)->name() << ": unknown exception";
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField((*it)->name()),
+                                  "stop",
+                                  "transport_stop_failed",
+                                  (*it)->name(),
+                                  "unknown exception");
         }
     }
 }

@@ -41,8 +41,22 @@
       "GetInterface",
       "GetRemoteCandidateMacs",
       "GetCandidateByMac",
+      "GetIssues",
       "GetReady",
       "GetPhase"
+    ],
+    "issueCodes": {
+      "runtimeStopped": "observation.runtime.stopped",
+      "agingLoopStopped": "observation.worker.aging.stopped",
+      "lldpUnavailable": "observation.input.lldp.unavailable"
+    },
+    "issueFields": [
+      "severity",
+      "message",
+      "component",
+      "operation",
+      "category",
+      "identity"
     ],
     "signals": [
       "LocalStateChanged",

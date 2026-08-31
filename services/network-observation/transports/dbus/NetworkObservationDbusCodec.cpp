@@ -220,6 +220,20 @@ toVariantMap(const contract::RemoteCandidate& c)
     return cand;
 }
 
+std::map<std::string, std::map<std::string, DBus::Variant>>
+encodeIssues(const contract::ObservationIssues& issues)
+{
+    std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
+    for (const auto& [issueCode, fields] : issues) {
+        std::map<std::string, DBus::Variant> encodedFields;
+        for (const auto& [name, value] : fields) {
+            encodedFields.emplace(name, DBus::Variant(value));
+        }
+        encoded.emplace(issueCode, std::move(encodedFields));
+    }
+    return encoded;
+}
+
 contract::LocalNetworkSnapshot
 fromVariantMapLocalSnapshot(const std::map<std::string, DBus::Variant>& m)
 {
@@ -284,6 +298,28 @@ fromVariantMapCandidate(const std::map<std::string, DBus::Variant>& m)
     c.ipv4           = requireStringSet(m, contract::K_IPV4);
     c.ipv6           = requireStringSet(m, contract::K_IPV6);
     return c;
+}
+
+contract::ObservationIssues
+decodeIssues(const std::map<std::string, std::map<std::string, DBus::Variant>>& issues)
+{
+    contract::ObservationIssues decoded;
+    for (const auto& [issueCode, fields] : issues) {
+        validateString(issueCode, "issue code");
+        contract::ObservationIssueFields decodedFields;
+        for (const auto& [name, value] : fields) {
+            validateKey(name);
+            if (value.type() != DBus::DataType::STRING) {
+                throw DecodeError(DecodeErrorCode::invalid_type,
+                                  "issue field '" + name + "' is not a string");
+            }
+            auto stringValue = value.to_string();
+            validateString(stringValue, name.c_str());
+            decodedFields.emplace(name, std::move(stringValue));
+        }
+        decoded.emplace(issueCode, std::move(decodedFields));
+    }
+    return decoded;
 }
 
 } // namespace RSCGroup::NetworkObservationDbusCodec

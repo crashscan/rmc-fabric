@@ -1,5 +1,6 @@
 #pragma once
 
+#include <map>
 #include <optional>
 #include <set>
 #include <string>
@@ -60,5 +61,8 @@ struct RemoteCandidate {
     std::set<std::string> ipv4;
     std::set<std::string> ipv6;
 };
+
+using ObservationIssueFields = std::map<std::string, std::string>;
+using ObservationIssues = std::map<std::string, ObservationIssueFields>;
 
 } // namespace interop_contract::network_observation

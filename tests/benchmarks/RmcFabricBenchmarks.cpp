@@ -65,6 +65,7 @@ public:
     bool start() override { running_ = true; return true; }
     void stop() override { running_ = false; }
     bool isRunning() const override { return running_; }
+    RSCGroup::ObservationRuntimeHealth health() const override { return {running_, true}; }
     RSCGroup::LocalNetworkSnapshot localSnapshot() const override { return {}; }
     std::vector<RSCGroup::RemoteCandidate> remoteCandidates() const override { return {}; }
     std::optional<RSCGroup::RemoteCandidate> findCandidateByMac(const std::string&) const override { return std::nullopt; }

@@ -5,7 +5,7 @@
 #include <network_observation/NetworkObservationEnumStrings.hpp>
 #include <gflags/gflags.h>
 #include <glog/logging.h>
-#include <json/writer.h>
+#include <jsoncpp/json/writer.h>
 #include <iostream>
 #include <string>
 #include <thread>

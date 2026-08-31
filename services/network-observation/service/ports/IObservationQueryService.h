@@ -17,6 +17,7 @@ public:
     [[nodiscard]] virtual std::optional<LocalInterfaceState> getInterface(const std::string& ifname) const = 0;
     [[nodiscard]] virtual std::vector<RemoteCandidate> remoteCandidates() const = 0;
     [[nodiscard]] virtual std::optional<RemoteCandidate> getCandidateByMac(const std::string& mac) const = 0;
+    [[nodiscard]] virtual interop_contract::network_observation::ObservationIssues getIssues() const = 0;
     [[nodiscard]] virtual bool isReady() const = 0;
 };
 

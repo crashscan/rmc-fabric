@@ -16,6 +16,7 @@ inline constexpr std::string_view METHOD_GET_LOCAL_SNAPSHOT          = "GetLocal
 inline constexpr std::string_view METHOD_GET_INTERFACE               = "GetInterface";
 inline constexpr std::string_view METHOD_GET_REMOTE_CANDIDATE_MACS   = "GetRemoteCandidateMacs";
 inline constexpr std::string_view METHOD_GET_CANDIDATE_BY_MAC        = "GetCandidateByMac";
+inline constexpr std::string_view METHOD_GET_ISSUES                  = "GetIssues";
 inline constexpr std::string_view METHOD_GET_READY                   = "GetReady";
 inline constexpr std::string_view METHOD_GET_PHASE                   = "GetPhase";
 
@@ -31,6 +32,23 @@ inline constexpr std::string_view SIGNAL_READY_CHANGED        = "ReadyChanged";
 inline constexpr std::string_view PHASE_INITIALIZING = "initializing";
 inline constexpr std::string_view PHASE_LIVE         = "live";
 inline constexpr std::string_view PHASE_STOPPED      = "stopped";
+
+// Issue keys (GetIssues inner maps)
+inline constexpr std::string_view ISSUE_SEVERITY  = "severity";
+inline constexpr std::string_view ISSUE_MESSAGE   = "message";
+inline constexpr std::string_view ISSUE_COMPONENT = "component";
+inline constexpr std::string_view ISSUE_OPERATION = "operation";
+inline constexpr std::string_view ISSUE_CATEGORY  = "category";
+inline constexpr std::string_view ISSUE_IDENTITY  = "identity";
+
+// Severity values
+inline constexpr std::string_view SEVERITY_ERROR   = "error";
+inline constexpr std::string_view SEVERITY_WARNING = "warning";
+
+// Stable issue codes
+inline constexpr std::string_view ISSUE_CODE_RUNTIME_STOPPED = "observation.runtime.stopped";
+inline constexpr std::string_view ISSUE_CODE_AGING_LOOP_STOPPED = "observation.worker.aging.stopped";
+inline constexpr std::string_view ISSUE_CODE_LLDP_UNAVAILABLE = "observation.input.lldp.unavailable";
 
 // Variant map field keys — local interface
 inline constexpr std::string_view K_IFINDEX   = "ifindex";

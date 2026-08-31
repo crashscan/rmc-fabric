@@ -40,8 +40,9 @@ bool waitFor(const std::function<bool()>& predicate,
 
 class FakeObservationRuntime final : public IObservationRuntime {
 public:
-    explicit FakeObservationRuntime(bool startResult = true)
+    explicit FakeObservationRuntime(bool startResult = true, bool lldpAvailable = true)
         : startResult_(startResult)
+        , lldpAvailable_(lldpAvailable)
     {
     }
 
@@ -73,6 +74,14 @@ public:
         return running_.load();
     }
 
+    ObservationRuntimeHealth health() const override
+    {
+        ObservationRuntimeHealth health;
+        health.running = running_.load();
+        health.lldpAvailable = lldpAvailable_.load();
+        return health;
+    }
+
     LocalNetworkSnapshot localSnapshot() const override
     {
         return {};
@@ -90,11 +99,16 @@ public:
 
     void age(std::chrono::steady_clock::time_point) override
     {
+        if (throwOnAge_.load()) {
+            throw std::runtime_error("age failed");
+        }
         std::unique_lock lock(mutex_);
         ageActive_ = true;
         ageEntered_ = true;
         ageEnteredCv_.notify_all();
-        releaseAgeCv_.wait(lock, [&] { return releaseAge_; });
+        if (blockInAge_) {
+            releaseAgeCv_.wait(lock, [&] { return releaseAge_; });
+        }
         ageActive_ = false;
     }
 
@@ -115,17 +129,28 @@ public:
     [[nodiscard]] int startCount() const { return startCount_.load(); }
     [[nodiscard]] int stopCount() const { return stopCount_.load(); }
     [[nodiscard]] bool stopSawActiveAge() const { return stopSawActiveAge_.load(); }
+    void setLldpAvailable(bool value) { lldpAvailable_.store(value); }
+    void setRunning(bool value) { running_.store(value); }
+    void setThrowOnAge(bool value) { throwOnAge_.store(value); }
+    void setBlockInAge(bool value)
+    {
+        std::scoped_lock lock(mutex_);
+        blockInAge_ = value;
+    }
 
 private:
     bool startResult_{true};
     IModelEventSink* sink_{nullptr};
     std::atomic<bool> running_{false};
+    std::atomic<bool> lldpAvailable_{true};
+    std::atomic<bool> throwOnAge_{false};
     std::atomic<int> startCount_{0};
     std::atomic<int> stopCount_{0};
     std::atomic<bool> stopSawActiveAge_{false};
     mutable std::mutex mutex_;
     bool ageActive_{false};
     bool ageEntered_{false};
+    bool blockInAge_{false};
     bool releaseAge_{false};
     std::condition_variable ageEnteredCv_;
     std::condition_variable releaseAgeCv_;
@@ -244,6 +269,7 @@ void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
 {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
+    runtimePtr->setBlockInAge(true);
     auto transport = std::make_shared<FakeObservationTransport>();
 
     ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(100));
@@ -319,6 +345,50 @@ void testPublishFailureDoesNotBlockLaterTransports()
     expect(observing->interfaceChangedCount() == 1, "later transport should still receive interface change");
     expect(observing->localStateChangedCount() == 1, "later transport should still receive local-state change");
     expect(observing->candidateChangedCount() == 1, "later transport should still receive candidate change");
+    expect(waitFor([&] {
+        return service.getIssues().contains("observation.transport.fake.publish.failed");
+    }), "transport publish failure should surface as an issue");
+    service.stop();
+}
+
+void testReadinessIsIndependentFromRuntimeIssuesAndIssuesResetOnRestart()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>(true, false);
+    auto runtimePtr = runtime.get();
+    auto transport = std::make_shared<FakeObservationTransport>();
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(1));
+    expect(service.start(), "service should start with degraded LLDP health");
+    expect(service.isReady(), "service readiness should remain true while runtime is degraded");
+    expect(waitFor([&] {
+        const auto issues = service.getIssues();
+        return issues.contains("observation.input.lldp.unavailable");
+    }), "lldp degradation should surface through issues");
+
+    service.stop();
+    expect(service.getIssues().empty(), "stop should clear runtime issues for restart");
+
+    runtimePtr->setLldpAvailable(true);
+    expect(service.start(), "service should restart after stop");
+    expect(waitFor([&] {
+        return service.getIssues().empty();
+    }), "issues should stay clear after recovery");
+    service.stop();
+}
+
+void testAgingLoopFailureSurfacesIssueWithoutClearingReadiness()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto runtimePtr = runtime.get();
+    runtimePtr->setThrowOnAge(true);
+    auto transport = std::make_shared<FakeObservationTransport>();
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(1));
+    expect(service.start(), "service should start before aging failure");
+    expect(waitFor([&] {
+        return service.getIssues().contains("observation.worker.aging.stopped");
+    }), "aging loop failure should surface through issues");
+    expect(service.isReady(), "aging loop failure should not silently clear readiness");
     service.stop();
 }
 
@@ -330,5 +400,7 @@ int main()
     testTransportFailurePreventsRuntimeStart();
     testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport();
     testPublishFailureDoesNotBlockLaterTransports();
+    testReadinessIsIndependentFromRuntimeIssuesAndIssuesResetOnRestart();
+    testAgingLoopFailureSurfacesIssueWithoutClearingReadiness();
     return EXIT_SUCCESS;
 }

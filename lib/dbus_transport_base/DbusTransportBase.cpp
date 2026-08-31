@@ -1,5 +1,6 @@
 #include "DbusTransportBase.h"
 #include "DbusServiceAdapter.h"
+#include <OperationalDiagnostics.h>
 
 #include <dbus-cxx.h>
 #include <glog/logging.h>
@@ -82,9 +83,12 @@ void DbusTransportBase::start()
         const auto nameResult = connection_->request_name(serviceName_);
         if (nameResult != DBus::RequestNameResponse::PrimaryOwner &&
             nameResult != DBus::RequestNameResponse::AlreadyOwner) {
-            LOG(ERROR) << "DbusTransportBase: failed to acquire bus name '"
-                       << serviceName_ << "' (result="
-                       << static_cast<std::uint32_t>(nameResult) << ")";
+            diagnostics::logError(serviceName_,
+                                  "transport.dbus",
+                                  "request_name",
+                                  "bus_name_unavailable",
+                                  serviceName_,
+                                  "request_name result=" + std::to_string(static_cast<std::uint32_t>(nameResult)));
             throw std::runtime_error("DbusTransportBase: bus name unavailable");
         }
 
@@ -96,25 +100,23 @@ void DbusTransportBase::start()
         onAdapterBound();
 
         running_.store(true, std::memory_order_release);
-        LOG(INFO) << "DbusTransportBase started: " << serviceName_;
+        diagnostics::logInfo(serviceName_, "transport.dbus", "start", "transport_started", serviceName_, "started");
     } catch (const std::exception& e) {
         running_.store(false, std::memory_order_release);
         try {
             adapter_->onTransportStopping();
         } catch (const std::exception& stopError) {
-            LOG(ERROR) << "DbusTransportBase: onTransportStopping failed after start error: "
-                       << stopError.what();
+            diagnostics::logError(serviceName_, "transport.dbus", "stop_adapter", "transport_stop_failed", serviceName_, stopError.what());
         } catch (...) {
-            LOG(ERROR) << "DbusTransportBase: onTransportStopping failed after start error";
+            diagnostics::logError(serviceName_, "transport.dbus", "stop_adapter", "transport_stop_failed", serviceName_, "unknown exception");
         }
         if (impl_->registered.load() && connection_) {
             try {
                 connection_->unregister_object(objectPath_);
             } catch (const std::exception& unregisterError) {
-                LOG(ERROR) << "DbusTransportBase: unregister_object failed during rollback: "
-                           << unregisterError.what();
+                diagnostics::logError(serviceName_, "transport.dbus", "unregister_object", "transport_stop_failed", objectPath_, unregisterError.what());
             } catch (...) {
-                LOG(ERROR) << "DbusTransportBase: unregister_object failed during rollback";
+                diagnostics::logError(serviceName_, "transport.dbus", "unregister_object", "transport_stop_failed", objectPath_, "unknown exception");
             }
             impl_->registered.store(false);
         }
@@ -123,7 +125,7 @@ void DbusTransportBase::start()
             connection_.reset();
             impl_->dispatcher.reset();
         }
-        LOG(ERROR) << "DbusTransportBase start failed: " << e.what();
+        diagnostics::logError(serviceName_, "transport.dbus", "start", "transport_start_failed", serviceName_, e.what());
         throw;
     }
 }
@@ -135,20 +137,18 @@ void DbusTransportBase::stop()
     try {
         adapter_->onTransportStopping();
     } catch (const std::exception& e) {
-        LOG(ERROR) << "DbusTransportBase: onTransportStopping failed for " << serviceName_
-                   << ": " << e.what();
+        diagnostics::logError(serviceName_, "transport.dbus", "stop_adapter", "transport_stop_failed", serviceName_, e.what());
     } catch (...) {
-        LOG(ERROR) << "DbusTransportBase: onTransportStopping failed for " << serviceName_;
+        diagnostics::logError(serviceName_, "transport.dbus", "stop_adapter", "transport_stop_failed", serviceName_, "unknown exception");
     }
 
     if (object_ && connection_ && impl_->registered.load()) {
         try {
             connection_->unregister_object(objectPath_);
         } catch (const std::exception& e) {
-            LOG(ERROR) << "DbusTransportBase: unregister_object failed for " << serviceName_
-                       << ": " << e.what();
+            diagnostics::logError(serviceName_, "transport.dbus", "unregister_object", "transport_stop_failed", objectPath_, e.what());
         } catch (...) {
-            LOG(ERROR) << "DbusTransportBase: unregister_object failed for " << serviceName_;
+            diagnostics::logError(serviceName_, "transport.dbus", "unregister_object", "transport_stop_failed", objectPath_, "unknown exception");
         }
         impl_->registered.store(false);
     }

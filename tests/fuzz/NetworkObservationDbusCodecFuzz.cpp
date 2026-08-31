@@ -2,7 +2,7 @@
 
 #include <NetworkObservationDbusCodec.h>
 
-#include <json/reader.h>
+#include <jsoncpp/json/reader.h>
 
 #include <cstddef>
 #include <cstdint>

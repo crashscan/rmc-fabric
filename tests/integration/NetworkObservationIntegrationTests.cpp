@@ -4,8 +4,8 @@
 #include <ObservationService.h>
 #include <DbusTransport.h>
 #include <dbus-cxx.h>
-#include <json/reader.h>
-#include <json/writer.h>
+#include <jsoncpp/json/reader.h>
+#include <jsoncpp/json/writer.h>
 
 #include <algorithm>
 #include <atomic>
@@ -424,6 +424,8 @@ void testObservationServiceRoundTrip()
     const auto phase = client.tryGetPhase();
     expect(phase.hasValue() && phase.value() == std::string(contract::PHASE_LIVE),
            "observation service should report live phase");
+    const auto issues = client.tryGetIssues();
+    expect(issues.hasValue(), "observation GetIssues should succeed");
 
     Json::Value ifaceCommand(Json::objectValue);
     ifaceCommand["type"] = "set_interface";
@@ -530,6 +532,56 @@ void testObservationServiceRoundTrip()
     }, std::chrono::seconds(5)), "observation client did not surface service_unavailable after shutdown");
 }
 
+void testObservationClientReconnectRequiresExplicitReconnect()
+{
+    TempDir sandbox;
+    PrivateBus bus(sandbox.path() + "/session-bus.sock");
+    int commandPipe[2];
+    expect(::pipe(commandPipe) == 0, "failed to create observation reconnect command pipe");
+    const std::string firstLogPath = sandbox.path() + "/network-observation-first.log";
+    ChildProcess firstChild = spawnObservationService(bus.address(), firstLogPath, commandPipe[0]);
+    ::setenv("DBUS_SESSION_BUS_ADDRESS", bus.address().c_str(), 1);
+
+    RSCGroup::DbusClient client("session");
+    expect(client.tryConnect().hasValue(), "observation reconnect client failed to connect");
+    expect(waitFor([&] {
+        const auto ready = client.tryGetReady();
+        return ready.hasValue() && ready.value();
+    }, std::chrono::seconds(10)), "first observation service did not become ready\n" + readFile(firstLogPath));
+
+    Json::Value shutdown(Json::objectValue);
+    shutdown["type"] = "shutdown";
+    sendCommand(commandPipe[1], shutdown);
+    ::close(commandPipe[1]);
+    const int firstStatus = firstChild.waitForExit();
+    expect(WIFEXITED(firstStatus), "first observation service should exit cleanly");
+
+    expect(waitFor([&] {
+        const auto result = client.tryGetLocalSnapshot();
+        return !result.hasValue() &&
+               result.error().code == interop_contract::ClientErrorCode::service_unavailable;
+    }, std::chrono::seconds(5)), "observation client should surface service_unavailable before reconnect");
+
+    int secondPipe[2];
+    expect(::pipe(secondPipe) == 0, "failed to create second observation reconnect command pipe");
+    const std::string secondLogPath = sandbox.path() + "/network-observation-second.log";
+    ChildProcess secondChild = spawnObservationService(bus.address(), secondLogPath, secondPipe[0]);
+
+    expect(client.tryConnect().hasValue(), "observation reconnect client failed to reconnect");
+    expect(waitFor([&] {
+        const auto readyAgain = client.tryGetReady();
+        return readyAgain.hasValue() && readyAgain.value();
+    }, std::chrono::seconds(10)), "second observation service did not become ready\n" + readFile(secondLogPath));
+
+    const auto issues = client.tryGetIssues();
+    expect(issues.hasValue(), "observation GetIssues should succeed after reconnect");
+
+    sendCommand(secondPipe[1], shutdown);
+    ::close(secondPipe[1]);
+    const int secondStatus = secondChild.waitForExit();
+    expect(WIFEXITED(secondStatus), "second observation service should exit cleanly");
+}
+
 void testObservationClientRejectsMalformedResponse()
 {
     TempDir sandbox;
@@ -564,6 +616,7 @@ int main()
 {
     try {
         testObservationServiceRoundTrip();
+        testObservationClientReconnectRequiresExplicitReconnect();
         testObservationClientRejectsMalformedResponse();
         return EXIT_SUCCESS;
     } catch (const std::exception& e) {
