@@ -4,12 +4,15 @@
 #include <ClientResult.hpp>
 #include <inventory.hpp>
 
+#include <chrono>
 #include <csignal>
+#include <cstdio>
 #include <cstdint>
 #include <filesystem>
 #include <iostream>
 #include <mutex>
 #include <string>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <vector>

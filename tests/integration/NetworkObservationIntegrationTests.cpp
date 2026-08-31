@@ -9,14 +9,17 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <filesystem>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <sys/wait.h>
 #include <thread>
 #include <unistd.h>
 #include <unordered_map>
@@ -279,13 +282,14 @@ ChildProcess spawnObservationService(const std::string& busAddress,
         std::fclose(log);
 
         auto runtime = std::make_unique<PipeControlledRuntime>(readFd);
+        auto* runtimePtr = runtime.get();
         auto transport = std::make_shared<RSCGroup::DbusTransport>("session");
         RSCGroup::ObservationService service(std::move(runtime), transport, std::chrono::hours(1));
         if (!service.start()) {
             _exit(2);
         }
 
-        while (::kill(getppid(), 0) == 0) {
+        while (::kill(getppid(), 0) == 0 && runtimePtr->isRunning()) {
             std::this_thread::sleep_for(std::chrono::milliseconds(50));
         }
         service.stop();

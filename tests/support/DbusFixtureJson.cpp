@@ -3,6 +3,7 @@
 #include <dbus-cxx/variant.h>
 #include <json/reader.h>
 
+#include <cstdint>
 #include <fstream>
 #include <stdexcept>
 #include <vector>

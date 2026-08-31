@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -132,7 +133,8 @@ void benchmarkInventoryCodec()
     snapshot.ready = true;
     snapshot.phase = "live";
     for (int index = 0; index < 32; ++index) {
-        snapshot.fields.emplace("field" + std::to_string(index), std::string("value-" + std::to_string(index)));
+        snapshot.fields.emplace("field" + std::to_string(index),
+                                std::string("value-") + std::to_string(index));
     }
     const auto encoded = RSCGroup::InventoryDbusCodec::encodeSnapshot(snapshot);
 

@@ -1,13 +1,10 @@
 #pragma once
 
+#include <dbus-cxx/variant.h>
 #include <json/value.h>
 
 #include <map>
 #include <string>
-
-namespace DBus {
-class Variant;
-}
 
 namespace test_support {
 

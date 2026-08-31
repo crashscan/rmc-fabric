@@ -1,6 +1,7 @@
 #include "IntegrationSupport.h"
 
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>

@@ -13,10 +13,14 @@
 
 #include <dbus-cxx/variant.h>
 
+#include <cstdint>
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <map>
 #include <string>
+#include <variant>
+#include <vector>
 
 namespace {
 
