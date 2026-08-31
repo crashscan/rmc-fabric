@@ -8,7 +8,7 @@ namespace RSCGroup {
 
 class IInventoryQueryService;
 
-class StdoutInventoryTransport final : public ITransport {
+class StdoutInventoryTransport final : public IInventoryTransport {
 public:
     void bindQueryService(IInventoryQueryService& queryService) override;
     void start() override;

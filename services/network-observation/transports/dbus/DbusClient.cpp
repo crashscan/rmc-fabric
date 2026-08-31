@@ -2,9 +2,9 @@
 // Created by vvass on 21-Jul-26.
 //
 #include "DbusClient.h"
+#include "NetworkObservationDbusCodec.h"
 
 #include <interop_contract/network_observation/NetworkObservationContracts.hpp>
-#include <interop_contract/network_observation/NetworkObservationVariantMaps.hpp>
 
 #include <dbus-cxx.h>
 #include <glog/logging.h>
@@ -78,7 +78,8 @@ contract::LocalNetworkSnapshot DbusClient::getLocalSnapshot()
         auto raw = (*method)();
         for (const auto& [name, v] : raw) {
             auto varCopy = v;
-            snap.interfaces[name] = fromVariantMapIface(varCopy.to_map<std::string, DBus::Variant>());
+            snap.interfaces[name] = NetworkObservationDbusCodec::fromVariantMapIface(
+                varCopy.to_map<std::string, DBus::Variant>());
         }
     } catch (const std::exception& e) {
         LOG(ERROR) << "getLocalSnapshot failed: " << e.what();
@@ -94,7 +95,7 @@ std::optional<contract::LocalInterfaceState> DbusClient::getInterface(const std:
             std::map<std::string, DBus::Variant>(std::string)>(std::string(METHOD_GET_INTERFACE));
         auto raw = (*method)(ifname);
         if (raw.empty()) return std::nullopt;
-        return fromVariantMapIface(raw);
+        return NetworkObservationDbusCodec::fromVariantMapIface(raw);
     } catch (const std::exception& e) {
         LOG(ERROR) << "getInterface failed: " << e.what();
         return std::nullopt;
@@ -124,7 +125,7 @@ std::optional<contract::RemoteCandidate> DbusClient::getCandidateByMac(const std
             std::map<std::string, DBus::Variant>(std::string)>(std::string(METHOD_GET_CANDIDATE_BY_MAC));
         auto raw = (*method)(mac);
         if (raw.empty()) return std::nullopt;
-        return fromVariantMapCandidate(raw);
+        return NetworkObservationDbusCodec::fromVariantMapCandidate(raw);
     } catch (const std::exception& e) {
         LOG(ERROR) << "getCandidateByMac failed: " << e.what();
         return std::nullopt;

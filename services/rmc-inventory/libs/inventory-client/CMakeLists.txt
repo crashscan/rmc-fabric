@@ -2,36 +2,18 @@ add_library(inventory-client STATIC
         src/InventoryClient.cpp
 )
 
+target_compile_features(inventory-client PUBLIC cxx_std_20)
+
 target_include_directories(inventory-client PUBLIC
-        ${DBusCxx_INCLUDE_DIRS}
-        ${SigCxx_INCLUDE_DIRS}
-        include
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+        $<INSTALL_INTERFACE:include/rmc-inventory/inventory-client>
 )
 
-if(BUILD_TESTING)
-    add_executable(inventory_dbus_codec_characterization_tests
-        tests/InventoryDbusCodecCharacterizationTests.cpp
-    )
-
-    target_include_directories(inventory_dbus_codec_characterization_tests PRIVATE
-        ${DBusCxx_INCLUDE_DIRS}
-        ${SigCxx_INCLUDE_DIRS}
-        include
-    )
-
-    target_link_libraries(inventory_dbus_codec_characterization_tests
-        PRIVATE DBusCxx::DBusCxx
-                interop_contract
-                inventory_transport
-    )
-
-    add_test(
-        NAME inventory_dbus_codec_characterization_tests
-        COMMAND inventory_dbus_codec_characterization_tests
-    )
-endif()
-
 target_link_libraries(inventory-client
-    PUBLIC interop_contract
-           inventory_transport
+    PUBLIC
+        interop_contract
+        inventory_dbus_codec
+    PRIVATE
+        DBusCxx::DBusCxx
+        SigCxx::SigCxx
 )

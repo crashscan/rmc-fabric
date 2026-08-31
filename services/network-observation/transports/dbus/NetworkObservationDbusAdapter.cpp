@@ -1,10 +1,9 @@
 #include "NetworkObservationDbusAdapter.h"
+#include "NetworkObservationDbusCodec.h"
 
 #include "IObservationQueryService.h"
 #include "LocalStateTypes.h"
 #include "CandidateTypes.h"
-
-#include <interop_contract/network_observation/NetworkObservationVariantMaps.hpp>
 
 #include <dbus-cxx.h>
 #include <glog/logging.h>
@@ -56,7 +55,7 @@ struct NetworkObservationHandler {
         if (auto guard = binding->acquire()) {
             auto snapshot = guard->localSnapshot();
             for (const auto& [name, iface] : snapshot.interfaces)
-                result[name] = DBus::Variant(contract::toVariantMap(iface));
+                result[name] = DBus::Variant(NetworkObservationDbusCodec::toVariantMap(iface));
         }
         return result;
     }
@@ -65,7 +64,7 @@ struct NetworkObservationHandler {
     {
         if (auto guard = binding->acquire()) {
             auto iface = guard->getInterface(ifname);
-            if (iface) return contract::toVariantMap(*iface);
+            if (iface) return NetworkObservationDbusCodec::toVariantMap(*iface);
         }
         return {};
     }
@@ -84,7 +83,7 @@ struct NetworkObservationHandler {
     {
         if (auto guard = binding->acquire()) {
             auto c = guard->getCandidateByMac(mac);
-            if (c) return contract::toVariantMap(toWireCandidate(*c));
+            if (c) return NetworkObservationDbusCodec::toVariantMap(toWireCandidate(*c));
         }
         return {};
     }
