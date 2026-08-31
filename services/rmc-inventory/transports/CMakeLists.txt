@@ -9,6 +9,12 @@ if(INVENTORY_ENABLE_STDOUT_TRANSPORT)
     add_compile_definitions(INVENTORY_ENABLE_STDOUT_TRANSPORT)
 endif()
 
+install(
+    TARGETS inventory_dbus_codec
+    EXPORT  rmc_fabricTargets
+    ARCHIVE COMPONENT dev
+)
+
 add_library(inventory_transport STATIC ${TRANSPORT_SOURCES})
 add_library(inventory_dbus_codec STATIC InventoryDbusCodec.cpp)
 
@@ -68,8 +74,3 @@ if(BUILD_TESTING)
     )
     set_tests_properties(inventory_dbus_codec_characterization_tests PROPERTIES TIMEOUT 10 LABELS "unit")
 endif()
-install(
-    TARGETS inventory_dbus_codec
-    EXPORT  rmc_fabricTargets
-    ARCHIVE COMPONENT dev
-)

@@ -23,6 +23,14 @@ Runtime dependency shape:
 - `apps -> service + selected concrete inputs/transports`
 - `clients -> contract + client-side codec/support`
 
+## Consistency policy
+
+`network-observation` deliberately follows the same top-level layer pattern as
+`rmc-inventory`, but keeps a more detailed internal split because its domain is
+broader. That difference is intentional. By contrast, packaging/export drift,
+orphan artifacts, and inconsistent lifecycle mutation rules are treated as
+debt, not as service-specific design freedom.
+
 ## Architecture
 
 ```

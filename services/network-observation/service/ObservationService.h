@@ -31,6 +31,8 @@ public:
     [[nodiscard]] bool start() override;
     void stop() override;
 
+    void addTransport(std::shared_ptr<IObservationTransport> transport);
+
     void onModelEvent(const ModelEvent& event) override;
 
     [[nodiscard]] LocalNetworkSnapshot localSnapshot() const override;
@@ -39,6 +41,7 @@ public:
     [[nodiscard]] std::optional<RemoteCandidate> getCandidateByMac(const std::string& mac) const override;
     [[nodiscard]] interop_contract::network_observation::ObservationIssues getIssues() const override;
     [[nodiscard]] bool isReady() const override { return ServiceBase::isReady(); }
+    [[nodiscard]] std::string getPhase() const override;
 
 private:
     void agingLoop(std::stop_token st);

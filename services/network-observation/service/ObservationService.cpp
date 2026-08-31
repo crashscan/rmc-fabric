@@ -53,6 +53,20 @@ ObservationService::~ObservationService()
     stop();
 }
 
+void ObservationService::addTransport(std::shared_ptr<IObservationTransport> transport)
+{
+    if (!transport) {
+        throw std::invalid_argument("ObservationService::addTransport: transport is null");
+    }
+
+    std::scoped_lock lock(lifecycleMutex_);
+    if (ServiceBase::isRunning()) {
+        throw std::runtime_error("ObservationService::addTransport: cannot add transports after start");
+    }
+
+    ServiceBase::addTransport(std::move(transport));
+}
+
 void ObservationService::validateConfiguration()
 {
 }
@@ -286,6 +300,15 @@ std::vector<RemoteCandidate> ObservationService::remoteCandidates() const
 std::optional<RemoteCandidate> ObservationService::getCandidateByMac(const std::string& mac) const
 {
     return runtime_->findCandidateByMac(mac);
+}
+
+std::string ObservationService::getPhase() const
+{
+    if (!ServiceBase::isRunning()) {
+        return std::string(contract::PHASE_STOPPED);
+    }
+    return ServiceBase::isReady() ? std::string(contract::PHASE_LIVE)
+                                  : std::string(contract::PHASE_INITIALIZING);
 }
 
 contract::ObservationIssues ObservationService::getIssues() const

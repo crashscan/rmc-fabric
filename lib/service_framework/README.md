@@ -22,3 +22,4 @@
 - `LifecycleManager` / `WorkerThread` remain lower-level primitives, not a second service lifecycle layer.
 - `ServiceTransportFactory` is not part of the adopted framework surface; services use local factories when transport construction needs domain-specific dependencies.
 - Service-specific health/event semantics stay service-owned unless multiple services truly share them.
+- `ServiceEventBus.h` currently exists only as an auxiliary utility header and is not part of the adopted service-framework surface or repository architecture contract.

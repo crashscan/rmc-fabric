@@ -87,6 +87,7 @@ if(BUILD_TESTING)
     add_test(NAME network_observation_dbus_codec_tests COMMAND network_observation_dbus_codec_tests)
     set_tests_properties(network_observation_dbus_codec_tests PROPERTIES TIMEOUT 10 LABELS "unit")
 endif()
+
 install(
     TARGETS network_observation_dbus_codec
     EXPORT  rmc_fabricTargets

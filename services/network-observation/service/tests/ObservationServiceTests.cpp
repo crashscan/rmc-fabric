@@ -273,10 +273,12 @@ void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
     auto transport = std::make_shared<FakeObservationTransport>();
 
     ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(100));
+    expect(service.getPhase() == "stopped", "phase should be stopped before start");
     expect(service.start(), "observation service should start");
     expect(runtimePtr->sink() != nullptr, "runtime should receive model event sink before start");
     expect(transport->startSawBound(), "transport should be bound before start");
     expect(transport->readyTrueCount() == 1, "ready=true should publish exactly once on start");
+    expect(service.getPhase() == "live", "phase should be live after ready start");
 
     service.stop();
     service.stop();
@@ -284,6 +286,7 @@ void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
     expect(runtimePtr->stopCount() == 1, "runtime stop must be idempotent via service stop");
     expect(transport->stopCount() == 1, "transport stop must be called exactly once");
     expect(transport->readyFalseCount() == 1, "ready=false should publish exactly once on stop");
+    expect(service.getPhase() == "stopped", "phase should be stopped after stop");
 }
 
 void testTransportFailurePreventsRuntimeStart()
@@ -351,6 +354,24 @@ void testPublishFailureDoesNotBlockLaterTransports()
     service.stop();
 }
 
+void testAddTransportAfterStartIsRejected()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto transport = std::make_shared<FakeObservationTransport>();
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(100));
+
+    expect(service.start(), "service should start before addTransport rejection");
+
+    bool threw = false;
+    try {
+        service.addTransport(std::make_shared<FakeObservationTransport>());
+    } catch (const std::runtime_error&) {
+        threw = true;
+    }
+    expect(threw, "addTransport after start should be rejected");
+    service.stop();
+}
+
 void testReadinessIsIndependentFromRuntimeIssuesAndIssuesResetOnRestart()
 {
     auto runtime = std::make_unique<FakeObservationRuntime>(true, false);
@@ -400,6 +421,7 @@ int main()
     testTransportFailurePreventsRuntimeStart();
     testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport();
     testPublishFailureDoesNotBlockLaterTransports();
+    testAddTransportAfterStartIsRejected();
     testReadinessIsIndependentFromRuntimeIssuesAndIssuesResetOnRestart();
     testAgingLoopFailureSurfacesIssueWithoutClearingReadiness();
     return EXIT_SUCCESS;

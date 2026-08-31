@@ -65,6 +65,13 @@ The repository is intended to keep closely related services and shared contracts
 - reusable infrastructure
 - tools and tests
 
+The two current services intentionally share the same broad layer shape
+(`core`, `service`, `inputs`, `transports`, `clients`, `apps`) while still
+allowing different internal decomposition where their domains genuinely differ.
+`network-observation` is expected to stay more decomposed internally because it
+owns a richer model/runtime/input stack; `rmc-inventory` may remain flatter
+until similar complexity appears.
+
 ### D-Bus as the integration boundary
 Services communicate over D-Bus using typed methods and signals.
 
@@ -83,6 +90,10 @@ They should avoid exposing:
 - internal model engine details
 - service-private implementation classes
 - tightly coupled internal state
+
+That means the project prefers a small deliberate public package surface and
+does not require every internal helper target to be installed or supported for
+external consumers.
 
 ### Service-oriented composition
 The repository is expected to support both:
