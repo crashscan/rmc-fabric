@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ITransport.h>
+#include <IInventoryTransport.h>
 
 #include <memory>
 #include <string>

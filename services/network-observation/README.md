@@ -1,5 +1,28 @@
 # Network Observation
 
+## Phase 3 layout
+
+```text
+network-observation/
+  core/                 domain model (`observation-model` target)
+  service/              `ObservationService`, `NetworkObservationAdapter`, internal ports
+    ports/
+  inputs/
+    netlink/
+    lldp/
+  transports/
+  clients/
+  apps/
+```
+
+Runtime dependency shape:
+
+- `inputs/* -> core`
+- `transports/* -> service/ports <- service`
+- `service -> core`
+- `apps -> service + selected concrete inputs/transports`
+- `clients -> contract + client-side codec/support`
+
 ## Architecture
 
 ```
@@ -154,7 +177,7 @@ NetlinkNetworkMonitor monitor(callbacks, watchedInterfaces);
 
 ## 2. Observation Model
 
-The `observation-model` library wraps the raw monitor and adds:
+The `core/` domain model is still built as the `observation-model` library and adds:
 
 - **Hard artifact filtering** — rejects multicast MACs, loopback, null MACs, IEEE reserved MACs
 - **Interface policy** — controls which interfaces contribute local state or remote candidates

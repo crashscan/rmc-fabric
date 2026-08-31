@@ -35,10 +35,11 @@ void StdoutInventoryTransport::bindQueryService(IInventoryQueryService& querySer
     query_ = &queryService;
 }
 
-void StdoutInventoryTransport::start()
+bool StdoutInventoryTransport::start()
 {
     running_.store(true, std::memory_order_release);
     std::cout << "[transport] StdoutInventoryTransport started" << std::endl;
+    return true;
 }
 
 void StdoutInventoryTransport::stop()
@@ -46,6 +47,11 @@ void StdoutInventoryTransport::stop()
     running_.store(false, std::memory_order_release);
     query_ = nullptr;
     std::cout << "[transport] StdoutInventoryTransport stopped" << std::endl;
+}
+
+std::string StdoutInventoryTransport::name() const
+{
+    return "stdout";
 }
 
 void StdoutInventoryTransport::publishInventoryChanged(const std::string& fieldPath)

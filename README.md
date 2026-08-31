@@ -26,20 +26,35 @@ Actual top-level structure:
 
 ```text
 services/
-  network-observation/      — network topology observation service
-  rmc-inventory/            — device inventory service
+  network-observation/
+    core/                   — pure observation model and domain types
+    service/                — runtime orchestration and query/transport ports
+      ports/
+    inputs/
+      netlink/              — Linux netlink ingestion
+      lldp/                 — LLDP ingestion
+    transports/             — service transports
+    clients/                — typed client adapters
+    apps/                   — thin composition roots
+  rmc-inventory/
+    core/                   — inventory manager, diffs, readiness semantics
+    service/                — service lifecycle and internal ports
+      ports/
+    inputs/
+      files/                — file-backed inventory sources
+    transports/             — service transports
+    clients/                — typed client adapters
+    apps/                   — thin composition roots
 
 lib/
   interop_contract/         — header-only wire types and contracts
   dbus_transport_base/      — reusable D-Bus service adapter base
   dbus_client_support/      — reusable D-Bus client helpers (header-only)
-  service_framework/        — service lifecycle, config, health, event bus
-  lifecycle_runner/         — Startable, StopToken, LifecycleManager, WorkerThread
+  service_framework/        — adopted lifecycle surface (`ServiceBase`, `IServiceTransport`, `DaemonRunner`)
+  lifecycle_runner/         — lower-level thread/lifecycle primitives
   daemon_support/           — signal handling for daemon processes
   file_watcher/             — inotify file watcher
 ```
-
-> Exact directory names may evolve as the project grows.
 
 ## Design Principles
 
@@ -158,14 +173,13 @@ uses a `std::shared_mutex`:
 - Deadlock risk is absent because service methods never call back into the
   transport layer.
 
-### Phase 2 (deferred)
+### Current service composition
 
-The following improvements are scoped to a later phase:
+- Each app directory builds only its local `main.cpp` and links service/component targets.
+- Service-local transport ports now extend `IServiceTransport`, and `ServiceBase` owns transport startup, rollback, stop ordering, and ready-state fan-out.
+- Inventory file-backed sources live under `services/rmc-inventory/inputs/files/` instead of `core/`.
+- `network-observation` keeps pure model code in `core/`, runtime orchestration in `service/`, Linux/LLDP ingestion in `inputs/`, and typed clients in `clients/`.
 
-- Extract `InventoryDbusCodec` to `lib/` so `inventory-client` no longer
-  depends on `inventory_transport` (layering violation).
-- Make `InventoryService` a proper static library target for unit-testability.
-- Reorganize network-observation transports into a CMake library target instead
-  of compiling sources directly into the daemon executable.
-- Rename `services/rmc-inventory/publishers/` → `transports/` for naming
-  consistency with `network-observation`.
+### Service framework notes
+
+See `lib/service_framework/README.md` for the supported framework surface and lifecycle ownership rules.

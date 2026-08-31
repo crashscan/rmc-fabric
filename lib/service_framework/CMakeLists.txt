@@ -2,12 +2,8 @@ add_library(service_framework STATIC
     ServiceBase.cpp
     GflagsConfig.cpp
     LoggingInitializer.cpp
-    ServiceTransportFactory.cpp
     ServiceHealthTracker.cpp
     DaemonRunner.cpp
-    # Header-only — listed for IDE visibility
-    QueryServiceConcept.h
-    ITypedTransport.h
 )
 
 target_include_directories(service_framework
@@ -23,3 +19,16 @@ target_link_libraries(service_framework
         glog
         gflags
 )
+
+if(BUILD_TESTING)
+    add_executable(service_framework_tests
+        tests/ServiceBaseTests.cpp
+    )
+    target_compile_features(service_framework_tests PRIVATE cxx_std_20)
+    target_link_libraries(service_framework_tests
+        PRIVATE
+            service_framework
+            pthread
+    )
+    add_test(NAME service_framework_tests COMMAND service_framework_tests)
+endif()
