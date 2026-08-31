@@ -14,7 +14,6 @@ target_link_libraries(network_observation_dbus_codec
     PUBLIC
         interop_contract
     PRIVATE
-        dbus_client_support
         DBusCxx::DBusCxx
 )
 
@@ -86,18 +85,10 @@ if(BUILD_TESTING)
             DBusCxx::DBusCxx
     )
     add_test(NAME network_observation_dbus_codec_tests COMMAND network_observation_dbus_codec_tests)
+    set_tests_properties(network_observation_dbus_codec_tests PROPERTIES TIMEOUT 10)
 endif()
-
 install(
     TARGETS network_observation_dbus_codec
     EXPORT  rmc_fabricTargets
     ARCHIVE COMPONENT dev
 )
-
-install(
-    FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/dbus/NetworkObservationDbusCodec.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/network_observation
-    COMPONENT   dev
-)
-

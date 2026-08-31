@@ -40,4 +40,5 @@ if(BUILD_TESTING)
             pthread
     )
     add_test(NAME network_observation_service_tests COMMAND network_observation_service_tests)
+    set_tests_properties(network_observation_service_tests PROPERTIES TIMEOUT 15)
 endif()

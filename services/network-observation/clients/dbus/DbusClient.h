@@ -6,7 +6,8 @@
  * @brief Client-side typed D-Bus proxy for network-observationd.
  */
 #pragma once
-#include <interop_contract/network_observation/NetworkObservationTypes.hpp>
+#include <ClientResult.hpp>
+#include <network_observation/NetworkObservationTypes.hpp>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -29,9 +30,17 @@ public:
     DbusClient(const DbusClient&) = delete;
     DbusClient& operator=(const DbusClient&) = delete;
 
+    [[nodiscard]] interop_contract::ClientResult<void> tryConnect();
     [[nodiscard]] bool connect();
 
     // --- Typed query methods ---
+    [[nodiscard]] interop_contract::ClientResult<contract::LocalNetworkSnapshot> tryGetLocalSnapshot();
+    [[nodiscard]] interop_contract::ClientResult<std::optional<contract::LocalInterfaceState>> tryGetInterface(const std::string& ifname);
+    [[nodiscard]] interop_contract::ClientResult<std::vector<std::string>> tryGetRemoteCandidateMacs();
+    [[nodiscard]] interop_contract::ClientResult<std::optional<contract::RemoteCandidate>> tryGetCandidateByMac(const std::string& mac);
+    [[nodiscard]] interop_contract::ClientResult<bool> tryGetReady();
+    [[nodiscard]] interop_contract::ClientResult<std::string> tryGetPhase();
+
     contract::LocalNetworkSnapshot getLocalSnapshot();
     std::optional<contract::LocalInterfaceState> getInterface(const std::string& ifname);
     std::vector<std::string> getRemoteCandidateMacs();

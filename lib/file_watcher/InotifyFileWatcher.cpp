@@ -11,8 +11,9 @@ namespace RSCGroup {
 
 InotifyFileWatcher::InotifyFileWatcher()
 {
-    inotifyFd_ = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
-    if (inotifyFd_ < 0) {
+    const int fd = ::inotify_init1(IN_NONBLOCK | IN_CLOEXEC);
+    inotifyFd_.reset(fd);
+    if (!inotifyFd_) {
         LOG(ERROR) << "InotifyFileWatcher: inotify_init1 failed, errno=" << errno;
     }
 }
@@ -20,11 +21,11 @@ InotifyFileWatcher::InotifyFileWatcher()
 InotifyFileWatcher::~InotifyFileWatcher()
 {
     std::scoped_lock lock(mutex_);
-    if (inotifyFd_ >= 0) {
+    if (inotifyFd_) {
         for (const auto& [wd, _] : watchDescToDir_) {
-            ::inotify_rm_watch(inotifyFd_, wd);
+            ::inotify_rm_watch(inotifyFd_.get(), wd);
         }
-        ::close(inotifyFd_);
+        inotifyFd_.reset();
     }
 }
 
@@ -38,11 +39,11 @@ std::string InotifyFileWatcher::normalizePath(const std::string& path)
 
 void InotifyFileWatcher::rearmDirectoryWatch(const std::string& dir)
 {
-    if (inotifyFd_ < 0 || dir.empty() || dirToWatchDesc_.contains(dir)) {
+    if (!inotifyFd_ || dir.empty() || dirToWatchDesc_.contains(dir)) {
         return;
     }
 
-    const int wd = ::inotify_add_watch(inotifyFd_, dir.c_str(), kWatchMask);
+    const int wd = ::inotify_add_watch(inotifyFd_.get(), dir.c_str(), kWatchMask);
     if (wd < 0) {
         LOG(WARNING) << "InotifyFileWatcher: re-arm failed for '" << dir
                      << "', errno=" << errno << " — reconcile covers it";
@@ -91,7 +92,7 @@ void InotifyFileWatcher::watchPath(const std::string& path)
 {
     std::scoped_lock lock(mutex_);
     const auto normalizedPath = normalizePath(path);
-    if (inotifyFd_ < 0 || normalizedPath.empty()) {
+    if (!inotifyFd_ || normalizedPath.empty()) {
         return;
     }
 
@@ -122,7 +123,7 @@ std::vector<std::string> InotifyFileWatcher::consumeChangedPaths()
     std::scoped_lock lock(mutex_);
 
     std::vector<std::string> changed;
-    if (inotifyFd_ < 0) {
+    if (!inotifyFd_) {
         return changed;
     }
 
@@ -130,7 +131,7 @@ std::vector<std::string> InotifyFileWatcher::consumeChangedPaths()
     alignas(struct inotify_event) char buf[4096];
 
     for (;;) {
-        const ssize_t len = ::read(inotifyFd_, buf, sizeof(buf));
+        const ssize_t len = ::read(inotifyFd_.get(), buf, sizeof(buf));
         if (len < 0) {
             if (errno == EINTR) {
                 continue;

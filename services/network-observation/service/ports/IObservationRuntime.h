@@ -1,7 +1,6 @@
 #pragma once
 
 #include "CandidateTypes.h"
-#include "IModelEventSink.h"
 #include "IObservationQueryService.h"
 #include "LocalStateTypes.h"
 
@@ -15,6 +14,7 @@ namespace RSCGroup {
 
 class ICandidateClassifier;
 class IInterfacePolicy;
+class IModelEventSink;
 
 class IObservationRuntime {
 public:

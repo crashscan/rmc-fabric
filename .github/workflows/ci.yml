@@ -22,12 +22,31 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
-            cmake ninja-build \
-            libglog-dev libgflags-dev \
+            cmake ninja-build pkg-config curl \
+            libgoogle-glog-dev libgflags-dev \
             libjsoncpp-dev \
-            libdbus-cxx-dev libsigc++-2.0-dev \
+            nlohmann-json3-dev \
+            libsigc++-3.0-dev \
+            libgtest-dev \
             liblldpctl-dev \
             lcov
+
+      - name: Build and install DBusCxx
+        run: |
+          curl -L https://github.com/dbus-cxx/dbus-cxx/archive/refs/tags/2.6.2.tar.gz \
+            -o /tmp/dbus-cxx-2.6.2.tar.gz
+          tar -C /tmp -xzf /tmp/dbus-cxx-2.6.2.tar.gz
+          cmake -S /tmp/dbus-cxx-2.6.2 -B /tmp/dbus-cxx-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TOOLS=OFF \
+            -DENABLE_GLIB_SUPPORT=OFF \
+            -DENABLE_QT_SUPPORT=OFF \
+            -DENABLE_UV_SUPPORT=OFF
+          cmake --build /tmp/dbus-cxx-build
+          sudo cmake --install /tmp/dbus-cxx-build
+          sudo ldconfig
 
       - name: Configure (${{ matrix.preset }})
         run: cmake --preset ${{ matrix.preset }}
@@ -49,11 +68,29 @@ jobs:
         run: |
           sudo apt-get update -y
           sudo apt-get install -y \
-            cmake ninja-build \
-            libglog-dev libgflags-dev \
+            cmake ninja-build pkg-config curl \
+            libgoogle-glog-dev libgflags-dev \
             libjsoncpp-dev \
-            libdbus-cxx-dev libsigc++-2.0-dev \
+            nlohmann-json3-dev \
+            libsigc++-3.0-dev \
             liblldpctl-dev
+
+      - name: Build and install DBusCxx
+        run: |
+          curl -L https://github.com/dbus-cxx/dbus-cxx/archive/refs/tags/2.6.2.tar.gz \
+            -o /tmp/dbus-cxx-2.6.2.tar.gz
+          tar -C /tmp -xzf /tmp/dbus-cxx-2.6.2.tar.gz
+          cmake -S /tmp/dbus-cxx-2.6.2 -B /tmp/dbus-cxx-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DENABLE_EXAMPLES=OFF \
+            -DENABLE_TOOLS=OFF \
+            -DENABLE_GLIB_SUPPORT=OFF \
+            -DENABLE_QT_SUPPORT=OFF \
+            -DENABLE_UV_SUPPORT=OFF
+          cmake --build /tmp/dbus-cxx-build
+          sudo cmake --install /tmp/dbus-cxx-build
+          sudo ldconfig
 
       - name: Configure (release)
         run: cmake --preset release

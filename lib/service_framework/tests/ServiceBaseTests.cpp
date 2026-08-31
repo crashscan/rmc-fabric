@@ -23,10 +23,16 @@ void expect(bool condition, const std::string& message)
 
 class RecordingTransport final : public IServiceTransport {
 public:
-    RecordingTransport(std::string name, std::vector<std::string>& events, bool startResult = true)
+    RecordingTransport(std::string name,
+                       std::vector<std::string>& events,
+                       bool startResult = true,
+                       bool throwOnReady = false,
+                       bool throwOnStop = false)
         : name_(std::move(name))
         , events_(events)
         , startResult_(startResult)
+        , throwOnReady_(throwOnReady)
+        , throwOnStop_(throwOnStop)
     {
     }
 
@@ -41,6 +47,9 @@ public:
     {
         events_.push_back(name_ + ".stop");
         ++stopCount_;
+        if (throwOnStop_) {
+            throw std::runtime_error(name_ + ".stop failure");
+        }
     }
 
     void publishReadyChanged(bool ready) override
@@ -48,6 +57,9 @@ public:
         events_.push_back(name_ + (ready ? ".ready.true" : ".ready.false"));
         readyTrueCount_ += ready ? 1 : 0;
         readyFalseCount_ += ready ? 0 : 1;
+        if (throwOnReady_) {
+            throw std::runtime_error(name_ + ".ready failure");
+        }
     }
 
     [[nodiscard]] std::string name() const override
@@ -64,6 +76,8 @@ private:
     std::string name_;
     std::vector<std::string>& events_;
     bool startResult_{true};
+    bool throwOnReady_{false};
+    bool throwOnStop_{false};
     std::atomic<int> startCount_{0};
     std::atomic<int> stopCount_{0};
     std::atomic<int> readyTrueCount_{0};
@@ -145,8 +159,44 @@ void testRollbackStopsStartedTransportsExactlyOnce()
     expect(first->startCount() == 1, "first transport should start once");
     expect(first->stopCount() == 1, "first transport should be rolled back exactly once");
     expect(second->startCount() == 1, "second transport should attempt start once");
-    expect(second->stopCount() == 0, "failing transport should not be stopped if start returned false");
+    expect(second->stopCount() == 1, "failing transport should be rolled back exactly once");
     expect(third->startCount() == 0, "later transports should not be started after failure");
+}
+
+void testReadyPublicationFailureDoesNotBlockLaterTransports()
+{
+    std::vector<std::string> events;
+    auto first = std::make_shared<RecordingTransport>("first", events, true, true);
+    auto second = std::make_shared<RecordingTransport>("second", events);
+
+    TestService service;
+    service.addTransport(first);
+    service.addTransport(second);
+
+    expect(service.start(), "ServiceBase should start successfully");
+    service.setReady(true);
+    service.stop();
+
+    expect(first->readyTrueCount() == 1, "first transport should still see ready=true once");
+    expect(second->readyTrueCount() == 1, "later transports must still see ready=true after earlier failure");
+    expect(second->readyFalseCount() == 1, "later transports must still see ready=false after earlier failure");
+}
+
+void testStopFailureDoesNotBlockRemainingTransports()
+{
+    std::vector<std::string> events;
+    auto first = std::make_shared<RecordingTransport>("first", events);
+    auto second = std::make_shared<RecordingTransport>("second", events, true, false, true);
+
+    TestService service;
+    service.addTransport(first);
+    service.addTransport(second);
+
+    expect(service.start(), "ServiceBase should start successfully");
+    service.stop();
+
+    expect(second->stopCount() == 1, "failing stop transport should be attempted once");
+    expect(first->stopCount() == 1, "later reverse-order stop should continue after earlier failure");
 }
 
 } // namespace
@@ -155,5 +205,7 @@ int main()
 {
     testStartStopOrderAndReadyTransitions();
     testRollbackStopsStartedTransportsExactlyOnce();
+    testReadyPublicationFailureDoesNotBlockLaterTransports();
+    testStopFailureDoesNotBlockRemainingTransports();
     return EXIT_SUCCESS;
 }

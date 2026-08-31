@@ -66,19 +66,19 @@ void DbusTransportBase::start()
 {
     if (running_.load()) return;
 
-    // If no external connection was provided, create one from busType_.
-    // For externally-managed connections (connection_-constructor), connection_ is
-    // always set at construction time and this branch is never taken.
-    if (!connection_) {
-        impl_->dispatcher = DBus::StandaloneDispatcher::create();
-        const auto busT = (busType_ == "session") ? DBus::BusType::SESSION
-                                                   : DBus::BusType::SYSTEM;
-        connection_ = impl_->dispatcher->create_connection(busT);
-    }
-
-    adapter_->onTransportStarting();
-
     try {
+        // If no external connection was provided, create one from busType_.
+        // For externally-managed connections (connection_-constructor), connection_ is
+        // always set at construction time and this branch is never taken.
+        if (!connection_) {
+            impl_->dispatcher = DBus::StandaloneDispatcher::create();
+            const auto busT = (busType_ == "session") ? DBus::BusType::SESSION
+                                                       : DBus::BusType::SYSTEM;
+            connection_ = impl_->dispatcher->create_connection(busT);
+        }
+
+        adapter_->onTransportStarting();
+
         const auto nameResult = connection_->request_name(serviceName_);
         if (nameResult != DBus::RequestNameResponse::PrimaryOwner &&
             nameResult != DBus::RequestNameResponse::AlreadyOwner) {
@@ -99,8 +99,23 @@ void DbusTransportBase::start()
         LOG(INFO) << "DbusTransportBase started: " << serviceName_;
     } catch (const std::exception& e) {
         running_.store(false, std::memory_order_release);
-        if (impl_->registered.load()) {
-            connection_->unregister_object(objectPath_);
+        try {
+            adapter_->onTransportStopping();
+        } catch (const std::exception& stopError) {
+            LOG(ERROR) << "DbusTransportBase: onTransportStopping failed after start error: "
+                       << stopError.what();
+        } catch (...) {
+            LOG(ERROR) << "DbusTransportBase: onTransportStopping failed after start error";
+        }
+        if (impl_->registered.load() && connection_) {
+            try {
+                connection_->unregister_object(objectPath_);
+            } catch (const std::exception& unregisterError) {
+                LOG(ERROR) << "DbusTransportBase: unregister_object failed during rollback: "
+                           << unregisterError.what();
+            } catch (...) {
+                LOG(ERROR) << "DbusTransportBase: unregister_object failed during rollback";
+            }
             impl_->registered.store(false);
         }
         object_.reset();
@@ -117,10 +132,24 @@ void DbusTransportBase::stop()
 {
     if (!running_.exchange(false, std::memory_order_acq_rel)) return;
 
-    adapter_->onTransportStopping();
+    try {
+        adapter_->onTransportStopping();
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "DbusTransportBase: onTransportStopping failed for " << serviceName_
+                   << ": " << e.what();
+    } catch (...) {
+        LOG(ERROR) << "DbusTransportBase: onTransportStopping failed for " << serviceName_;
+    }
 
     if (object_ && connection_ && impl_->registered.load()) {
-        connection_->unregister_object(objectPath_);
+        try {
+            connection_->unregister_object(objectPath_);
+        } catch (const std::exception& e) {
+            LOG(ERROR) << "DbusTransportBase: unregister_object failed for " << serviceName_
+                       << ": " << e.what();
+        } catch (...) {
+            LOG(ERROR) << "DbusTransportBase: unregister_object failed for " << serviceName_;
+        }
         impl_->registered.store(false);
     }
     object_.reset();

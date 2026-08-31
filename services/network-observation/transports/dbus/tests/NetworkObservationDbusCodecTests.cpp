@@ -1,8 +1,13 @@
 #include "NetworkObservationDbusCodec.h"
 
+#include <DecodeError.hpp>
+
 #include <cstdlib>
+#include <dbus-cxx/variant.h>
 #include <iostream>
+#include <map>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -79,11 +84,55 @@ void testRemoteCandidateRoundTrip()
     expect(out.ipv6 == in.ipv6, "candidate ipv6 round-trip mismatch");
 }
 
+void testLocalInterfaceRejectsMissingRequiredField()
+{
+    std::map<std::string, DBus::Variant> raw;
+    raw[std::string(contract::K_IFINDEX)] = DBus::Variant(int32_t{7});
+    raw[std::string(contract::K_MAC)] = DBus::Variant(std::string("aa:bb:cc:dd:ee:ff"));
+    raw[std::string(contract::K_ADMINUP)] = DBus::Variant(true);
+    raw[std::string(contract::K_RUNNING)] = DBus::Variant(true);
+    raw[std::string(contract::K_OPERSTATE)] = DBus::Variant(std::string("UP"));
+    raw[std::string(contract::K_IPV4)] = DBus::Variant(std::vector<DBus::Variant>{});
+    raw[std::string(contract::K_IPV6)] = DBus::Variant(std::vector<DBus::Variant>{});
+
+    bool threw = false;
+    try {
+        (void)codec::fromVariantMapIface(raw);
+    } catch (const interop_contract::DecodeError&) {
+        threw = true;
+    }
+    expect(threw, "fromVariantMapIface should reject missing ifname");
+}
+
+void testRemoteCandidateRejectsUnknownStatus()
+{
+    std::map<std::string, DBus::Variant> raw;
+    raw[std::string(contract::K_MAC)] = DBus::Variant(std::string("00:11:22:33:44:55"));
+    raw[std::string(contract::K_CLASSIFICATION)] = DBus::Variant(std::string("RemoteEndpoint"));
+    raw[std::string(contract::K_STATUS)] = DBus::Variant(std::string("Broken"));
+    raw[std::string(contract::K_SEEN_IN_FDB)] = DBus::Variant(true);
+    raw[std::string(contract::K_SEEN_IN_NEIGH)] = DBus::Variant(false);
+    raw[std::string(contract::K_SEEN_IN_LLDP)] = DBus::Variant(true);
+    raw[std::string(contract::K_NEIGHBOR_IFACES)] = DBus::Variant(std::vector<DBus::Variant>{});
+    raw[std::string(contract::K_IPV4)] = DBus::Variant(std::vector<DBus::Variant>{});
+    raw[std::string(contract::K_IPV6)] = DBus::Variant(std::vector<DBus::Variant>{});
+
+    bool threw = false;
+    try {
+        (void)codec::fromVariantMapCandidate(raw);
+    } catch (const interop_contract::DecodeError&) {
+        threw = true;
+    }
+    expect(threw, "fromVariantMapCandidate should reject unknown status");
+}
+
 } // namespace
 
 int main()
 {
     testLocalInterfaceRoundTrip();
     testRemoteCandidateRoundTrip();
+    testLocalInterfaceRejectsMissingRequiredField();
+    testRemoteCandidateRejectsUnknownStatus();
     return EXIT_SUCCESS;
 }

@@ -9,7 +9,10 @@ ServiceBase::ServiceBase(const std::string& serviceName)
     : serviceName_(serviceName)
 {}
 
-ServiceBase::~ServiceBase() = default;
+ServiceBase::~ServiceBase()
+{
+    stop();
+}
 
 std::string ServiceBase::name() const
 {
@@ -43,7 +46,15 @@ void ServiceBase::setReady(bool ready)
     }
     ready_ = ready;
     for (auto& transport : transports_) {
-        transport->publishReadyChanged(ready_);
+        try {
+            transport->publishReadyChanged(ready_);
+        } catch (const std::exception& e) {
+            LOG(ERROR) << serviceName_ << ": publishReadyChanged(" << ready_
+                       << ") failed for transport " << transport->name() << ": " << e.what();
+        } catch (...) {
+            LOG(ERROR) << serviceName_ << ": publishReadyChanged(" << ready_
+                       << ") failed for transport " << transport->name() << ": unknown exception";
+        }
     }
 }
 
@@ -61,9 +72,16 @@ bool ServiceBase::start()
         return false;
     }
 
-    if (!initializeComponents()) {
-        LOG(ERROR) << serviceName_ << ": initializeComponents() failed";
-        transports_.clear();
+    try {
+        if (!initializeComponents()) {
+            LOG(ERROR) << serviceName_ << ": initializeComponents() failed";
+            return false;
+        }
+    } catch (const std::exception& e) {
+        LOG(ERROR) << serviceName_ << ": initializeComponents() threw: " << e.what();
+        return false;
+    } catch (...) {
+        LOG(ERROR) << serviceName_ << ": initializeComponents() threw an unknown exception";
         return false;
     }
 
@@ -71,18 +89,30 @@ bool ServiceBase::start()
     std::size_t started = 0;
     for (auto& transport : transports_) {
         LOG(INFO) << serviceName_ << ": starting transport " << transport->name();
-        if (!transport->start()) {
-            LOG(ERROR) << serviceName_ << ": transport " << transport->name() << " failed to start";
-            // Roll back already-started transports in reverse order.
-            for (std::size_t i = started; i > 0; --i) {
-                transports_[i - 1]->stop();
+        try {
+            if (transport->start()) {
+                ++started;
+                continue;
             }
+        } catch (const std::exception& e) {
+            LOG(ERROR) << serviceName_ << ": transport " << transport->name()
+                       << " threw during start(): " << e.what();
+            rollbackStartedTransports(started, transport.get());
+            return false;
+        } catch (...) {
+            LOG(ERROR) << serviceName_ << ": transport " << transport->name()
+                       << " threw during start(): unknown exception";
+            rollbackStartedTransports(started, transport.get());
             return false;
         }
-        ++started;
+
+        LOG(ERROR) << serviceName_ << ": transport " << transport->name() << " failed to start";
+        rollbackStartedTransports(started, transport.get());
+        return false;
     }
 
     running_ = true;
+    ready_ = false;
     LOG(INFO) << serviceName_ << ": started";
     return true;
 }
@@ -97,14 +127,56 @@ void ServiceBase::stop()
         setReady(false);
     }
 
-    // Stop transports in reverse registration order.
-    for (auto it = transports_.rbegin(); it != transports_.rend(); ++it) {
-        LOG(INFO) << serviceName_ << ": stopping transport " << (*it)->name();
-        (*it)->stop();
-    }
+    stopAllTransports();
 
     running_ = false;
     LOG(INFO) << serviceName_ << ": stopped";
+}
+
+void ServiceBase::rollbackStartedTransports(std::size_t startedCount, IServiceTransport* currentTransport) noexcept
+{
+    if (currentTransport) {
+        try {
+            LOG(INFO) << serviceName_ << ": rolling back transport " << currentTransport->name();
+            currentTransport->stop();
+        } catch (const std::exception& e) {
+            LOG(ERROR) << serviceName_ << ": rollback stop failed for transport "
+                       << currentTransport->name() << ": " << e.what();
+        } catch (...) {
+            LOG(ERROR) << serviceName_ << ": rollback stop failed for transport "
+                       << currentTransport->name() << ": unknown exception";
+        }
+    }
+
+    for (std::size_t i = startedCount; i > 0; --i) {
+        auto& transport = transports_[i - 1];
+        try {
+            LOG(INFO) << serviceName_ << ": rolling back transport " << transport->name();
+            transport->stop();
+        } catch (const std::exception& e) {
+            LOG(ERROR) << serviceName_ << ": rollback stop failed for transport "
+                       << transport->name() << ": " << e.what();
+        } catch (...) {
+            LOG(ERROR) << serviceName_ << ": rollback stop failed for transport "
+                       << transport->name() << ": unknown exception";
+        }
+    }
+}
+
+void ServiceBase::stopAllTransports() noexcept
+{
+    for (auto it = transports_.rbegin(); it != transports_.rend(); ++it) {
+        try {
+            LOG(INFO) << serviceName_ << ": stopping transport " << (*it)->name();
+            (*it)->stop();
+        } catch (const std::exception& e) {
+            LOG(ERROR) << serviceName_ << ": stop() failed for transport "
+                       << (*it)->name() << ": " << e.what();
+        } catch (...) {
+            LOG(ERROR) << serviceName_ << ": stop() failed for transport "
+                       << (*it)->name() << ": unknown exception";
+        }
+    }
 }
 
 } // namespace RSCGroup

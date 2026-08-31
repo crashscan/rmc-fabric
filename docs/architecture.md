@@ -25,11 +25,9 @@ No public consumer should require internal service, input, server-transport, or 
 |------------------------------------|------------------------------------------------|----------------------------------------------|
 | `interop_contract`                 | `rmc_fabric::interop_contract`                 | `<cmake install prefix>/include/`            |
 | `inventory-client`                 | `rmc_fabric::inventory-client`                 | `include/rmc_fabric/inventory/`              |
-| `inventory_dbus_codec`             | `rmc_fabric::inventory_dbus_codec`             | `include/rmc_fabric/inventory/`              |
 | `network_observation_client`       | `rmc_fabric::network_observation_client`       | `include/rmc_fabric/network_observation/`    |
-| `network_observation_dbus_codec`   | `rmc_fabric::network_observation_dbus_codec`   | `include/rmc_fabric/network_observation/`    |
 
-All other targets (`inventory_service`, `inventory_transport`, `network_observation_service`, transports, inputs, apps) are internal and are **not** exported.
+All other targets (`inventory_service`, `inventory_transport`, D-Bus codecs/transports, `network_observation_service`, inputs, apps) are internal and are **not** exported.
 
 ## Internal target dependency graph (simplified)
 
@@ -71,21 +69,25 @@ All wire-level types, method names, signal names, and field key constants are in
 
 Both services inherit `ServiceBase` which provides:
 
-- `start()` — starts transports and worker threads; idempotent after a successful start.
-- `stop()` — stops all components in reverse order; idempotent.
+- `start()` — validates configuration, initializes service-owned state, starts transports, then starts service-owned workers.
+- `stop()` — stops service-owned workers before transport teardown; idempotent.
 - Destructor — calls `stop()` to prevent dangling threads.
 - Readiness — published via the D-Bus `ReadyChanged` signal. Emitted at most once per `start()`/`stop()` cycle.
 
-**Failed `start()`:** any transport or worker-thread creation failure rolls back already-started components and leaves the service in a clean state. A subsequent `start()` is allowed unless the service documents that restart is unsupported.
+**Failed `start()`:** any transport or worker-thread creation failure rolls back already-started transports in reverse order exactly once, clears service-owned startup state, and leaves the service restartable.
 
-**Shutdown ordering:** transports are stopped before worker threads. `ServiceBinding` ensures in-flight D-Bus handler calls complete before service pointers are cleared.
+**Shutdown ordering:** service-owned workers stop before state they access is destroyed. `ServiceBinding` is detached from D-Bus transports during transport shutdown, before service dependencies are destroyed. Cleanup failures are logged per step and do not stop later cleanup actions.
 
 ## Error/result policy (ADR-0001)
 
 - Adapter boundaries must not let `dbus-cxx` exceptions escape.
-- The contract layer (`lib/interop_contract/`) must not include transport-specific types.
-- Codec decode failures return empty/default values and log at `ERROR`.
-- "Service unavailable" returns empty/default values and logs at `WARNING`.
+- The contract layer (`lib/interop_contract/`) and installed public client headers must not expose transport-specific types.
+- Public client `try*` APIs return `interop_contract::ClientResult<T>` with stable codes:
+  `service_unavailable`, `timeout`, `transport_error`, `decode_error`, and `invalid_response`.
+- `ClientError.message` is diagnostic text only; callers must branch on `ClientErrorCode`.
+- Compatibility getters keep their legacy empty/default fallback behavior by delegating through the new `try*` APIs.
+- Transport publication fan-out is isolated per transport. Failures are logged with stable service/transport context and later transports still receive the event.
+- Codec ingress is bounded by `IngressLimits.hpp` and malformed required fields, wrong types, unknown enums, or oversized collections now raise neutral `DecodeError`s internally.
 
 See [ADR-0001](adr/ADR-0001-transport-neutral-contract-layer.md).
 
@@ -96,9 +98,9 @@ See [ADR-0001](adr/ADR-0001-transport-neutral-contract-layer.md).
 ```
 cmake >= 3.25
 ninja
-libglog-dev libgflags-dev libjsoncpp-dev
-libdbus-cxx-dev libsigc++-2.0-dev
-liblldpctl-dev
+libgoogle-glog-dev libgflags-dev libjsoncpp-dev nlohmann-json3-dev
+libsigc++-3.0-dev liblldpctl-dev
+# DBusCxx is required and may need to be built from source where no distro package exists.
 ```
 
 ### Using CMake presets
@@ -149,3 +151,11 @@ target_link_libraries(my_target PRIVATE rmc_fabric::inventory-client)
 ```
 
 The generated package config is installed to `<prefix>/lib/cmake/rmc_fabric/`.
+
+CTest now verifies both build-tree and install-tree package consumption by configuring three external projects against:
+
+- `rmc_fabric::interop_contract`
+- `rmc_fabric::inventory-client`
+- `rmc_fabric::network_observation_client`
+
+Those consumers intentionally fail if internal service or D-Bus transport targets are exported.

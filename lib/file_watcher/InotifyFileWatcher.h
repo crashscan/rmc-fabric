@@ -1,6 +1,7 @@
 #pragma once
 
 #include <IFileWatcher.h>
+#include <ScopedFd.h>
 
 #include <cstdint>
 #include <sys/inotify.h>
@@ -22,7 +23,7 @@ public:
     InotifyFileWatcher& operator=(const InotifyFileWatcher&) = delete;
 
     void watchPath(const std::string& path) override;
-    [[nodiscard]] int getPollFd() const override { return inotifyFd_; }
+    [[nodiscard]] int getPollFd() const override { return inotifyFd_.get(); }
     void maintain() override;
     [[nodiscard]] std::vector<std::string> consumeChangedPaths() override;
 
@@ -39,7 +40,7 @@ private:
         IN_MOVED_TO | IN_MOVED_FROM |
         IN_MOVE_SELF | IN_DELETE_SELF;
 
-    int inotifyFd_{-1};
+    ScopedFd inotifyFd_;
     std::map<int, std::string> watchDescToDir_;
     std::map<std::string, int> dirToWatchDesc_;
     std::set<std::string> watchedPaths_;

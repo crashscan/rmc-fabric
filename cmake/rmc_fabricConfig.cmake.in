@@ -1,11 +1,9 @@
 @PACKAGE_INIT@
 
+list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
 include(CMakeFindDependencyMacro)
-
-# DBusCxx and SigCxx are PUBLIC link dependencies of the client targets;
-# consumers that link those targets must have them available.
-find_dependency(DBusCxx REQUIRED)
-find_dependency(SigCxx  REQUIRED)
+find_dependency(SigCxx REQUIRED MODULE)
+find_dependency(DBusCxx REQUIRED MODULE)
 
 include("${CMAKE_CURRENT_LIST_DIR}/rmc_fabricTargets.cmake")
 

@@ -1,7 +1,7 @@
 #pragma once
 
-#include <interop_contract/network_observation/NetworkObservationContracts.hpp>
-#include <interop_contract/network_observation/NetworkObservationTypes.hpp>
+#include <network_observation/NetworkObservationContracts.hpp>
+#include <network_observation/NetworkObservationTypes.hpp>
 
 #include <map>
 #include <string>
@@ -17,6 +17,9 @@ toVariantMap(const interop_contract::network_observation::LocalInterfaceState& i
 
 [[nodiscard]] std::map<std::string, DBus::Variant>
 toVariantMap(const interop_contract::network_observation::RemoteCandidate& c);
+
+[[nodiscard]] interop_contract::network_observation::LocalNetworkSnapshot
+fromVariantMapLocalSnapshot(const std::map<std::string, DBus::Variant>& m);
 
 [[nodiscard]] interop_contract::network_observation::LocalInterfaceState
 fromVariantMapIface(const std::map<std::string, DBus::Variant>& m);

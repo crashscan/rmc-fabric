@@ -1,5 +1,6 @@
 #include "InventoryDbusCodec.h"
 #include <inventory.hpp>
+#include <DecodeError.hpp>
 
 #include <cstdlib>
 #include <iostream>
@@ -11,12 +12,11 @@
 
 namespace {
 
-using RSCGroup::FieldValue;
-using RSCGroup::InventoryFields;
 using RSCGroup::InventoryDbusCodec::decodeIssues;
 using RSCGroup::InventoryDbusCodec::encodeIssues;
 
-using Issues = std::map<std::string, InventoryFields>;
+using InventoryFields = interop_contract::inventory::InventoryFields;
+using Issues = interop_contract::inventory::InventoryIssues;
 
 void expect(bool condition, const std::string& message)
 {
@@ -137,11 +137,47 @@ void testEncodeDecodeIssuesRoundTripsContractShape()
            "unexpected decoded origin");
 }
 
+void testDecodeSnapshotRejectsMissingMetadata()
+{
+    std::map<std::string, DBus::Variant> raw;
+    raw[std::string(interop_contract::inventory::FIELD_TIMESTAMP)] = DBus::Variant(int64_t{9});
+    raw[std::string(interop_contract::inventory::FIELD_READY)] = DBus::Variant(true);
+    raw[std::string(interop_contract::inventory::FIELD_PHASE)] = DBus::Variant(std::string("live"));
+
+    bool threw = false;
+    try {
+        (void)RSCGroup::InventoryDbusCodec::decodeSnapshot(raw);
+    } catch (const interop_contract::DecodeError&) {
+        threw = true;
+    }
+    expect(threw, "decodeSnapshot should reject missing version metadata");
+}
+
+void testDecodeSourceStateRejectsUnknownHealth()
+{
+    std::map<std::string, DBus::Variant> raw;
+    raw[std::string(interop_contract::inventory::SOURCE_STATE_HEALTH)] = DBus::Variant(std::string("mystery"));
+    raw[std::string(interop_contract::inventory::SOURCE_STATE_REQUIRED)] = DBus::Variant(true);
+    raw[std::string(interop_contract::inventory::SOURCE_STATE_STALE)] = DBus::Variant(false);
+    raw[std::string(interop_contract::inventory::SOURCE_STATE_LAST_ATTEMPT_TS)] = DBus::Variant(int64_t{1});
+    raw[std::string(interop_contract::inventory::SOURCE_STATE_LAST_SUCCESS_TS)] = DBus::Variant(int64_t{1});
+
+    bool threw = false;
+    try {
+        (void)RSCGroup::InventoryDbusCodec::decodeSourceState(raw, "firmware");
+    } catch (const interop_contract::DecodeError&) {
+        threw = true;
+    }
+    expect(threw, "decodeSourceState should reject unknown health values");
+}
+
 } // namespace
 
 int main()
 {
     testEncodeIssuesPreservesDeterministicStructure();
     testEncodeDecodeIssuesRoundTripsContractShape();
+    testDecodeSnapshotRejectsMissingMetadata();
+    testDecodeSourceStateRejectsUnknownHealth();
     return EXIT_SUCCESS;
 }

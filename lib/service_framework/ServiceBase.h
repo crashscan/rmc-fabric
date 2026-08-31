@@ -127,6 +127,9 @@ public:
     [[nodiscard]] const std::vector<std::shared_ptr<IServiceTransport>>& transports() const;
 
 private:
+    void rollbackStartedTransports(std::size_t startedCount, IServiceTransport* currentTransport = nullptr) noexcept;
+    void stopAllTransports() noexcept;
+
     std::string serviceName_;
     std::vector<std::shared_ptr<IServiceTransport>> transports_;
     bool running_{false};

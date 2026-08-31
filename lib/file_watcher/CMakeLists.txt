@@ -9,5 +9,6 @@ target_include_directories(file_watcher
 
 target_link_libraries(file_watcher
     PRIVATE
+        linux_support
         glog
 )

@@ -12,7 +12,7 @@
  */
 #pragma once
 
-#include <interop_contract/network_observation/NetworkObservationTypes.hpp>
+#include <network_observation/NetworkObservationTypes.hpp>
 
 #include <chrono>
 #include <optional>

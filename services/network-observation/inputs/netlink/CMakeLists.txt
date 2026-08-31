@@ -9,11 +9,15 @@ target_include_directories(netlink-monitor PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 target_include_directories(netlink-monitor PRIVATE
-        ${RSC_UTIL_INCLUDE_DIR}
-        ${RSC_UTIL_INCLUDE_DIR}/rsc_util
         types
         utils
         parser
         state
 )
+if(RSC_UTIL_INCLUDE_DIR)
+    target_include_directories(netlink-monitor PRIVATE
+            ${RSC_UTIL_INCLUDE_DIR}
+            ${RSC_UTIL_INCLUDE_DIR}/rsc_util
+    )
+endif()
 target_link_libraries(netlink-monitor pthread glog rsc_util)

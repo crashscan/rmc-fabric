@@ -12,9 +12,9 @@
 #include <chrono>
 #include <cstdint>
 #include <poll.h>
+#include <system_error>
 #include <stdexcept>
 #include <sys/eventfd.h>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -72,6 +72,12 @@ void drainFd(int fd)
 std::unique_ptr<IFileWatcher> InventoryService::makeDefaultFileWatcher()
 {
     return std::make_unique<InotifyFileWatcher>();
+}
+
+InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
+                                   FileWatcherFactory fileWatcherFactory)
+    : InventoryService(std::move(manager), Settings{}, std::move(fileWatcherFactory))
+{
 }
 
 InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
@@ -134,9 +140,10 @@ void InventoryService::validateConfiguration()
 
 bool InventoryService::initializeComponents()
 {
-    if (refreshEventFd_ < 0) {
-        refreshEventFd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-        if (refreshEventFd_ < 0) {
+    if (!refreshEventFd_) {
+        const int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
+        refreshEventFd_.reset(fd);
+        if (!refreshEventFd_) {
             LOG(ERROR) << "InventoryService: failed to create refresh eventfd";
             return false;
         }
@@ -164,7 +171,7 @@ bool InventoryService::start()
     }
 
     if (!ServiceBase::start()) {
-        closeRefreshEventFd();
+        refreshEventFd_.reset();
         return false;
     }
 
@@ -184,12 +191,20 @@ bool InventoryService::start()
             }
             loopAlive_.store(false, std::memory_order_release);
         });
+    } catch (const std::exception& e) {
+        loopAlive_.store(false, std::memory_order_release);
+        loopFailed_.store(false, std::memory_order_release);
+        refreshEventFd_.reset();
+        ServiceBase::stop();
+        LOG(ERROR) << "InventoryService: failed to start loop thread: " << e.what();
+        return false;
     } catch (...) {
         loopAlive_.store(false, std::memory_order_release);
         loopFailed_.store(false, std::memory_order_release);
-        closeRefreshEventFd();
+        refreshEventFd_.reset();
         ServiceBase::stop();
-        throw;
+        LOG(ERROR) << "InventoryService: failed to start loop thread";
+        return false;
     }
     return true;
 }
@@ -200,12 +215,12 @@ void InventoryService::stop()
 
     if (loopThread_.joinable()) {
         loopThread_.request_stop();
-        signalFd(refreshEventFd_);
+        signalFd(refreshEventFd_.get());
         loopThread_.join();
     }
 
     loopFailed_.store(false, std::memory_order_release);
-    closeRefreshEventFd();
+    refreshEventFd_.reset();
     ServiceBase::stop();
 }
 
@@ -250,7 +265,7 @@ void InventoryService::refresh()
         std::scoped_lock lock(refreshMutex_);
         refreshRequested_ = true;
     }
-    signalFd(refreshEventFd_);
+    signalFd(refreshEventFd_.get());
 }
 
 void InventoryService::runLoop(std::stop_token stopToken)
@@ -271,7 +286,7 @@ void InventoryService::runLoop(std::stop_token stopToken)
 
         std::vector<pollfd> fds;
         fds.reserve(2);
-        fds.push_back({refreshEventFd_, POLLIN, 0});
+        fds.push_back({refreshEventFd_.get(), POLLIN, 0});
         fds.push_back({fileWatcher_->getPollFd(), POLLIN, 0});
 
         const int pr = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), msUntil(wakeTs));
@@ -279,15 +294,14 @@ void InventoryService::runLoop(std::stop_token stopToken)
             if (errno == EINTR) {
                 continue;
             }
-            LOG(ERROR) << "InventoryService: poll failed, errno=" << errno;
-            break;
+            throw std::system_error(errno, std::generic_category(), "InventoryService: poll failed");
         }
 
         bool sourceTriggered = false;
 
         if (pr > 0) {
             if ((fds[0].revents & POLLIN) != 0) {
-                drainFd(refreshEventFd_);
+                drainFd(refreshEventFd_.get());
             }
 
             if ((fds[1].revents & POLLIN) != 0) {
@@ -354,13 +368,13 @@ void InventoryService::publishDiff(const InventoryDiff& diff,
 
     for (const auto& field : diff.changedFields) {
         for (const auto& transport : typedTransports) {
-            transport->publishInventoryChanged(field);
+            publishInventoryChange(transport, field);
         }
     }
 
     for (const auto& field : diff.removedFields) {
         for (const auto& transport : typedTransports) {
-            transport->publishInventoryChanged(field);
+            publishInventoryChange(transport, field);
         }
     }
 
@@ -376,7 +390,7 @@ void InventoryService::publishDiff(const InventoryDiff& diff,
                 LOG(INFO) << "Inventory source '" << sourceName << "' recovered";
             }
             for (const auto& transport : typedTransports) {
-                transport->publishSourceStateChanged(sourceName);
+                publishSourceStateChange(transport, sourceName);
             }
         }
     }
@@ -404,11 +418,31 @@ interop_contract::inventory::InventoryIssues InventoryService::getIssues() const
     return issues;
 }
 
-void InventoryService::closeRefreshEventFd() noexcept
+void InventoryService::publishInventoryChange(const std::shared_ptr<IInventoryTransport>& transport,
+                                              const std::string& fieldName) const noexcept
 {
-    if (refreshEventFd_ >= 0) {
-        ::close(refreshEventFd_);
-        refreshEventFd_ = -1;
+    try {
+        transport->publishInventoryChanged(fieldName);
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "InventoryService: publishInventoryChanged failed for transport "
+                   << transport->name() << " and field '" << fieldName << "': " << e.what();
+    } catch (...) {
+        LOG(ERROR) << "InventoryService: publishInventoryChanged failed for transport "
+                   << transport->name() << " and field '" << fieldName << "'";
+    }
+}
+
+void InventoryService::publishSourceStateChange(const std::shared_ptr<IInventoryTransport>& transport,
+                                                const std::string& sourceName) const noexcept
+{
+    try {
+        transport->publishSourceStateChanged(sourceName);
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "InventoryService: publishSourceStateChanged failed for transport "
+                   << transport->name() << " and source '" << sourceName << "': " << e.what();
+    } catch (...) {
+        LOG(ERROR) << "InventoryService: publishSourceStateChanged failed for transport "
+                   << transport->name() << " and source '" << sourceName << "'";
     }
 }
 

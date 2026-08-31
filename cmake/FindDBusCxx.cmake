@@ -1,6 +1,9 @@
 find_package(PkgConfig QUIET)
 if(PkgConfig_FOUND)
     pkg_check_modules(PC_DBUSCXX QUIET dbus-cxx)
+    if(NOT PC_DBUSCXX_FOUND)
+        pkg_check_modules(PC_DBUSCXX QUIET dbus-cxx-2.0)
+    endif()
 endif()
 
 if(PC_DBUSCXX_FOUND)
@@ -36,13 +39,13 @@ find_package_handle_standard_args(DBusCxx
 
 if(DBusCxx_FOUND AND NOT TARGET DBusCxx::DBusCxx)
     if(PC_DBUSCXX_FOUND)
-        add_library(DBusCxx::DBusCxx INTERFACE IMPORTED)
+        add_library(DBusCxx::DBusCxx INTERFACE IMPORTED GLOBAL)
         set_target_properties(DBusCxx::DBusCxx PROPERTIES
                 INTERFACE_INCLUDE_DIRECTORIES "${DBusCxx_INCLUDE_DIRS}"
                 INTERFACE_LINK_LIBRARIES "${DBusCxx_LIBRARIES}"
         )
     else()
-        add_library(DBusCxx::DBusCxx UNKNOWN IMPORTED)
+        add_library(DBusCxx::DBusCxx UNKNOWN IMPORTED GLOBAL)
         set_target_properties(DBusCxx::DBusCxx PROPERTIES
                 IMPORTED_LOCATION "${DBusCxx_LIBRARY}"
                 INTERFACE_INCLUDE_DIRECTORIES "${DBusCxx_INCLUDE_DIR}"
