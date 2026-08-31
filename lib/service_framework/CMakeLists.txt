@@ -2,7 +2,6 @@ add_library(service_framework STATIC
     ServiceBase.cpp
     GflagsConfig.cpp
     LoggingInitializer.cpp
-    ServiceHealthTracker.cpp
     DaemonRunner.cpp
 )
 

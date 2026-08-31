@@ -8,6 +8,8 @@ add_library(dbus_transport_base STATIC
 target_include_directories(dbus_transport_base
     PUBLIC
         ${CMAKE_CURRENT_SOURCE_DIR}
+    PRIVATE
+        ${CMAKE_SOURCE_DIR}/lib/service_framework
 )
 
 target_link_libraries(dbus_transport_base

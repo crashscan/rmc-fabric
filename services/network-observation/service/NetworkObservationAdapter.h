@@ -30,6 +30,7 @@ public:
     [[nodiscard]] bool start() override;
     void stop() override;
     [[nodiscard]] bool isRunning() const override;
+    [[nodiscard]] ObservationRuntimeHealth health() const override;
 
     void setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy) override;
     void setEventSink(IModelEventSink* sink) override;

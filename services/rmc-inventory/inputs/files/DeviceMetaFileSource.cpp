@@ -1,7 +1,7 @@
 #include "DeviceMetaFileSource.h"
 
 #include <inventory.hpp>
-#include <json/reader.h>
+#include <jsoncpp/json/reader.h>
 
 #include <memory>
 #include <stdexcept>

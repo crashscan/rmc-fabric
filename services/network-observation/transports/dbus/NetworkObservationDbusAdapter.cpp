@@ -88,6 +88,14 @@ struct NetworkObservationHandler {
         return {};
     }
 
+    std::map<std::string, std::map<std::string, DBus::Variant>> GetIssues()
+    {
+        if (auto guard = binding->acquire()) {
+            return NetworkObservationDbusCodec::encodeIssues(guard->getIssues());
+        }
+        return {};
+    }
+
     bool GetReady()
     {
         if (auto guard = binding->acquire()) return guard->isReady();
@@ -163,6 +171,9 @@ void NetworkObservationDbusAdapter::bindMethods(const std::shared_ptr<DBus::Obje
     object->create_method<std::map<std::string, DBus::Variant>(std::string)>(
         interfaceName, std::string(contract::METHOD_GET_CANDIDATE_BY_MAC),
         sigc::mem_fun(h, &NetworkObservationHandler::GetCandidateByMac));
+    object->create_method<std::map<std::string, std::map<std::string, DBus::Variant>>()>(
+        interfaceName, std::string(contract::METHOD_GET_ISSUES),
+        sigc::mem_fun(h, &NetworkObservationHandler::GetIssues));
     object->create_method<bool()>(
         interfaceName, std::string(contract::METHOD_GET_READY),
         sigc::mem_fun(h, &NetworkObservationHandler::GetReady));

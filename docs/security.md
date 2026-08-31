@@ -31,6 +31,8 @@ Failure to read a source must not erase last-known-good inventory values.
 - Default policy allows request/response traffic only to the service names and signal receipt from those names.
 - Packaging scripts and integration tests use temporary files under `/tmp` and remove them after use.
 - Readiness helper files use `mktemp` rather than predictable names.
+- Operational diagnostics sanitize and bound logged identities/messages; raw inventory file contents
+  and raw foreign payloads must not be logged.
 
 ## Accepted risks
 

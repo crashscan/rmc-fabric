@@ -35,6 +35,21 @@ set_tests_properties(contract_compatibility_tests PROPERTIES
     LABELS "unit"
 )
 
+add_executable(service_soak_short_tests
+    ServiceSoakShortTests.cpp
+)
+target_compile_features(service_soak_short_tests PRIVATE cxx_std_20)
+target_link_libraries(service_soak_short_tests
+    PRIVATE
+        network_observation_service
+        pthread
+)
+add_test(NAME service_soak_short_tests COMMAND service_soak_short_tests)
+set_tests_properties(service_soak_short_tests PROPERTIES
+    TIMEOUT 30
+    LABELS "soak-short;resilience"
+)
+
 if(RMC_FABRIC_BUILD_INTEGRATION_TESTS)
     add_subdirectory(integration)
 endif()

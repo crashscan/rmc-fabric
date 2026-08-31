@@ -2,6 +2,7 @@
 
 #include "NetworkObservationDbusAdapter.h"
 
+#include <OperationalDiagnostics.h>
 #include <network_observation/NetworkObservationContracts.hpp>
 
 #include <glog/logging.h>
@@ -36,7 +37,7 @@ bool DbusTransport::start()
         DbusTransportBase::start();
         return true;
     } catch (const std::exception& e) {
-        LOG(ERROR) << "DbusTransport start failed: " << e.what();
+        diagnostics::logError("observation-service", "transport.dbus", "start", "transport_start_failed", name(), e.what());
         obsAdapter()->setService(nullptr);
         return false;
     }

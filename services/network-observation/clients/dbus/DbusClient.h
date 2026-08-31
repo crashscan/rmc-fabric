@@ -38,6 +38,7 @@ public:
     [[nodiscard]] interop_contract::ClientResult<std::optional<contract::LocalInterfaceState>> tryGetInterface(const std::string& ifname);
     [[nodiscard]] interop_contract::ClientResult<std::vector<std::string>> tryGetRemoteCandidateMacs();
     [[nodiscard]] interop_contract::ClientResult<std::optional<contract::RemoteCandidate>> tryGetCandidateByMac(const std::string& mac);
+    [[nodiscard]] interop_contract::ClientResult<contract::ObservationIssues> tryGetIssues();
     [[nodiscard]] interop_contract::ClientResult<bool> tryGetReady();
     [[nodiscard]] interop_contract::ClientResult<std::string> tryGetPhase();
 
@@ -45,6 +46,7 @@ public:
     std::optional<contract::LocalInterfaceState> getInterface(const std::string& ifname);
     std::vector<std::string> getRemoteCandidateMacs();
     std::optional<contract::RemoteCandidate> getCandidateByMac(const std::string& mac);
+    contract::ObservationIssues getIssues();
     bool getReady();
     std::string getPhase();
 

@@ -1,5 +1,6 @@
 #include <ServiceBase.h>
 #include <ITransport.h>
+#include <OperationalDiagnostics.h>
 
 #include <atomic>
 #include <cstdlib>
@@ -199,6 +200,24 @@ void testStopFailureDoesNotBlockRemainingTransports()
     expect(first->stopCount() == 1, "later reverse-order stop should continue after earlier failure");
 }
 
+void testOperationalDiagnosticFormattingIsBoundedAndSanitized()
+{
+    const std::string formatted = diagnostics::formatError(
+        "observation-service",
+        "transport.dbus\nnewline",
+        "publish candidate changed",
+        "transport publish failed",
+        "eth0 with spaces",
+        std::string(300, 'x') + "\nraw");
+
+    expect(formatted.find('\n') == std::string::npos, "diagnostic output must not contain raw newlines");
+    expect(formatted.find("component=transport.dbus_newline") != std::string::npos,
+           "diagnostic component should be sanitized");
+    expect(formatted.find("operation=publish_candidate_changed") != std::string::npos,
+           "diagnostic operation should be sanitized");
+    expect(formatted.size() < 512, "diagnostic output should stay bounded");
+}
+
 } // namespace
 
 int main()
@@ -207,5 +226,6 @@ int main()
     testRollbackStopsStartedTransportsExactlyOnce();
     testReadyPublicationFailureDoesNotBlockLaterTransports();
     testStopFailureDoesNotBlockRemainingTransports();
+    testOperationalDiagnosticFormattingIsBoundedAndSanitized();
     return EXIT_SUCCESS;
 }

@@ -1,11 +1,17 @@
 #include "ObservationService.h"
 
+#include <OperationalDiagnostics.h>
+#include <network_observation/NetworkObservationContracts.hpp>
+
 #include <glog/logging.h>
 
+#include <map>
 #include <stdexcept>
 
 namespace RSCGroup {
 namespace {
+
+namespace contract = interop_contract::network_observation;
 
 [[nodiscard]] std::vector<std::shared_ptr<IObservationTransport>> observationTransports(const ServiceBase& service)
 {
@@ -17,6 +23,11 @@ namespace {
         }
     }
     return typed;
+}
+
+[[nodiscard]] std::string makeTransportIssueCode(const std::string& transportName)
+{
+    return "observation.transport." + diagnostics::sanitizeField(transportName) + ".publish.failed";
 }
 
 } // namespace
@@ -66,30 +77,44 @@ bool ObservationService::start()
         return false;
     }
     if (!runtime_->start()) {
+        diagnostics::logError(name(), "runtime", "start", "runtime_start_failed", "runtime", "runtime start returned failure");
         ServiceBase::stop();
         return false;
     }
 
+    refreshRuntimeIssues();
     ServiceBase::setReady(true);
     try {
         agingThread_ = std::jthread([this](std::stop_token st) {
             try {
                 agingLoop(st);
             } catch (const std::exception& e) {
-                LOG(ERROR) << "ObservationService: aging loop failed: " << e.what();
+                reportIssue(std::string(contract::ISSUE_CODE_AGING_LOOP_STOPPED),
+                            std::string(contract::SEVERITY_ERROR),
+                            "worker.aging",
+                            "age",
+                            "worker_loop_failed",
+                            "aging",
+                            e.what());
             } catch (...) {
-                LOG(ERROR) << "ObservationService: aging loop failed";
+                reportIssue(std::string(contract::ISSUE_CODE_AGING_LOOP_STOPPED),
+                            std::string(contract::SEVERITY_ERROR),
+                            "worker.aging",
+                            "age",
+                            "worker_loop_failed",
+                            "aging",
+                            "unknown exception");
             }
         });
     } catch (const std::exception& e) {
         runtime_->stop();
         ServiceBase::stop();
-        LOG(ERROR) << "ObservationService: failed to start aging thread: " << e.what();
+        diagnostics::logError(name(), "worker.aging", "start", "worker_start_failed", "aging", e.what());
         return false;
     } catch (...) {
         runtime_->stop();
         ServiceBase::stop();
-        LOG(ERROR) << "ObservationService: failed to start aging thread";
+        diagnostics::logError(name(), "worker.aging", "start", "worker_start_failed", "aging", "unknown exception");
         return false;
     }
     return true;
@@ -102,6 +127,10 @@ void ObservationService::stop()
         return;
     }
     stopOwnedState();
+    {
+        std::scoped_lock lock(issuesMutex_);
+        issues_.clear();
+    }
     ServiceBase::stop();
 }
 
@@ -113,6 +142,7 @@ void ObservationService::agingLoop(std::stop_token st)
             break;
         }
         runtime_->age(std::chrono::steady_clock::now());
+        refreshRuntimeIssues();
     }
 }
 
@@ -126,24 +156,22 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishInterfaceChanged(*event.ifname);
+                        clearTransportPublishFailure(transport->name());
                     } catch (const std::exception& e) {
-                        LOG(ERROR) << "ObservationService: publishInterfaceChanged failed for transport "
-                                   << transport->name() << ": " << e.what();
+                        noteTransportPublishFailure(transport->name(), "publish_interface_changed", e.what());
                     } catch (...) {
-                        LOG(ERROR) << "ObservationService: publishInterfaceChanged failed for transport "
-                                   << transport->name();
+                        noteTransportPublishFailure(transport->name(), "publish_interface_changed", "unknown exception");
                     }
                 }
             }
             for (const auto& transport : typedTransports) {
                 try {
                     transport->publishLocalStateChanged();
+                    clearTransportPublishFailure(transport->name());
                 } catch (const std::exception& e) {
-                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
-                               << transport->name() << ": " << e.what();
+                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
                 } catch (...) {
-                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
-                               << transport->name();
+                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", "unknown exception");
                 }
             }
             break;
@@ -153,24 +181,22 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishInterfaceRemoved(*event.ifname);
+                        clearTransportPublishFailure(transport->name());
                     } catch (const std::exception& e) {
-                        LOG(ERROR) << "ObservationService: publishInterfaceRemoved failed for transport "
-                                   << transport->name() << ": " << e.what();
+                        noteTransportPublishFailure(transport->name(), "publish_interface_removed", e.what());
                     } catch (...) {
-                        LOG(ERROR) << "ObservationService: publishInterfaceRemoved failed for transport "
-                                   << transport->name();
+                        noteTransportPublishFailure(transport->name(), "publish_interface_removed", "unknown exception");
                     }
                 }
             }
             for (const auto& transport : typedTransports) {
                 try {
                     transport->publishLocalStateChanged();
+                    clearTransportPublishFailure(transport->name());
                 } catch (const std::exception& e) {
-                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
-                               << transport->name() << ": " << e.what();
+                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
                 } catch (...) {
-                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
-                               << transport->name();
+                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", "unknown exception");
                 }
             }
             break;
@@ -180,24 +206,22 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishInterfaceChanged(*event.ifname);
+                        clearTransportPublishFailure(transport->name());
                     } catch (const std::exception& e) {
-                        LOG(ERROR) << "ObservationService: publishInterfaceChanged failed for transport "
-                                   << transport->name() << ": " << e.what();
+                        noteTransportPublishFailure(transport->name(), "publish_interface_changed", e.what());
                     } catch (...) {
-                        LOG(ERROR) << "ObservationService: publishInterfaceChanged failed for transport "
-                                   << transport->name();
+                        noteTransportPublishFailure(transport->name(), "publish_interface_changed", "unknown exception");
                     }
                 }
             }
             for (const auto& transport : typedTransports) {
                 try {
                     transport->publishLocalStateChanged();
+                    clearTransportPublishFailure(transport->name());
                 } catch (const std::exception& e) {
-                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
-                               << transport->name() << ": " << e.what();
+                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
                 } catch (...) {
-                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
-                               << transport->name();
+                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", "unknown exception");
                 }
             }
             break;
@@ -211,12 +235,11 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishCandidateChanged(*event.mac);
+                        clearTransportPublishFailure(transport->name());
                     } catch (const std::exception& e) {
-                        LOG(ERROR) << "ObservationService: publishCandidateChanged failed for transport "
-                                   << transport->name() << ": " << e.what();
+                        noteTransportPublishFailure(transport->name(), "publish_candidate_changed", e.what());
                     } catch (...) {
-                        LOG(ERROR) << "ObservationService: publishCandidateChanged failed for transport "
-                                   << transport->name();
+                        noteTransportPublishFailure(transport->name(), "publish_candidate_changed", "unknown exception");
                     }
                 }
             }
@@ -228,12 +251,11 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishCandidateRemoved(*event.mac);
+                        clearTransportPublishFailure(transport->name());
                     } catch (const std::exception& e) {
-                        LOG(ERROR) << "ObservationService: publishCandidateRemoved failed for transport "
-                                   << transport->name() << ": " << e.what();
+                        noteTransportPublishFailure(transport->name(), "publish_candidate_removed", e.what());
                     } catch (...) {
-                        LOG(ERROR) << "ObservationService: publishCandidateRemoved failed for transport "
-                                   << transport->name();
+                        noteTransportPublishFailure(transport->name(), "publish_candidate_removed", "unknown exception");
                     }
                 }
             }
@@ -266,6 +288,12 @@ std::optional<RemoteCandidate> ObservationService::getCandidateByMac(const std::
     return runtime_->findCandidateByMac(mac);
 }
 
+contract::ObservationIssues ObservationService::getIssues() const
+{
+    std::scoped_lock lock(issuesMutex_);
+    return issues_;
+}
+
 void ObservationService::stopOwnedState()
 {
     if (agingThread_.joinable()) {
@@ -273,6 +301,108 @@ void ObservationService::stopOwnedState()
         agingThread_.join();
     }
     runtime_->stop();
+}
+
+void ObservationService::refreshRuntimeIssues()
+{
+    const auto health = runtime_->health();
+    if (!health.running) {
+        reportIssue(std::string(contract::ISSUE_CODE_RUNTIME_STOPPED),
+                    std::string(contract::SEVERITY_ERROR),
+                    "runtime",
+                    "poll_health",
+                    "runtime_stopped",
+                    "runtime",
+                    "runtime is not running");
+    } else {
+        clearIssue(std::string(contract::ISSUE_CODE_RUNTIME_STOPPED),
+                   "runtime",
+                   "runtime",
+                   "runtime recovered");
+    }
+
+    if (!health.lldpAvailable) {
+        reportIssue(std::string(contract::ISSUE_CODE_LLDP_UNAVAILABLE),
+                    std::string(contract::SEVERITY_WARNING),
+                    "input.lldp",
+                    "poll_health",
+                    "input_degraded",
+                    "lldp",
+                    "LLDP observer is unavailable");
+    } else {
+        clearIssue(std::string(contract::ISSUE_CODE_LLDP_UNAVAILABLE),
+                   "input.lldp",
+                   "lldp",
+                   "LLDP observer recovered");
+    }
+}
+
+void ObservationService::reportIssue(const std::string& issueCode,
+                                     const std::string& severity,
+                                     const std::string& component,
+                                     const std::string& operation,
+                                     const std::string& category,
+                                     const std::string& identity,
+                                     const std::string& message)
+{
+    contract::ObservationIssueFields fields;
+    fields.emplace(std::string(contract::ISSUE_SEVERITY), diagnostics::sanitizeField(severity));
+    fields.emplace(std::string(contract::ISSUE_COMPONENT), diagnostics::sanitizeField(component));
+    fields.emplace(std::string(contract::ISSUE_OPERATION), diagnostics::sanitizeField(operation));
+    fields.emplace(std::string(contract::ISSUE_CATEGORY), diagnostics::sanitizeField(category));
+    fields.emplace(std::string(contract::ISSUE_IDENTITY), diagnostics::sanitizeField(identity));
+    fields.emplace(std::string(contract::ISSUE_MESSAGE), diagnostics::sanitizeMessage(message));
+
+    bool changed = false;
+    {
+        std::scoped_lock lock(issuesMutex_);
+        auto it = issues_.find(issueCode);
+        if (it == issues_.end() || it->second != fields) {
+            issues_[issueCode] = fields;
+            changed = true;
+        }
+    }
+
+    if (changed) {
+        diagnostics::logError(name(), component, operation, category, identity, message);
+    }
+}
+
+void ObservationService::clearIssue(const std::string& issueCode,
+                                    const std::string& component,
+                                    const std::string& identity,
+                                    const std::string& message)
+{
+    bool removed = false;
+    {
+        std::scoped_lock lock(issuesMutex_);
+        removed = issues_.erase(issueCode) != 0;
+    }
+
+    if (removed) {
+        diagnostics::logInfo(name(), component, "recover", "issue_cleared", identity, message);
+    }
+}
+
+void ObservationService::noteTransportPublishFailure(const std::string& transportName,
+                                                     const std::string& operation,
+                                                     const std::string& message)
+{
+    reportIssue(makeTransportIssueCode(transportName),
+                std::string(contract::SEVERITY_WARNING),
+                "transport." + diagnostics::sanitizeField(transportName),
+                operation,
+                "transport_publish_failed",
+                transportName,
+                message);
+}
+
+void ObservationService::clearTransportPublishFailure(const std::string& transportName)
+{
+    clearIssue(makeTransportIssueCode(transportName),
+               "transport." + diagnostics::sanitizeField(transportName),
+               transportName,
+               "transport publish recovered");
 }
 
 } // namespace RSCGroup

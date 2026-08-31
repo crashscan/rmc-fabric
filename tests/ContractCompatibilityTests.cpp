@@ -18,6 +18,7 @@
 #include <iostream>
 #include <limits>
 #include <map>
+#include <algorithm>
 #include <string>
 #include <variant>
 #include <vector>
@@ -80,14 +81,77 @@ Json::Value loadFixture(const std::string& name)
     return test_support::loadJsonFile(fixturePath(name));
 }
 
+Json::Value canonicalJson(const Json::Value& value)
+{
+    if (value.isObject()) {
+        Json::Value out(Json::objectValue);
+        auto members = value.getMemberNames();
+        std::sort(members.begin(), members.end());
+        for (const auto& member : members) {
+            out[member] = canonicalJson(value[member]);
+        }
+        return out;
+    }
+    if (value.isArray()) {
+        Json::Value out(Json::arrayValue);
+        for (const auto& item : value) {
+            out.append(canonicalJson(item));
+        }
+        return out;
+    }
+    return value;
+}
+
+bool jsonSemanticallyEqual(const Json::Value& lhs, const Json::Value& rhs)
+{
+    if (lhs.type() != rhs.type()) {
+        if (lhs.isIntegral() && rhs.isIntegral()) {
+            return lhs.asLargestInt() == rhs.asLargestInt();
+        }
+        return false;
+    }
+
+    if (lhs.isObject()) {
+        auto lhsMembers = lhs.getMemberNames();
+        auto rhsMembers = rhs.getMemberNames();
+        std::sort(lhsMembers.begin(), lhsMembers.end());
+        std::sort(rhsMembers.begin(), rhsMembers.end());
+        if (lhsMembers != rhsMembers) {
+            return false;
+        }
+        for (const auto& member : lhsMembers) {
+            if (!jsonSemanticallyEqual(lhs[member], rhs[member])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    if (lhs.isArray()) {
+        if (lhs.size() != rhs.size()) {
+            return false;
+        }
+        for (Json::ArrayIndex index = 0; index < lhs.size(); ++index) {
+            if (!jsonSemanticallyEqual(lhs[index], rhs[index])) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    return lhs == rhs;
+}
+
 void expectJsonEquals(const Json::Value& actual,
                       const Json::Value& expected,
                       const std::string& label)
 {
-    if (actual != expected) {
+    const auto canonicalActual = canonicalJson(actual);
+    const auto canonicalExpected = canonicalJson(expected);
+    if (!jsonSemanticallyEqual(canonicalActual, canonicalExpected)) {
         std::cerr << "JSON mismatch for " << label << '\n'
-                  << "actual: " << actual.toStyledString() << '\n'
-                  << "expected: " << expected.toStyledString() << '\n';
+                  << "actual: " << canonicalActual.toStyledString() << '\n'
+                  << "expected: " << canonicalExpected.toStyledString() << '\n';
         std::exit(EXIT_FAILURE);
     }
 }
@@ -121,6 +185,15 @@ void testApiContractSnapshot()
            "inventory service name snapshot mismatch");
     expect(root["networkObservation"]["serviceName"].asString() == std::string(observation::SERVICE_NAME),
            "network observation service name snapshot mismatch");
+    expect(root["networkObservation"]["issueCodes"]["runtimeStopped"].asString() ==
+               std::string(observation::ISSUE_CODE_RUNTIME_STOPPED),
+           "network observation runtime issue-code snapshot mismatch");
+    expect(root["networkObservation"]["issueCodes"]["agingLoopStopped"].asString() ==
+               std::string(observation::ISSUE_CODE_AGING_LOOP_STOPPED),
+           "network observation aging issue-code snapshot mismatch");
+    expect(root["networkObservation"]["issueCodes"]["lldpUnavailable"].asString() ==
+               std::string(observation::ISSUE_CODE_LLDP_UNAVAILABLE),
+           "network observation lldp issue-code snapshot mismatch");
     expect(root["clientErrorCode"]["invalid_response"].asInt() ==
                static_cast<int>(ClientErrorCode::invalid_response),
            "client error code snapshot mismatch");

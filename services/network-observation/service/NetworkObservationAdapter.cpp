@@ -169,6 +169,14 @@ bool NetworkObservationAdapter::isRunning() const
     return monitor_ && monitor_->isRunning();
 }
 
+ObservationRuntimeHealth NetworkObservationAdapter::health() const
+{
+    ObservationRuntimeHealth result;
+    result.running = monitor_ && monitor_->isRunning();
+    result.lldpAvailable = lldpObserver_ && lldpObserver_->isRunning();
+    return result;
+}
+
 void NetworkObservationAdapter::setEventSink(IModelEventSink* sink)
 {
     model_->setEventSink(sink);

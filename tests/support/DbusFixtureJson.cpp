@@ -1,7 +1,7 @@
 #include "DbusFixtureJson.h"
 
 #include <dbus-cxx/variant.h>
-#include <json/reader.h>
+#include <jsoncpp/json/reader.h>
 
 #include <cstdint>
 #include <fstream>
@@ -149,8 +149,16 @@ Json::Value jsonFromVariant(const DBus::Variant& value)
             return out;
         case DBus::DataType::ARRAY: {
             Json::Value items(Json::arrayValue);
-            for (const auto& item : value.to_vector<DBus::Variant>()) {
-                items.append(jsonFromVariant(item));
+            auto copy = value;
+            try {
+                for (const auto& item : copy.to_vector<DBus::Variant>()) {
+                    items.append(jsonFromVariant(item));
+                }
+            } catch (const std::exception&) {
+                auto stringCopy = value;
+                for (const auto& item : stringCopy.to_vector<std::string>()) {
+                    items.append(jsonFromVariant(DBus::Variant(item)));
+                }
             }
             out["list"] = std::move(items);
             return out;
@@ -160,7 +168,8 @@ Json::Value jsonFromVariant(const DBus::Variant& value)
         case DBus::DataType::STRUCT:
         default: {
             Json::Value map(Json::objectValue);
-            for (const auto& [key, nested] : value.to_map<std::string, DBus::Variant>()) {
+            auto copy = value;
+            for (const auto& [key, nested] : copy.to_map<std::string, DBus::Variant>()) {
                 map[key] = jsonFromVariant(nested);
             }
             out["map"] = std::move(map);

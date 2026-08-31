@@ -129,7 +129,7 @@ Component-specific tools may later move to separate repositories if they become 
 
 ### Quick start
 
-Requires: cmake ≥ 3.25, ninja, libgoogle-glog-dev, libgflags-dev, libjsoncpp-dev, nlohmann-json3-dev, libsigc++-3.0-dev, liblldpctl-dev, and DBusCxx (distro package or source build).
+Requires: cmake ≥ 3.25, ninja, libgoogle-glog-dev, libgflags-dev, libjsoncpp-dev, nlohmann-json3-dev, libsigc++-3.0-dev, liblldpctl-dev, libunwind-dev, DBusCxx (distro package or source build), plus the externally provided `rsc_util` and `lldpctl.hpp` environment dependencies used by `network-observation`.
 
 ```bash
 # Developer build with tests
@@ -158,6 +158,13 @@ See [docs/architecture.md](docs/architecture.md) for:
 - service lifecycle invariants;
 - how to configure, build, and test via presets;
 - how to consume installed CMake packages.
+
+Operational follow-up documents:
+
+- [docs/operations.md](docs/operations.md)
+- [docs/resilience.md](docs/resilience.md)
+- [docs/dependencies.md](docs/dependencies.md)
+- [docs/roadmap-status.md](docs/roadmap-status.md)
 
 Architecture Decision Records are in [docs/adr/](docs/adr/).
 

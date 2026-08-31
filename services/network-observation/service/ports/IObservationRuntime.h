@@ -12,6 +12,11 @@
 
 namespace RSCGroup {
 
+struct ObservationRuntimeHealth {
+    bool running{false};
+    bool lldpAvailable{true};
+};
+
 class ICandidateClassifier;
 class IInterfacePolicy;
 class IModelEventSink;
@@ -27,6 +32,7 @@ public:
     [[nodiscard]] virtual bool start() = 0;
     virtual void stop() = 0;
     [[nodiscard]] virtual bool isRunning() const = 0;
+    [[nodiscard]] virtual ObservationRuntimeHealth health() const = 0;
 
     [[nodiscard]] virtual LocalNetworkSnapshot localSnapshot() const = 0;
     [[nodiscard]] virtual std::vector<RemoteCandidate> remoteCandidates() const = 0;
