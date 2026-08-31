@@ -13,20 +13,17 @@ add_library(observation-model SHARED
 )
 target_include_directories(observation-model PUBLIC
     public
+)
+target_include_directories(observation-model PRIVATE
     adapter
-    classifier
     engine
+    classifier
     policy
     ${NETLINK_BASE}
     ${NETLINK_BASE}/types
     ${NETLINK_BASE}/utils
     ${NETLINK_BASE}/parser
     ${NETLINK_BASE}/state
-)
-target_include_directories(observation-model PRIVATE
-    engine
-    classifier
-    policy
 )
 target_link_libraries(observation-model pthread glog rsc_util lldp-observer netlink-monitor liblldpctl.so interop_contract)
 

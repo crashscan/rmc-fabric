@@ -26,6 +26,7 @@ public:
     virtual void publishReadyChanged(bool ready) = 0;
 };
 
+// Backward-compatibility alias for in-tree migration. Prefer IInventoryTransport.
 using ITransport = IInventoryTransport;
 
 } // namespace RSCGroup
