@@ -1,0 +1,49 @@
+{
+  "contractVersion": 1,
+  "snapshot": {
+    "deviceClass": { "string": "compute-node" },
+    "deviceModelId": { "string": "711" },
+    "deviceProject": { "string": "ocean2" },
+    "firmwareVersion": { "string": "2.7.1" },
+    "nodeName": { "string": "rack12-node7" },
+    "phase": { "string": "live" },
+    "ready": { "bool": true },
+    "softwareVersion": { "string": "1.0.21" },
+    "timestamp": { "i64": 1725102000 },
+    "uuid": { "string": "1234-5678" },
+    "version": { "u64": 11 }
+  },
+  "sourceStates": {
+    "device-meta-file": {
+      "health": { "string": "ok" },
+      "lastAttemptTs": { "i64": 1725101990 },
+      "lastSuccessTs": { "i64": 1725101990 },
+      "origin": { "string": "/data/info/device-meta.json" },
+      "required": { "bool": false },
+      "stale": { "bool": false }
+    },
+    "firmware-file": {
+      "health": { "string": "ok" },
+      "lastAttemptTs": { "i64": 1725101991 },
+      "lastSuccessTs": { "i64": 1725101991 },
+      "origin": { "string": "/etc/rmc/firmware" },
+      "required": { "bool": true },
+      "stale": { "bool": false }
+    },
+    "uuid-file": {
+      "health": { "string": "ok" },
+      "lastAttemptTs": { "i64": 1725101992 },
+      "lastSuccessTs": { "i64": 1725101992 },
+      "origin": { "string": "/etc/rmc/uuid" },
+      "required": { "bool": true },
+      "stale": { "bool": false }
+    }
+  },
+  "issues": {
+    "software-file": {
+      "message": { "string": "source data is stale" },
+      "origin": { "string": "/etc/rmc/software" },
+      "severity": { "string": "warning" }
+    }
+  }
+}

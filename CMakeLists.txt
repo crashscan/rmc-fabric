@@ -15,6 +15,9 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 option(RMC_FABRIC_WERROR   "Treat warnings as errors (CI/developer builds)"   OFF)
 option(RMC_FABRIC_COVERAGE "Enable gcov/lcov coverage instrumentation"        OFF)
+option(RMC_FABRIC_BUILD_INTEGRATION_TESTS "Build hermetic D-Bus integration tests" OFF)
+option(RMC_FABRIC_BUILD_FUZZ_TARGETS "Build libFuzzer codec ingress targets when supported" OFF)
+option(RMC_FABRIC_BUILD_BENCHMARKS "Build benchmark-style performance executables" OFF)
 set(RMC_FABRIC_SANITIZE "" CACHE STRING
     "Comma-separated sanitizer list, e.g. address,undefined (passed to -fsanitize=)")
 
@@ -97,6 +100,7 @@ if(BUILD_TESTING)
   )
   set_tests_properties(architecture_no_transport_in_interop_contract PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    LABELS "architecture"
   )
 
   add_test(
@@ -105,6 +109,7 @@ if(BUILD_TESTING)
   )
   set_tests_properties(architecture_component_boundaries PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    LABELS "architecture"
   )
 
   add_test(
@@ -117,11 +122,15 @@ if(BUILD_TESTING)
       -DVERIFY_CONSUMER_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
       -P ${CMAKE_SOURCE_DIR}/cmake/VerifyPackageConsumers.cmake
   )
-  set_tests_properties(package_consumer_verification PROPERTIES TIMEOUT 180)
+  set_tests_properties(package_consumer_verification PROPERTIES TIMEOUT 180 LABELS "package")
 endif()
 
 add_subdirectory(lib)
 add_subdirectory(services)
+
+if(BUILD_TESTING)
+  add_subdirectory(tests)
+endif()
 
 if(BUILD_MANUAL_TESTS)
   add_subdirectory(tests_manual)

@@ -1,8 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 
 namespace interop_contract::network_observation {
+
+inline constexpr std::uint32_t CONTRACT_VERSION = 1;
 
 inline constexpr std::string_view SERVICE_NAME  = "org.rsc.NetworkObservation";
 inline constexpr std::string_view OBJECT_PATH   = "/org/rsc/NetworkObservation";

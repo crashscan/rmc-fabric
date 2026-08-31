@@ -9,21 +9,35 @@ RUNDIR=${RUNDIR:-/run/inventory-agent}
 PIDFILE=${PIDFILE:-$RUNDIR/inventory-agentd.pid}
 LOGFILE=${LOGFILE:-/var/log/inventory-agentd.log}
 TRANSPORT=${TRANSPORT:-dbus}
+TRANSPORT_CONFIG=${TRANSPORT_CONFIG:-system}
 STARTUP_WAIT_SEC=${STARTUP_WAIT_SEC:-20}
 DBUS_REPLY_TIMEOUT_MS=${DBUS_REPLY_TIMEOUT_MS:-3000}
 
+if [ "$TRANSPORT_CONFIG" = "session" ]; then
+    DBUS_SEND_BUS=--session
+    DBUS_SOCKET=${DBUS_SESSION_BUS_ADDRESS:-}
+else
+    DBUS_SEND_BUS=--system
+    DBUS_SOCKET=/run/dbus/system_bus_socket
+fi
+
 responds() {
-    dbus-send --system --print-reply --reply-timeout="$DBUS_REPLY_TIMEOUT_MS" \
+    dbus-send "$DBUS_SEND_BUS" --print-reply --reply-timeout="$DBUS_REPLY_TIMEOUT_MS" \
         --dest=org.rsc.Inventory /org/rsc/Inventory org.rsc.Inventory.GetReady 2>/dev/null \
         | grep -q "boolean"
 }
 
 i=0
 while [ "$i" -lt "$STARTUP_WAIT_SEC" ]; do
-    [ -S /run/dbus/system_bus_socket ] && break
+    [ "$TRANSPORT_CONFIG" = "session" ] && [ -n "$DBUS_SOCKET" ] && break
+    [ "$TRANSPORT_CONFIG" != "session" ] && [ -S "$DBUS_SOCKET" ] && break
     sleep 1; i=$((i+1))
 done
-[ -S /run/dbus/system_bus_socket ] || { echo "system D-Bus unavailable" >&2; exit 1; }
+if [ "$TRANSPORT_CONFIG" = "session" ]; then
+    [ -n "$DBUS_SOCKET" ] || { echo "session D-Bus unavailable: DBUS_SESSION_BUS_ADDRESS is unset" >&2; exit 1; }
+else
+    [ -S "$DBUS_SOCKET" ] || { echo "system D-Bus unavailable" >&2; exit 1; }
+fi
 
 mkdir -p "$RUNDIR"
 
@@ -32,7 +46,7 @@ if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
     exit 1
 fi
 
-"$DAEMON" --transport="$TRANSPORT" >>"$LOGFILE" 2>&1 &
+"$DAEMON" --transport="$TRANSPORT" --transport_config="$TRANSPORT_CONFIG" >>"$LOGFILE" 2>&1 &
 PID=$!
 echo "$PID" > "$PIDFILE"
 

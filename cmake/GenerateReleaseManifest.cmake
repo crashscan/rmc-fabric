@@ -1,0 +1,48 @@
+function(extract_first_match file_path regex output_var)
+    file(READ "${file_path}" file_contents)
+    string(REGEX MATCH "${regex}" match "${file_contents}")
+    if(NOT match)
+        message(FATAL_ERROR "Could not extract value from ${file_path} using ${regex}")
+    endif()
+    set(${output_var} "${CMAKE_MATCH_1}" PARENT_SCOPE)
+endfunction()
+
+if(NOT DEFINED RELEASE_MANIFEST_SOURCE_DIR OR NOT DEFINED RELEASE_MANIFEST_INSTALL_PREFIX OR NOT DEFINED RELEASE_MANIFEST_OUTPUT)
+    message(FATAL_ERROR "Release manifest inputs are required")
+endif()
+
+extract_first_match("${RELEASE_MANIFEST_SOURCE_DIR}/CMakeLists.txt"
+    "project\\(rmc-fabric VERSION ([0-9]+\\.[0-9]+\\.[0-9]+)" project_version)
+extract_first_match("${RELEASE_MANIFEST_SOURCE_DIR}/lib/interop_contract/ContractVersion.hpp"
+    "PUBLIC_CLIENT_API_VERSION = ([0-9]+)" public_client_api_version)
+extract_first_match("${RELEASE_MANIFEST_SOURCE_DIR}/lib/interop_contract/inventory/InventoryContracts.hpp"
+    "CONTRACT_VERSION = ([0-9]+)" inventory_contract_version)
+extract_first_match("${RELEASE_MANIFEST_SOURCE_DIR}/lib/interop_contract/network_observation/NetworkObservationContracts.hpp"
+    "CONTRACT_VERSION = ([0-9]+)" network_contract_version)
+
+set(manifest "{\n")
+string(APPEND manifest "  \"version\": \"${project_version}\",\n")
+string(APPEND manifest "  \"publicClientApiVersion\": ${public_client_api_version},\n")
+string(APPEND manifest "  \"contractVersions\": {\n")
+string(APPEND manifest "    \"inventory\": ${inventory_contract_version},\n")
+string(APPEND manifest "    \"networkObservation\": ${network_contract_version}\n")
+string(APPEND manifest "  },\n")
+string(APPEND manifest "  \"executables\": [\n")
+string(APPEND manifest "    \"${RELEASE_MANIFEST_INSTALL_PREFIX}/sbin/inventory-agentd\",\n")
+string(APPEND manifest "    \"${RELEASE_MANIFEST_INSTALL_PREFIX}/sbin/network-observationd\",\n")
+string(APPEND manifest "    \"${RELEASE_MANIFEST_INSTALL_PREFIX}/bin/net-observe\"\n")
+string(APPEND manifest "  ],\n")
+string(APPEND manifest "  \"publicHeaders\": [\n")
+string(APPEND manifest "    \"${RELEASE_MANIFEST_INSTALL_PREFIX}/include/rmc_fabric/inventory/InventoryClient.h\",\n")
+string(APPEND manifest "    \"${RELEASE_MANIFEST_INSTALL_PREFIX}/include/rmc_fabric/network_observation/DbusClient.h\",\n")
+string(APPEND manifest "    \"${RELEASE_MANIFEST_INSTALL_PREFIX}/include/inventory/InventoryContracts.hpp\",\n")
+string(APPEND manifest "    \"${RELEASE_MANIFEST_INSTALL_PREFIX}/include/network_observation/NetworkObservationContracts.hpp\"\n")
+string(APPEND manifest "  ],\n")
+string(APPEND manifest "  \"targets\": [\n")
+string(APPEND manifest "    \"rmc_fabric::interop_contract\",\n")
+string(APPEND manifest "    \"rmc_fabric::inventory-client\",\n")
+string(APPEND manifest "    \"rmc_fabric::network_observation_client\"\n")
+string(APPEND manifest "  ]\n")
+string(APPEND manifest "}\n")
+
+file(WRITE "${RELEASE_MANIFEST_OUTPUT}" "${manifest}")

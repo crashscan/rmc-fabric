@@ -21,3 +21,9 @@ if(RSC_UTIL_INCLUDE_DIR)
     )
 endif()
 target_link_libraries(netlink-monitor pthread glog rsc_util)
+
+install(
+    TARGETS netlink-monitor
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    COMPONENT rel
+)

@@ -39,5 +39,5 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME inventory_service_tests COMMAND inventory_service_tests)
-    set_tests_properties(inventory_service_tests PROPERTIES TIMEOUT 15)
+    set_tests_properties(inventory_service_tests PROPERTIES TIMEOUT 15 LABELS "unit")
 endif()

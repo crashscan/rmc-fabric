@@ -4,6 +4,7 @@
 #include "IWatchableInventorySource.h"
 
 #include <mutex>
+#include <string_view>
 #include <string>
 
 namespace RSCGroup {
@@ -34,8 +35,12 @@ protected:
                                                         const std::string& what);
 
 private:
+    [[nodiscard]] static std::string readFileContents(const std::string& filePath);
+    [[nodiscard]] static std::string boundedErrorText(std::string_view error);
     void noteSuccess();
     void noteFailure(const std::string& error);
+
+    static constexpr std::size_t kMaxFileBytes = 64 * 1024;
 
     const std::string name_;
     const bool required_;

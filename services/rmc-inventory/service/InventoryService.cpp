@@ -412,7 +412,7 @@ interop_contract::inventory::InventoryIssues InventoryService::getIssues() const
                       std::string("inventory refresh loop terminated unexpectedly; inventory data may be stale"));
         issue.emplace(std::string(interop_contract::inventory::ISSUE_ORIGIN),
                       std::string("InventoryService::runLoop"));
-        issues["inventory.loop.stopped"] = std::move(issue);
+        issues[std::string(interop_contract::inventory::ISSUE_CODE_LOOP_STOPPED)] = std::move(issue);
     }
 
     return issues;

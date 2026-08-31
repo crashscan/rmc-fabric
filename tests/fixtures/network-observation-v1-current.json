@@ -1,0 +1,33 @@
+{
+  "contractVersion": 1,
+  "localSnapshot": {
+    "eth0": {
+      "map": {
+        "adminUp": { "bool": true },
+        "ifindex": { "i32": 7 },
+        "ifname": { "string": "eth0" },
+        "ipv4": { "list": [ { "string": "10.0.0.10/24" } ] },
+        "ipv6": { "list": [ { "string": "fe80::10/64" } ] },
+        "mac": { "string": "aa:bb:cc:dd:ee:ff" },
+        "master": { "string": "br0" },
+        "operstate": { "string": "UP" },
+        "running": { "bool": true }
+      }
+    }
+  },
+  "candidate": {
+    "bridgePort": { "string": "swp1" },
+    "classification": { "string": "RemoteEndpoint" },
+    "ipv4": { "list": [ { "string": "10.0.0.20/24" } ] },
+    "ipv6": { "list": [ { "string": "fe80::20/64" } ] },
+    "mac": { "string": "00:11:22:33:44:55" },
+    "neighborIfaces": { "list": [ { "string": "eth0" }, { "string": "eth1" } ] },
+    "remoteChassisId": { "string": "chassis-1" },
+    "remotePortId": { "string": "port-7" },
+    "remoteSystemName": { "string": "leaf-7" },
+    "seenInFdb": { "bool": true },
+    "seenInLldp": { "bool": true },
+    "seenInNeigh": { "bool": true },
+    "status": { "string": "Confirmed" }
+  }
+}

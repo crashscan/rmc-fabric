@@ -19,6 +19,8 @@
 
 DEFINE_string(transport, "dbus",
     "Transport: dbus, stdout");
+DEFINE_string(transport_config, "system",
+    "Transport-specific config (e.g. D-Bus bus type)");
 DEFINE_int32(reconcile_ms, 60000,
     "Periodic full-refresh interval in milliseconds");
 DEFINE_int32(min_refresh_ms, 1000,
@@ -77,12 +79,16 @@ int main(int argc, char* argv[])
     }
 
     const std::string transportName = cfg.getString("transport", "dbus");
+    const std::string transportConfig = cfg.getString("transport_config", "system");
 
     std::shared_ptr<DBus::StandaloneDispatcher> dispatcher;
     std::shared_ptr<DBus::Connection> connection;
     if (transportName == "dbus") {
         dispatcher = DBus::StandaloneDispatcher::create();
-        connection = dispatcher->create_connection(DBus::BusType::SYSTEM);
+        const auto busType = transportConfig == "session"
+            ? DBus::BusType::SESSION
+            : DBus::BusType::SYSTEM;
+        connection = dispatcher->create_connection(busType);
     }
 
     auto transport = TransportFactory::create(transportName, connection);
@@ -96,4 +102,3 @@ int main(int argc, char* argv[])
 
     return DaemonRunner::run(argv[0], service, cfg);
 }
-

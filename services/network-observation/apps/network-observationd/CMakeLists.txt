@@ -13,3 +13,9 @@ target_link_libraries(network-observationd
         jsoncpp
         liblldpctl.so
 )
+
+install(
+    TARGETS network-observationd
+    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    COMPONENT rel
+)

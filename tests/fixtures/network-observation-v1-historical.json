@@ -1,0 +1,28 @@
+{
+  "contractVersion": 1,
+  "localSnapshot": {
+    "bond0": {
+      "map": {
+        "adminUp": { "bool": true },
+        "ifindex": { "i32": 3 },
+        "ifname": { "string": "bond0" },
+        "ipv4": { "list": [] },
+        "ipv6": { "list": [] },
+        "mac": { "string": "de:ad:be:ef:00:01" },
+        "operstate": { "string": "DOWN" },
+        "running": { "bool": false }
+      }
+    }
+  },
+  "candidate": {
+    "classification": { "string": "GatewayLike" },
+    "ipv4": { "list": [] },
+    "ipv6": { "list": [] },
+    "mac": { "string": "66:55:44:33:22:11" },
+    "neighborIfaces": { "list": [ { "string": "bond0" } ] },
+    "seenInFdb": { "bool": false },
+    "seenInLldp": { "bool": true },
+    "seenInNeigh": { "bool": false },
+    "status": { "string": "Provisional" }
+  }
+}
