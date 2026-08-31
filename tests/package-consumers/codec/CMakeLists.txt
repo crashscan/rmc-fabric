@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.25)
+project(rmc_fabric_codec_consumer LANGUAGES CXX)
+
+find_package(rmc_fabric CONFIG REQUIRED)
+
+add_executable(inventory_codec_consumer inventory_codec_consumer.cpp)
+target_compile_features(inventory_codec_consumer PRIVATE cxx_std_20)
+target_link_libraries(inventory_codec_consumer PRIVATE rmc_fabric::inventory_dbus_codec)
+
+add_executable(network_observation_codec_consumer network_observation_codec_consumer.cpp)
+target_compile_features(network_observation_codec_consumer PRIVATE cxx_std_20)
+target_link_libraries(network_observation_codec_consumer PRIVATE rmc_fabric::network_observation_dbus_codec)

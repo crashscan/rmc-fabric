@@ -25,9 +25,11 @@ namespace contract = interop_contract::network_observation;
     return typed;
 }
 
-[[nodiscard]] std::string makeTransportIssueCode(const std::string& transportName)
+[[nodiscard]] std::string makeTransportIssueCode(const std::string& transportName,
+                                                   const std::string& operation)
 {
-    return "observation.transport." + diagnostics::sanitizeField(transportName) + ".publish.failed";
+    return "observation.transport." + diagnostics::sanitizeField(transportName)
+           + "." + diagnostics::sanitizeField(operation) + ".failed";
 }
 
 } // namespace
@@ -170,7 +172,7 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishInterfaceChanged(*event.ifname);
-                        clearTransportPublishFailure(transport->name());
+                        clearTransportPublishFailure(transport->name(), "publish_interface_changed");
                     } catch (const std::exception& e) {
                         noteTransportPublishFailure(transport->name(), "publish_interface_changed", e.what());
                     } catch (...) {
@@ -181,7 +183,7 @@ void ObservationService::onModelEvent(const ModelEvent& event)
             for (const auto& transport : typedTransports) {
                 try {
                     transport->publishLocalStateChanged();
-                    clearTransportPublishFailure(transport->name());
+                    clearTransportPublishFailure(transport->name(), "publish_local_state_changed");
                 } catch (const std::exception& e) {
                     noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
                 } catch (...) {
@@ -195,7 +197,7 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishInterfaceRemoved(*event.ifname);
-                        clearTransportPublishFailure(transport->name());
+                        clearTransportPublishFailure(transport->name(), "publish_interface_removed");
                     } catch (const std::exception& e) {
                         noteTransportPublishFailure(transport->name(), "publish_interface_removed", e.what());
                     } catch (...) {
@@ -206,7 +208,7 @@ void ObservationService::onModelEvent(const ModelEvent& event)
             for (const auto& transport : typedTransports) {
                 try {
                     transport->publishLocalStateChanged();
-                    clearTransportPublishFailure(transport->name());
+                    clearTransportPublishFailure(transport->name(), "publish_local_state_changed");
                 } catch (const std::exception& e) {
                     noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
                 } catch (...) {
@@ -220,7 +222,7 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishInterfaceChanged(*event.ifname);
-                        clearTransportPublishFailure(transport->name());
+                        clearTransportPublishFailure(transport->name(), "publish_interface_changed");
                     } catch (const std::exception& e) {
                         noteTransportPublishFailure(transport->name(), "publish_interface_changed", e.what());
                     } catch (...) {
@@ -231,7 +233,7 @@ void ObservationService::onModelEvent(const ModelEvent& event)
             for (const auto& transport : typedTransports) {
                 try {
                     transport->publishLocalStateChanged();
-                    clearTransportPublishFailure(transport->name());
+                    clearTransportPublishFailure(transport->name(), "publish_local_state_changed");
                 } catch (const std::exception& e) {
                     noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
                 } catch (...) {
@@ -249,7 +251,7 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishCandidateChanged(*event.mac);
-                        clearTransportPublishFailure(transport->name());
+                        clearTransportPublishFailure(transport->name(), "publish_candidate_changed");
                     } catch (const std::exception& e) {
                         noteTransportPublishFailure(transport->name(), "publish_candidate_changed", e.what());
                     } catch (...) {
@@ -265,7 +267,7 @@ void ObservationService::onModelEvent(const ModelEvent& event)
                 for (const auto& transport : typedTransports) {
                     try {
                         transport->publishCandidateRemoved(*event.mac);
-                        clearTransportPublishFailure(transport->name());
+                        clearTransportPublishFailure(transport->name(), "publish_candidate_removed");
                     } catch (const std::exception& e) {
                         noteTransportPublishFailure(transport->name(), "publish_candidate_removed", e.what());
                     } catch (...) {
@@ -411,7 +413,7 @@ void ObservationService::noteTransportPublishFailure(const std::string& transpor
                                                      const std::string& operation,
                                                      const std::string& message)
 {
-    reportIssue(makeTransportIssueCode(transportName),
+    reportIssue(makeTransportIssueCode(transportName, operation),
                 std::string(contract::SEVERITY_WARNING),
                 "transport." + diagnostics::sanitizeField(transportName),
                 operation,
@@ -420,9 +422,10 @@ void ObservationService::noteTransportPublishFailure(const std::string& transpor
                 message);
 }
 
-void ObservationService::clearTransportPublishFailure(const std::string& transportName)
+void ObservationService::clearTransportPublishFailure(const std::string& transportName,
+                                                       const std::string& operation)
 {
-    clearIssue(makeTransportIssueCode(transportName),
+    clearIssue(makeTransportIssueCode(transportName, operation),
                "transport." + diagnostics::sanitizeField(transportName),
                transportName,
                "transport publish recovered");

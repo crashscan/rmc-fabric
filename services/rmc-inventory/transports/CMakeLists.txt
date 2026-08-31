@@ -44,7 +44,6 @@ target_link_libraries(inventory_transport
 target_link_libraries(inventory_dbus_codec
     PUBLIC
         interop_contract
-    PRIVATE
         DBusCxx::DBusCxx
 )
 

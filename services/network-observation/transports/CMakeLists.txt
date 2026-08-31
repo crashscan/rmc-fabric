@@ -13,7 +13,6 @@ target_include_directories(network_observation_dbus_codec
 target_link_libraries(network_observation_dbus_codec
     PUBLIC
         interop_contract
-    PRIVATE
         DBusCxx::DBusCxx
 )
 

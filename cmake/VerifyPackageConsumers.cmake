@@ -2,6 +2,7 @@ set(CONSUMER_NAMES
     contracts-only
     inventory-client
     network-observation-client
+    codec
 )
 
 function(configure_and_build_consumer source_dir build_dir prefix_path)
