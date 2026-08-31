@@ -5,4 +5,5 @@ target_include_directories(dbus_client_support
         ${CMAKE_CURRENT_SOURCE_DIR}
 )
 
-# Consumers must link DBusCxx themselves — this library is header-only.
+# Internal low-level helper only; consumers must link DBusCxx themselves.
+# This target is intentionally not installed or exported as public package API.

@@ -9,6 +9,8 @@ Public consumers
   -> rmc_fabric::interop_contract          (wire types, D-Bus constants)
   -> rmc_fabric::inventory-client          (typed D-Bus proxy for inventory-agentd)
   -> rmc_fabric::network_observation_client (typed D-Bus proxy for network-observationd)
+  -> rmc_fabric::inventory_dbus_codec      (low-level inventory D-Bus map codec)
+  -> rmc_fabric::network_observation_dbus_codec (low-level observation D-Bus map codec)
 
 Internal services
   apps        -> service + selected inputs + transport_factory
@@ -25,9 +27,44 @@ No public consumer should require internal service, input, server-transport, or 
 |------------------------------------|------------------------------------------------|----------------------------------------------|
 | `interop_contract`                 | `rmc_fabric::interop_contract`                 | `<cmake install prefix>/include/`            |
 | `inventory-client`                 | `rmc_fabric::inventory-client`                 | `include/rmc_fabric/inventory/`              |
+| `inventory_dbus_codec`             | `rmc_fabric::inventory_dbus_codec`             | `include/rmc_fabric/inventory/`              |
 | `network_observation_client`       | `rmc_fabric::network_observation_client`       | `include/rmc_fabric/network_observation/`    |
+| `network_observation_dbus_codec`   | `rmc_fabric::network_observation_dbus_codec`   | `include/rmc_fabric/network_observation/`    |
 
-All other targets (`inventory_service`, `inventory_transport`, D-Bus codecs/transports, `network_observation_service`, inputs, apps) are internal and are **not** exported.
+The primary supported consumer surface is `interop_contract` plus the two typed
+client libraries. The codec targets are also exported intentionally as
+low-level helpers for package consumers that need direct D-Bus variant-map
+encoding/decoding without the higher-level client wrappers.
+
+All other targets (`inventory_service`, `inventory_transport`, server transports,
+`network_observation_service`, inputs, apps) are internal and are **not**
+exported.
+
+## Selective consistency policy
+
+The repository intentionally keeps a **shared coarse-grained service shape**
+without forcing identical fine-grained structure inside every service.
+
+- Shared expectation:
+  - `core` owns domain logic
+  - `service` owns orchestration and service-local ports
+  - `inputs` own external ingestion
+  - `transports` own service publication adapters
+  - `clients` own public consumer-side proxies
+  - `apps` are thin composition roots
+- Intentional specialization:
+  - `network-observation` keeps a more decomposed internal model layout
+    (`core/public`, `engine`, `classifier`, `policy`) because it owns a richer
+    runtime and source pipeline
+  - `rmc-inventory` remains flatter because its current domain is smaller and
+    centered on source merge, readiness, and change publication
+- Drift to keep corrected with tests and review:
+  - package exports must match the documented public surface exactly
+  - post-start transport/source registration is closed by default
+  - ambiguous artifacts should either be documented as auxiliary or removed
+
+The goal is therefore **selective specialization with explicit invariants**,
+not full internal uniformity.
 
 ## Internal target dependency graph (simplified)
 
@@ -75,6 +112,8 @@ Both services inherit `ServiceBase` which provides:
 - Readiness — published via the D-Bus `ReadyChanged` signal. Emitted at most once per `start()`/`stop()` cycle.
 - Health/issues — service-owned degradation is surfaced through service-specific issue queries rather than
   by redefining readiness semantics.
+- Registration mutation — transports and sources are registered before `start()`; adding them after start is rejected unless a service explicitly opts into dynamic registration.
+- Port boundaries — service ports stay adapter-free; concrete D-Bus/stdout/input types remain outside `service/ports`.
 
 **Failed `start()`:** any transport or worker-thread creation failure rolls back already-started transports in reverse order exactly once, clears service-owned startup state, and leaves the service restartable.
 

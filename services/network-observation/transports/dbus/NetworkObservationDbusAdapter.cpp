@@ -104,10 +104,7 @@ struct NetworkObservationHandler {
 
     std::string GetPhase()
     {
-        if (auto guard = binding->acquire()) {
-            return guard->isReady() ? std::string(contract::PHASE_LIVE)
-                                    : std::string(contract::PHASE_INITIALIZING);
-        }
+        if (auto guard = binding->acquire()) return guard->getPhase();
         return std::string(contract::PHASE_STOPPED);
     }
 };

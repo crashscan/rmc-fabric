@@ -68,6 +68,7 @@ if(BUILD_TESTING)
     )
     set_tests_properties(inventory_dbus_codec_characterization_tests PROPERTIES TIMEOUT 10 LABELS "unit")
 endif()
+
 install(
     TARGETS inventory_dbus_codec
     EXPORT  rmc_fabricTargets
