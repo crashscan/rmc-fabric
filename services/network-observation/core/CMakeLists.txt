@@ -19,6 +19,12 @@ target_include_directories(observation-model PRIVATE
 )
 target_link_libraries(observation-model pthread glog rsc_util interop_contract)
 
+install(
+    TARGETS observation-model
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+    COMPONENT rel
+)
+
 if(BUILD_TESTING)
     find_package(GTest CONFIG)
     if(GTest_FOUND)
@@ -38,5 +44,6 @@ if(BUILD_TESTING)
             GTest::gtest_main
         )
         add_test(NAME observation_model_tests COMMAND observation_model_tests)
+        set_tests_properties(observation_model_tests PROPERTIES LABELS "unit")
     endif()
 endif()

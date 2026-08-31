@@ -1,8 +1,11 @@
 #pragma once
 
+#include <cstdint>
 #include <string_view>
 
 namespace interop_contract::inventory {
+
+inline constexpr std::uint32_t CONTRACT_VERSION = 1;
 
 inline constexpr std::string_view SERVICE_NAME  = "org.rsc.Inventory";
 inline constexpr std::string_view OBJECT_PATH   = "/org/rsc/Inventory";
@@ -64,5 +67,8 @@ inline constexpr std::string_view ISSUE_ORIGIN   = "origin";
 // Severity values
 inline constexpr std::string_view SEVERITY_ERROR   = "error";
 inline constexpr std::string_view SEVERITY_WARNING = "warning";
+
+// Stable service-level issue codes
+inline constexpr std::string_view ISSUE_CODE_LOOP_STOPPED = "inventory.loop.stopped";
 
 } // namespace interop_contract::inventory

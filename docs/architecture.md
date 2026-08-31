@@ -89,7 +89,9 @@ Both services inherit `ServiceBase` which provides:
 - Transport publication fan-out is isolated per transport. Failures are logged with stable service/transport context and later transports still receive the event.
 - Codec ingress is bounded by `IngressLimits.hpp` and malformed required fields, wrong types, unknown enums, or oversized collections now raise neutral `DecodeError`s internally.
 
-See [ADR-0001](adr/ADR-0001-transport-neutral-contract-layer.md).
+See [ADR-0001](adr/ADR-0001-transport-neutral-contract-layer.md),
+[compatibility policy](compatibility.md), and
+[ADR-0002](adr/ADR-0002-public-contract-and-client-compatibility.md).
 
 ## Building and testing
 
@@ -122,6 +124,13 @@ ctest --preset asan
 ```
 
 Available presets: `dev`, `release`, `asan`, `coverage`.
+
+Additional opt-in presets:
+
+- `integration`
+- `fuzz`
+- `release-package`
+- `benchmark`
 
 ### Manual configure
 
@@ -159,3 +168,9 @@ CTest now verifies both build-tree and install-tree package consumption by confi
 - `rmc_fabric::network_observation_client`
 
 Those consumers intentionally fail if internal service or D-Bus transport targets are exported.
+
+See also:
+
+- [testing](testing.md)
+- [performance baselines](performance.md)
+- [security boundaries](security.md)

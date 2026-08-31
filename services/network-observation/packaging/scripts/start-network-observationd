@@ -34,7 +34,8 @@ wait_for_bus() {
 }
 
 check_ready() {
-    tmp="/tmp/network-observationd.ready.$$"
+    tmp="$(mktemp /tmp/network-observationd.ready.XXXXXX)"
+    trap 'rm -f "$tmp"' RETURN
     /usr/bin/dbus-send --system --print-reply --reply-timeout=3000 \
         --dest=org.rsc.NetworkObservation \
         /org/rsc/NetworkObservation \
@@ -48,13 +49,11 @@ wait_ready() {
     while [ "$i" -lt "$STARTUP_WAIT_SEC" ]; do
         is_running || return 1
         if check_ready; then
-            rm -f /tmp/network-observationd.ready.$$
             return 0
         fi
         sleep 1
         i=$((i+1))
     done
-    rm -f /tmp/network-observationd.ready.$$
     return 1
 }
 

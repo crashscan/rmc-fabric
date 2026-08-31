@@ -1,0 +1,27 @@
+{
+  "localSnapshot": {
+    "eth0": {
+      "map": {
+        "adminUp": { "bool": true },
+        "ifindex": { "i32": 7 },
+        "ifname": { "string": "eth0" },
+        "ipv4": { "list": [ { "string": "10.0.0.10/24" } ] },
+        "ipv6": { "list": [] },
+        "mac": { "string": "aa:bb:cc:dd:ee:ff" },
+        "operstate": { "string": "UP" },
+        "running": { "bool": true }
+      }
+    }
+  },
+  "candidate": {
+    "classification": { "string": "RemoteEndpoint" },
+    "ipv4": { "list": [] },
+    "ipv6": { "list": [] },
+    "mac": { "string": "00:11:22:33:44:55" },
+    "neighborIfaces": { "list": [ { "string": "eth0" } ] },
+    "seenInFdb": { "bool": true },
+    "seenInLldp": { "bool": true },
+    "seenInNeigh": { "bool": true },
+    "status": { "string": "Confirmed" }
+  }
+}

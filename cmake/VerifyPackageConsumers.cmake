@@ -59,3 +59,55 @@ foreach(consumer IN LISTS CONSUMER_NAMES)
         "${install_prefix}"
     )
 endforeach()
+
+set(required_paths
+    "${install_prefix}/sbin/inventory-agentd"
+    "${install_prefix}/sbin/network-observationd"
+    "${install_prefix}/bin/net-observe"
+    "${install_prefix}/etc/inventory-agent/inventory-agentd.conf"
+    "${install_prefix}/etc/network-observation/network-observationd.conf"
+    "${install_prefix}/etc/monit.d/inventory-agentd.cfg"
+    "${install_prefix}/etc/monit.d/network-observationd.cfg"
+    "${install_prefix}/etc/dbus-1/system.d/org.rsc.Inventory.conf"
+    "${install_prefix}/etc/dbus-1/system.d/org.rsc.NetworkObservation.conf"
+    "${install_prefix}/libexec/inventory-agent/start-inventory-agentd"
+    "${install_prefix}/libexec/network-observation/start-network-observationd"
+)
+
+foreach(required_path IN LISTS required_paths)
+    if(NOT EXISTS "${required_path}")
+        message(FATAL_ERROR "Missing installed runtime artifact: ${required_path}")
+    endif()
+endforeach()
+
+function(run_help_smoke executable)
+    execute_process(
+        COMMAND "${executable}" --help
+        RESULT_VARIABLE help_result
+        OUTPUT_VARIABLE help_stdout
+        ERROR_VARIABLE help_stderr
+    )
+    if(NOT help_result EQUAL 0 AND NOT help_result EQUAL 1)
+        message(FATAL_ERROR "Help smoke test failed for ${executable}")
+    endif()
+    string(LENGTH "${help_stdout}${help_stderr}" help_length)
+    if(help_length EQUAL 0)
+        message(FATAL_ERROR "Help smoke test produced no output for ${executable}")
+    endif()
+endfunction()
+
+run_help_smoke("${install_prefix}/sbin/inventory-agentd")
+run_help_smoke("${install_prefix}/sbin/network-observationd")
+run_help_smoke("${install_prefix}/bin/net-observe")
+
+execute_process(
+    COMMAND "${CMAKE_COMMAND}"
+        -DRELEASE_MANIFEST_SOURCE_DIR=${VERIFY_CONSUMER_SOURCE_DIR}
+        -DRELEASE_MANIFEST_INSTALL_PREFIX=${install_prefix}
+        -DRELEASE_MANIFEST_OUTPUT=${VERIFY_CONSUMER_BINARY_DIR}/release-manifest.json
+        -P "${VERIFY_CONSUMER_SOURCE_DIR}/cmake/GenerateReleaseManifest.cmake"
+    RESULT_VARIABLE manifest_result
+)
+if(NOT manifest_result EQUAL 0)
+    message(FATAL_ERROR "Failed to generate release manifest")
+endif()

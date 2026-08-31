@@ -1,0 +1,13 @@
+{
+  "candidate": {
+    "classification": { "string": "Broken" },
+    "ipv4": { "list": [] },
+    "ipv6": { "list": [] },
+    "mac": { "string": "00:11:22:33:44:55" },
+    "neighborIfaces": { "list": [ { "i32": 7 } ] },
+    "seenInFdb": { "bool": true },
+    "seenInLldp": { "bool": true },
+    "seenInNeigh": { "bool": true },
+    "status": { "string": "Confirmed" }
+  }
+}

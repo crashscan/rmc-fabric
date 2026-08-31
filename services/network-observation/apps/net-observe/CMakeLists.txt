@@ -10,3 +10,9 @@ target_link_libraries(net-observe
         gflags
         jsoncpp
 )
+
+install(
+    TARGETS net-observe
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    COMPONENT rel
+)

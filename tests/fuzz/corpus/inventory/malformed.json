@@ -1,0 +1,9 @@
+{
+  "snapshot": {
+    "phase": { "string": "live" },
+    "ready": { "bool": true },
+    "timestamp": { "u64": 18446744073709551615 },
+    "uuid": { "list": [] },
+    "version": { "string": "oops" }
+  }
+}

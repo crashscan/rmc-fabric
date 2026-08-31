@@ -49,9 +49,11 @@ if(BUILD_TESTING)
         NAME interop_contract_tests
         COMMAND interop_contract_tests
     )
+    set_tests_properties(interop_contract_tests PROPERTIES LABELS "unit")
 
     add_test(
         NAME interop_inventory_contract_tests
         COMMAND interop_inventory_contract_tests
     )
+    set_tests_properties(interop_inventory_contract_tests PROPERTIES LABELS "unit")
 endif()

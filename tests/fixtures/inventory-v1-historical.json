@@ -1,0 +1,41 @@
+{
+  "contractVersion": 1,
+  "snapshot": {
+    "phase": { "string": "initializing" },
+    "ready": { "bool": false },
+    "timestamp": { "i64": 1725000000 },
+    "uuid": { "string": "bootstrapping-node" },
+    "version": { "u64": 1 }
+  },
+  "sourceStates": {
+    "firmware-file": {
+      "health": { "string": "failed" },
+      "lastAttemptTs": { "i64": 1725000000 },
+      "lastError": { "string": "cannot open '/etc/rmc/firmware'" },
+      "lastSuccessTs": { "i64": 0 },
+      "origin": { "string": "/etc/rmc/firmware" },
+      "required": { "bool": true },
+      "stale": { "bool": false }
+    },
+    "uuid-file": {
+      "health": { "string": "ok" },
+      "lastAttemptTs": { "i64": 1725000001 },
+      "lastSuccessTs": { "i64": 1725000001 },
+      "origin": { "string": "/etc/rmc/uuid" },
+      "required": { "bool": true },
+      "stale": { "bool": false }
+    }
+  },
+  "issues": {
+    "firmware-file": {
+      "message": { "string": "cannot open '/etc/rmc/firmware'" },
+      "origin": { "string": "/etc/rmc/firmware" },
+      "severity": { "string": "error" }
+    },
+    "inventory.loop.stopped": {
+      "message": { "string": "inventory refresh loop terminated unexpectedly; inventory data may be stale" },
+      "origin": { "string": "InventoryService::runLoop" },
+      "severity": { "string": "error" }
+    }
+  }
+}

@@ -11,3 +11,9 @@ target_link_libraries(inventory-agentd
         inventory_transport
         daemon_support
 )
+
+install(
+    TARGETS inventory-agentd
+    RUNTIME DESTINATION ${CMAKE_INSTALL_SBINDIR}
+    COMPONENT rel
+)

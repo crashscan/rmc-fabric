@@ -1,0 +1,16 @@
+{
+  "snapshot": {
+    "phase": { "string": "live" },
+    "ready": { "bool": true },
+    "timestamp": { "i64": 1725102000 },
+    "uuid": { "string": "1234-5678" },
+    "version": { "u64": 11 }
+  },
+  "issues": {
+    "firmware-file": {
+      "message": { "string": "cannot open '/etc/rmc/firmware'" },
+      "origin": { "string": "/etc/rmc/firmware" },
+      "severity": { "string": "error" }
+    }
+  }
+}

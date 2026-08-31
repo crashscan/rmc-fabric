@@ -1,9 +1,12 @@
 #include "FileBackedInventorySource.h"
 
 #include <filesystem>
-#include <fstream>
-#include <sstream>
+#include <system_error>
 #include <stdexcept>
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace RSCGroup {
 
@@ -30,22 +33,12 @@ FileBackedInventorySource::~FileBackedInventorySource() = default;
 
 InventoryFields FileBackedInventorySource::collect()
 {
-    std::ifstream in(filePath_);
-    if (!in) {
-        const std::string err = "cannot open '" + filePath_ + "'";
-        noteFailure(err);
-        throw std::runtime_error(err);
-    }
-
-    std::stringstream ss;
-    ss << in.rdbuf();
-
     try {
-        InventoryFields fields = fieldsFromContents(ss.str());
+        InventoryFields fields = fieldsFromContents(readFileContents(filePath_));
         noteSuccess();
         return fields;
     } catch (const std::exception& e) {
-        noteFailure(e.what());
+        noteFailure(boundedErrorText(e.what()));
         throw;
     }
 }
@@ -65,6 +58,70 @@ std::string FileBackedInventorySource::scalarFromContents(const std::string& con
     }
     const auto last = contents.find_last_not_of(kWs);
     return contents.substr(first, last - first + 1);
+}
+
+std::string FileBackedInventorySource::readFileContents(const std::string& filePath)
+{
+    const int fd = ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    if (fd < 0) {
+        if (errno == ELOOP) {
+            throw std::runtime_error("refusing to open symlink '" + filePath + "'");
+        }
+        throw std::system_error(errno, std::generic_category(),
+                                "cannot open '" + filePath + "'");
+    }
+
+    struct FdCloser {
+        int fd{-1};
+        ~FdCloser() { if (fd >= 0) { ::close(fd); } }
+    } closer{fd};
+
+    struct stat st {};
+    if (::fstat(fd, &st) != 0) {
+        throw std::system_error(errno, std::generic_category(),
+                                "cannot stat '" + filePath + "'");
+    }
+    if (!S_ISREG(st.st_mode)) {
+        throw std::runtime_error("refusing non-regular file '" + filePath + "'");
+    }
+    if (st.st_size < 0 || static_cast<std::uintmax_t>(st.st_size) > kMaxFileBytes) {
+        throw std::runtime_error("file exceeds size limit '" + filePath + "'");
+    }
+
+    std::string contents;
+    contents.reserve(static_cast<std::size_t>(st.st_size));
+
+    char buffer[4096];
+    for (;;) {
+        const ssize_t bytesRead = ::read(fd, buffer, sizeof(buffer));
+        if (bytesRead == 0) {
+            break;
+        }
+        if (bytesRead < 0) {
+            if (errno == EINTR) {
+                continue;
+            }
+            throw std::system_error(errno, std::generic_category(),
+                                    "cannot read '" + filePath + "'");
+        }
+        contents.append(buffer, static_cast<std::size_t>(bytesRead));
+        if (contents.size() > kMaxFileBytes) {
+            throw std::runtime_error("file exceeds size limit '" + filePath + "'");
+        }
+    }
+
+    return contents;
+}
+
+std::string FileBackedInventorySource::boundedErrorText(std::string_view error)
+{
+    constexpr std::size_t kMaxErrorBytes = 512;
+    if (error.size() <= kMaxErrorBytes) {
+        return std::string(error);
+    }
+    std::string bounded(error.substr(0, kMaxErrorBytes));
+    bounded += "...";
+    return bounded;
 }
 
 void FileBackedInventorySource::noteSuccess() { std::scoped_lock lock(stateMutex_); state_.health = SourceHealth::OK; state_.lastError.reset(); }
