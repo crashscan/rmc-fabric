@@ -11,5 +11,5 @@ int main()
 
     interop_contract::inventory::InventorySnapshot snapshot;
     interop_contract::network_observation::LocalNetworkSnapshot local;
-    return snapshot.fields.empty() && local.interfaces.empty() ? 0 : 0;
+    return snapshot.fields.empty() && local.interfaces.empty() ? 0 : 1;
 }

@@ -75,6 +75,12 @@ std::unique_ptr<IFileWatcher> InventoryService::makeDefaultFileWatcher()
 }
 
 InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
+                                   FileWatcherFactory fileWatcherFactory)
+    : InventoryService(std::move(manager), Settings{}, std::move(fileWatcherFactory))
+{
+}
+
+InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
                                    Settings settings,
                                    FileWatcherFactory fileWatcherFactory)
     : ServiceBase("inventory-service")
@@ -259,7 +265,7 @@ void InventoryService::refresh()
         std::scoped_lock lock(refreshMutex_);
         refreshRequested_ = true;
     }
-    signalFd(refreshEventFd_);
+    signalFd(refreshEventFd_.get());
 }
 
 void InventoryService::runLoop(std::stop_token stopToken)

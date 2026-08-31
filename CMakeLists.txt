@@ -148,6 +148,18 @@ configure_package_config_file(
     INSTALL_DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
 )
 
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindSigCxx.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/FindSigCxx.cmake"
+    COPYONLY
+)
+
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindDBusCxx.cmake"
+    "${CMAKE_CURRENT_BINARY_DIR}/FindDBusCxx.cmake"
+    COPYONLY
+)
+
 export(
     EXPORT rmc_fabricTargets
     FILE "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricTargets.cmake"
@@ -164,6 +176,8 @@ install(
     FILES
         "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfigVersion.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindSigCxx.cmake"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindDBusCxx.cmake"
     DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
     COMPONENT   dev
 )

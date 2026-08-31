@@ -12,12 +12,11 @@
 
 namespace {
 
-using RSCGroup::FieldValue;
-using RSCGroup::InventoryFields;
 using RSCGroup::InventoryDbusCodec::decodeIssues;
 using RSCGroup::InventoryDbusCodec::encodeIssues;
 
-using Issues = std::map<std::string, InventoryFields>;
+using InventoryFields = interop_contract::inventory::InventoryFields;
+using Issues = interop_contract::inventory::InventoryIssues;
 
 void expect(bool condition, const std::string& message)
 {

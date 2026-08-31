@@ -159,7 +159,7 @@ void testRollbackStopsStartedTransportsExactlyOnce()
     expect(first->startCount() == 1, "first transport should start once");
     expect(first->stopCount() == 1, "first transport should be rolled back exactly once");
     expect(second->startCount() == 1, "second transport should attempt start once");
-    expect(second->stopCount() == 0, "failing transport should not be stopped if start returned false");
+    expect(second->stopCount() == 1, "failing transport should be rolled back exactly once");
     expect(third->startCount() == 0, "later transports should not be started after failure");
 }
 

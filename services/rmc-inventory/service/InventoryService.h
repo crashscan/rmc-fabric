@@ -29,7 +29,9 @@ public:
     using FileWatcherFactory = std::function<std::unique_ptr<IFileWatcher>()>;
 
     explicit InventoryService(std::shared_ptr<IInventoryManager> manager,
-                              Settings settings = {},
+                              FileWatcherFactory fileWatcherFactory = {});
+    explicit InventoryService(std::shared_ptr<IInventoryManager> manager,
+                              Settings settings,
                               FileWatcherFactory fileWatcherFactory = {});
     ~InventoryService() override;
 

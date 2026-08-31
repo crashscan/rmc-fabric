@@ -325,7 +325,7 @@ void testTransportStartFailureRollsBackWithoutRunningLoop()
     expect(first->startCount() == 1, "first transport should attempt start once");
     expect(first->stopCount() == 1, "started transport should be rolled back exactly once");
     expect(failing->startCount() == 1, "failing transport should attempt start once");
-    expect(failing->stopCount() == 0, "failing transport should not be stopped when start returned false");
+    expect(failing->stopCount() == 1, "failing transport should be rolled back exactly once");
 }
 
 void testStopWaitsForWorkerBeforeStoppingTransports()

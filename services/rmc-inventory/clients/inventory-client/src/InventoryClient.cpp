@@ -96,41 +96,6 @@ struct InventoryClient::Impl
     std::shared_ptr<DBus::SignalProxy<void(bool)>> sigReadyChanged;
 };
 
-InventoryClient::InventoryClient(std::shared_ptr<void> connection,
-                                 std::string serviceName,
-                                 std::string objectPath,
-                                 std::string interfaceName)
-    : impl_(std::make_unique<Impl>())
-{
-    impl_->serviceName = std::move(serviceName);
-    impl_->objectPath = std::move(objectPath);
-    impl_->interfaceName = std::move(interfaceName);
-
-    if (connection) {
-        impl_->connection = std::static_pointer_cast<DBus::Connection>(std::move(connection));
-    } else {
-        impl_->dispatcher = DBus::StandaloneDispatcher::create();
-        impl_->connection = impl_->dispatcher->create_connection(DBus::BusType::SYSTEM);
-    }
-
-    if (!impl_->connection) {
-        throw std::invalid_argument("InventoryClient: connection is null");
-    }
-
-    impl_->proxy = impl_->connection->create_object_proxy(
-        impl_->serviceName,
-        impl_->objectPath,
-        DBus::ThreadForCalling::DispatcherThread);
-    if (!impl_->proxy) {
-        throw std::runtime_error("InventoryClient: failed to create object proxy");
-    }
-
-    impl_->iface = impl_->proxy->create_interface(impl_->interfaceName);
-    if (!impl_->iface) {
-        throw std::runtime_error("InventoryClient: failed to create interface proxy");
-    }
-}
-
 InventoryClient::InventoryClient(std::string busType,
                                  std::string serviceName,
                                  std::string objectPath,

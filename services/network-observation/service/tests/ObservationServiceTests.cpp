@@ -269,7 +269,7 @@ void testTransportFailurePreventsRuntimeStart()
     ObservationService service(std::move(runtime), failingTransport, std::chrono::milliseconds(100));
     expect(!service.start(), "service start should fail when transport start fails");
     expect(runtimePtr->startCount() == 0, "runtime must not start if transport startup fails");
-    expect(failingTransport->stopCount() == 0, "failing transport should not be stopped when start returned false");
+    expect(failingTransport->stopCount() == 1, "failing transport should be rolled back exactly once");
 }
 
 void testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport()

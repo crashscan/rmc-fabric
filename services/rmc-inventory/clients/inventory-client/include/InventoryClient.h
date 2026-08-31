@@ -17,12 +17,6 @@ public:
     using BoolCallback   = std::function<void(bool)>;
 
     explicit InventoryClient(
-        std::shared_ptr<void> connection,
-        std::string serviceName    = std::string(interop_contract::inventory::SERVICE_NAME),
-        std::string objectPath     = std::string(interop_contract::inventory::OBJECT_PATH),
-        std::string interfaceName  = std::string(interop_contract::inventory::INTERFACE)
-    );
-    explicit InventoryClient(
         std::string busType,
         std::string serviceName    = std::string(interop_contract::inventory::SERVICE_NAME),
         std::string objectPath     = std::string(interop_contract::inventory::OBJECT_PATH),

@@ -144,9 +144,7 @@ int main()
     std::signal(SIGTERM, handleSignal);
 
     try {
-        auto dispatcher = DBus::StandaloneDispatcher::create();
-        auto connection = dispatcher->create_connection(DBus::BusType::SYSTEM);
-        auto client = std::make_shared<InventoryClient>(connection);
+        auto client = std::make_shared<InventoryClient>("system");
 
         if (!client->waitReady(std::chrono::seconds(5))) {
             std::scoped_lock lock(g_outMutex);
@@ -241,16 +239,6 @@ int main()
         g_shuttingDown = true;
 
         client.reset();
-        connection.reset();
-
-        try {
-            dispatcher->stop();
-        } catch (const std::exception& e) {
-            std::scoped_lock lock(g_outMutex);
-            std::cerr << "dispatcher stop failed: " << e.what() << "\n";
-        }
-
-        dispatcher.reset();
     } catch (const std::exception& e) {
         std::scoped_lock lock(g_outMutex);
         std::cerr << "inventory-watch failed: " << e.what() << "\n";

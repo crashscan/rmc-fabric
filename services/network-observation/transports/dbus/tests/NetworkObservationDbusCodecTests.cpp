@@ -3,9 +3,11 @@
 #include <DecodeError.hpp>
 
 #include <cstdlib>
+#include <dbus-cxx/variant.h>
 #include <iostream>
 #include <map>
 #include <string>
+#include <vector>
 
 namespace {
 
