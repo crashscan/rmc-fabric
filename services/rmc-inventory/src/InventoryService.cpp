@@ -96,7 +96,7 @@ void InventoryService::addSource(std::shared_ptr<IInventorySource> source) {
     }
 }
 
-void InventoryService::addTransport(std::shared_ptr<ITransport> transport) {
+void InventoryService::addTransport(std::shared_ptr<IInventoryTransport> transport) {
     if (!transport) {
         throw std::invalid_argument("InventoryService::addTransport: transport is null");
     }
@@ -124,7 +124,7 @@ bool InventoryService::initializeComponents()
         }
     }
 
-    std::vector<std::shared_ptr<ITransport>> startedTransports;
+    std::vector<std::shared_ptr<IInventoryTransport>> startedTransports;
     startedTransports.reserve(transports_.size());
     try {
         for (auto& transport : transports_) {

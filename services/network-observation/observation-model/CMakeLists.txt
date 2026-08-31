@@ -11,12 +11,14 @@ add_library(observation-model SHARED
     policy/DefaultInterfacePolicy.cpp
     adapter/NetworkObservationAdapter.cpp
 )
-target_include_directories(observation-model PRIVATE
+target_include_directories(observation-model PUBLIC
     public
+)
+target_include_directories(observation-model PRIVATE
+    adapter
     engine
     classifier
     policy
-    adapter
     ${NETLINK_BASE}
     ${NETLINK_BASE}/types
     ${NETLINK_BASE}/utils

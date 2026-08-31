@@ -11,7 +11,7 @@ namespace RSCGroup {
 
 class TransportFactory {
 public:
-    [[nodiscard]] static std::shared_ptr<ITransport> create(
+    [[nodiscard]] static std::shared_ptr<IInventoryTransport> create(
         const std::string& name,
         std::shared_ptr<DBus::Connection> connection = nullptr,
         std::string serviceName   = {},

@@ -14,9 +14,9 @@ class IInventoryQueryService;
  * compile-time-verified bindQueryService() binding step.  Binding must
  * happen before start().
  */
-class ITransport : public ITypedTransport<IInventoryQueryService> {
+class IInventoryTransport : public ITypedTransport<IInventoryQueryService> {
 public:
-    ~ITransport() override = default;
+    ~IInventoryTransport() override = default;
 
     virtual void start() = 0;
     virtual void stop() = 0;
@@ -25,5 +25,8 @@ public:
     virtual void publishSourceStateChanged(const std::string& sourceName) = 0;
     virtual void publishReadyChanged(bool ready) = 0;
 };
+
+// Backward-compatibility alias for in-tree migration. Prefer IInventoryTransport.
+using ITransport = IInventoryTransport;
 
 } // namespace RSCGroup

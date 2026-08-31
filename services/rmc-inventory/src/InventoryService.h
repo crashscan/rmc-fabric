@@ -67,7 +67,7 @@ public:
     InventoryService& operator=(const InventoryService&) = delete;
 
     void addSource(std::shared_ptr<IInventorySource> source);
-    void addTransport(std::shared_ptr<ITransport> transport);
+    void addTransport(std::shared_ptr<IInventoryTransport> transport);
 
     // ServiceBase extension points
     bool initializeComponents() override;
@@ -106,7 +106,7 @@ private:
     std::unique_ptr<IFileWatcher> fileWatcher_;
     Settings settings_;
 
-    std::vector<std::shared_ptr<ITransport>> transports_;
+    std::vector<std::shared_ptr<IInventoryTransport>> transports_;
 
     // Loop operational state: written by the worker thread, observed elsewhere.
     std::atomic<bool> loopAlive_{false};

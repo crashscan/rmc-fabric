@@ -38,6 +38,24 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # ---------------------------------------------------------------------------
 include(CTest)
 
+if(BUILD_TESTING)
+  add_test(
+    NAME architecture_no_transport_in_interop_contract
+    COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check_no_transport_in_interop_contract.sh
+  )
+  set_tests_properties(architecture_no_transport_in_interop_contract PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
+
+  add_test(
+    NAME architecture_component_boundaries
+    COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check_component_boundaries.sh ${CMAKE_SOURCE_DIR}
+  )
+  set_tests_properties(architecture_component_boundaries PROPERTIES
+    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+  )
+endif()
+
 add_subdirectory(services)
 add_subdirectory(lib)
 
@@ -76,4 +94,3 @@ set(CPACK_COMPONENT_HEADERS_GROUP      "dev")
 set(CPACK_COMPONENT_RELLIBRARIES_GROUP "rel")
 
 include(CPack)
-

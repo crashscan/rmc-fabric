@@ -16,7 +16,7 @@ namespace RSCGroup {
 
 class IInventoryQueryService;
 
-class DbusInventoryTransport final : public ITransport, public DbusTransportBase {
+class DbusInventoryTransport final : public IInventoryTransport, public DbusTransportBase {
 public:
     DbusInventoryTransport(std::shared_ptr<DBus::Connection> connection,
                            std::string serviceName,
@@ -27,10 +27,10 @@ public:
     DbusInventoryTransport(const DbusInventoryTransport&) = delete;
     DbusInventoryTransport& operator=(const DbusInventoryTransport&) = delete;
 
-    // ITypedTransport<IInventoryQueryService> (inherited via ITransport)
+    // ITypedTransport<IInventoryQueryService> (inherited via IInventoryTransport)
     void bindQueryService(IInventoryQueryService& queryService) override;
 
-    // ITransport
+    // IInventoryTransport
     void start() override;
     void stop() override;
 

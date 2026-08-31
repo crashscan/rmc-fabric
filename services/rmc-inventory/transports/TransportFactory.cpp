@@ -9,7 +9,7 @@
 
 namespace RSCGroup {
 
-std::shared_ptr<ITransport> TransportFactory::create(
+std::shared_ptr<IInventoryTransport> TransportFactory::create(
     const std::string& name,
     std::shared_ptr<DBus::Connection> connection,
     std::string serviceName,
