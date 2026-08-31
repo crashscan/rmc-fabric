@@ -81,6 +81,13 @@ include_directories(
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # ---------------------------------------------------------------------------
+# Install helpers — included early so CMAKE_INSTALL_INCLUDEDIR etc. are
+# available inside add_subdirectory() calls below.
+# ---------------------------------------------------------------------------
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+# ---------------------------------------------------------------------------
 # Testing — BUILD_TESTING is the CMake standard option; include(CTest) honours it.
 # ---------------------------------------------------------------------------
 include(CTest)
@@ -113,8 +120,6 @@ endif()
 # ---------------------------------------------------------------------------
 # Install and CMake package export
 # ---------------------------------------------------------------------------
-include(GNUInstallDirs)
-include(CMakePackageConfigHelpers)
 
 # Install the rmc_fabric_warnings helper (in-tree only — do NOT export to consumers)
 

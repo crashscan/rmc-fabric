@@ -2,10 +2,10 @@
 
 include(CMakeFindDependencyMacro)
 
-# Try to locate DBusCxx and SigCxx if consumers use public client targets
-# These are PRIVATE in most targets so failure is non-fatal for contract-only consumers.
-find_dependency(DBusCxx QUIET)
-find_dependency(SigCxx  QUIET)
+# DBusCxx and SigCxx are PUBLIC link dependencies of the client targets;
+# consumers that link those targets must have them available.
+find_dependency(DBusCxx REQUIRED)
+find_dependency(SigCxx  REQUIRED)
 
 include("${CMAKE_CURRENT_LIST_DIR}/rmc_fabricTargets.cmake")
 
