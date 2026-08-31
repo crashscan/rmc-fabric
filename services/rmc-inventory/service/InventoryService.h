@@ -81,6 +81,7 @@ private:
     std::atomic<bool> loopFailed_{false};
 
     mutable std::mutex lifecycleMutex_;
+    bool stopping_{false};  ///< Protected by lifecycleMutex_; prevents concurrent teardowns
     std::jthread loopThread_;
 
     mutable std::mutex refreshMutex_;

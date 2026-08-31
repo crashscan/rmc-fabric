@@ -44,9 +44,21 @@ public:
               const std::string& interfaceName) override;
 
     /**
+     * @brief Closes query admission and waits for in-flight D-Bus handler
+     *        calls to complete.  Safe to call concurrently with handler
+     *        method invocations.
+     *
+     * After this returns, no query handler executes and no new query is
+     * admitted.  Publication signals remain open.
+     */
+    void quiesceQueries() override;
+
+    /**
      * @brief Revokes handler access to the service and waits for in-flight
      *        D-Bus calls to complete.  Safe to call concurrently with handler
      *        method invocations.
+     *
+     * Delegates to quiesceQueries() for the drain.
      */
     void onTransportStopping() override;
 

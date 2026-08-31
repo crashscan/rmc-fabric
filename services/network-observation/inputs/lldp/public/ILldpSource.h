@@ -19,6 +19,20 @@ public:
     virtual ~ILldpSource() = default;
 
     virtual bool start() = 0;
+
+    /**
+     * @brief Stop the source and drain all in-flight callbacks.
+     *
+     * Postcondition when stop() returns:
+     *  - no admitted callback is executing;
+     *  - no new callback will be admitted until a successful restart;
+     *  - watch/subscription handle is released;
+     *  - cached neighbor state is cleared;
+     *  - destruction is safe.
+     *
+     * Must be idempotent: calling stop() on an already-stopped source is
+     * a no-op.
+     */
     virtual void stop() = 0;
     [[nodiscard]] virtual bool isRunning() const = 0;
 

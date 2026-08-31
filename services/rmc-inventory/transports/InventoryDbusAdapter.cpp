@@ -92,9 +92,14 @@ InventoryDbusAdapter::InventoryDbusAdapter()
     handler_->binding = &binding_;
 }
 
-void InventoryDbusAdapter::onTransportStopping()
+void InventoryDbusAdapter::quiesceQueries()
 {
     binding_.detach();
+}
+
+void InventoryDbusAdapter::onTransportStopping()
+{
+    quiesceQueries();
 }
 
 void InventoryDbusAdapter::setService(IInventoryQueryService* service)

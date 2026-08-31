@@ -42,6 +42,16 @@ const std::vector<std::shared_ptr<IServiceTransport>>& ServiceBase::transports()
 
 void ServiceBase::setReady(bool ready)
 {
+    // Reject setReady(true) once shutdown has been claimed.
+    if (ready && shutdownClaimed_.load(std::memory_order_acquire)) {
+        LOG(WARNING) << diagnostics::formatError(serviceName_,
+                                                 "service.lifecycle",
+                                                 "set_ready",
+                                                 "shutdown_claimed",
+                                                 serviceName_,
+                                                 "setReady(true) rejected: shutdown in progress");
+        return;
+    }
     if (ready_.exchange(ready) == ready) {
         return;
     }
@@ -144,6 +154,7 @@ bool ServiceBase::start()
 
     running_ = true;
     ready_ = false;
+    shutdownClaimed_.store(false, std::memory_order_release);
     diagnostics::logInfo(serviceName_, "service.lifecycle", "start", "service_started", serviceName_, "started");
     return true;
 }
@@ -154,6 +165,9 @@ void ServiceBase::stop()
         return;
     }
 
+    // Claim shutdown: prevents setReady(true) from any concurrent producer.
+    shutdownClaimed_.store(true, std::memory_order_release);
+
     if (ready_) {
         setReady(false);
     }
@@ -162,6 +176,36 @@ void ServiceBase::stop()
 
     running_ = false;
     diagnostics::logInfo(serviceName_, "service.lifecycle", "stop", "service_stopped", serviceName_, "stopped");
+}
+
+void ServiceBase::quiesceQueriesOnTransports()
+{
+    for (auto& transport : transports_) {
+        try {
+            transport->quiesceQueries();
+        } catch (const std::exception& e) {
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(transport->name()),
+                                  "quiesce_queries",
+                                  "transport_quiesce_failed",
+                                  transport->name(),
+                                  e.what());
+            throw;
+        } catch (...) {
+            diagnostics::logError(serviceName_,
+                                  "transport." + diagnostics::sanitizeField(transport->name()),
+                                  "quiesce_queries",
+                                  "transport_quiesce_failed",
+                                  transport->name(),
+                                  "unknown exception");
+            throw;
+        }
+    }
+}
+
+void ServiceBase::stopTransports() noexcept
+{
+    stopAllTransports();
 }
 
 void ServiceBase::rollbackStartedTransports(std::size_t startedCount, IServiceTransport* currentTransport) noexcept

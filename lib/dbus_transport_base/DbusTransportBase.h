@@ -60,6 +60,20 @@ public:
      * before calling start().
      */
     void start();
+
+    /**
+     * @brief Close query admission and wait for all in-flight D-Bus query
+     *        handlers to drain.
+     *
+     * This is a query-only quiescence: the D-Bus object and connection
+     * remain registered and publication signals remain open.  stop() must
+     * remain safe to call without an explicit prior quiesceQueries().
+     *
+     * Failure is logged as a safety-barrier failure; no exception is
+     * suppressed silently.
+     */
+    void quiesceQueries();
+
     void stop();
 
     [[nodiscard]] bool isRunning() const { return running_.load(std::memory_order_acquire); }

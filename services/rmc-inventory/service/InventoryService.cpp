@@ -212,17 +212,70 @@ bool InventoryService::start()
 
 void InventoryService::stop()
 {
-    std::scoped_lock lock(lifecycleMutex_);
-
-    if (loopThread_.joinable()) {
-        loopThread_.request_stop();
-        signalFd(refreshEventFd_.get());
-        loopThread_.join();
+    // Claim shutdown. If another stop() is already in progress or the service
+    // has never started, return immediately.
+    {
+        std::scoped_lock lock(lifecycleMutex_);
+        if (stopping_) return;
+        if (!ServiceBase::isRunning() && !loopThread_.joinable()) return;
+        stopping_ = true;
     }
 
+    // Step 1: Quiesce D-Bus query admission — no new Refresh/Get calls
+    // will be admitted after this returns.
+    // Must NOT hold lifecycleMutex_ while blocking on query drain.
+    quiesceQueriesOnTransports();
+
+    // Step 2: Signal the worker and join it.
+    // After quiescence, no new Refresh() can enqueue a signal on the eventfd.
+    {
+        std::scoped_lock lock(lifecycleMutex_);
+        if (loopThread_.joinable()) {
+            loopThread_.request_stop();
+            signalFd(refreshEventFd_.get());
+        }
+    }
+    // Join outside the mutex — the worker must not hold it when exiting.
+    // Self-join guard: if stop() is called from within the loop thread itself
+    // (e.g. a downstream callback drives lifecycle), skip the join to avoid
+    // a deadlock — the caller is responsible for the thread completing.
+    bool selfJoinPath = false;
+    if (loopThread_.joinable() && loopThread_.get_id() != std::this_thread::get_id()) {
+        loopThread_.join();
+    } else if (loopThread_.joinable()) {
+        LOG(WARNING) << "InventoryService::stop() called from within loop thread; join skipped";
+        loopThread_.detach();
+        selfJoinPath = true;
+    }
+
+    // Step 3: Clear worker-related state.
     loopFailed_.store(false, std::memory_order_release);
-    refreshEventFd_.reset();
+    {
+        std::scoped_lock lock(refreshMutex_);
+        refreshRequested_ = false;
+    }
+
+    // Step 4: Close eventfd only after the worker has been fully joined.
+    // On the self-join path the detached thread is still executing (it will
+    // exit the event loop shortly), so we must NOT close the fd here — the
+    // thread holds references to it via its poll/read loop.  On that path we
+    // leave refreshEventFd_ open; start() will reinitialise it on next boot.
+    if (!selfJoinPath) {
+        refreshEventFd_.reset();
+    }
+    // else: detach path — leave fd alive so the still-running thread can exit
+
+    // Step 5: Emit ReadyChanged(false) (terminal readiness transition) and
+    // fully stop/unregister transports.
+    // ServiceBase::stop() emits setReady(false) before stopping transports,
+    // satisfying the terminal-signal ordering requirement.
     ServiceBase::stop();
+
+    // Reset stopping_ so the service can be restarted.
+    {
+        std::scoped_lock lock(lifecycleMutex_);
+        stopping_ = false;
+    }
 }
 
 bool InventoryService::isRunning() const

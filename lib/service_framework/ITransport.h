@@ -37,6 +37,22 @@ public:
     virtual void stop() = 0;
 
     /**
+     * @brief Close query admission and wait for all in-flight query handlers
+     *        to complete before returning.
+     *
+     * Postconditions (when this method returns):
+     *  - no new externally-initiated query call is admitted;
+     *  - all previously admitted query calls have returned;
+     *  - publication resources (signals) remain open;
+     *  - stop() remains safe to call without an explicit prior quiesceQueries().
+     *
+     * Default is a no-op for transports that have no query methods.
+     * Failure to quiesce is a safety-barrier failure: implementations should
+     * log or throw rather than silently continue.
+     */
+    virtual void quiesceQueries() {}
+
+    /**
      * @brief Notify subscribers that the service ready state has changed.
      *
      * Default is a no-op so that transports that do not need ready-state

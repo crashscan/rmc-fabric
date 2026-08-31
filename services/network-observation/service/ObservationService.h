@@ -67,6 +67,7 @@ private:
     std::unique_ptr<IObservationRuntime> runtime_;
     std::chrono::steady_clock::duration agingInterval_;
     mutable std::mutex lifecycleMutex_;
+    bool stopping_{false};  ///< Protected by lifecycleMutex_; prevents concurrent teardowns
     std::mutex agingMutex_;
     std::condition_variable_any agingCv_;
     std::jthread agingThread_;

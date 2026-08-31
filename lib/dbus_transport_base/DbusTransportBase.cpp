@@ -130,10 +130,27 @@ void DbusTransportBase::start()
     }
 }
 
+void DbusTransportBase::quiesceQueries()
+{
+    if (!running_.load(std::memory_order_acquire)) return;
+
+    try {
+        adapter_->quiesceQueries();
+    } catch (const std::exception& e) {
+        diagnostics::logError(serviceName_, "transport.dbus", "quiesce_queries", "transport_quiesce_failed", serviceName_, e.what());
+        throw;
+    } catch (...) {
+        diagnostics::logError(serviceName_, "transport.dbus", "quiesce_queries", "transport_quiesce_failed", serviceName_, "unknown exception");
+        throw;
+    }
+}
+
 void DbusTransportBase::stop()
 {
     if (!running_.exchange(false, std::memory_order_acq_rel)) return;
 
+    // Quiesce queries defensively before unregistering the D-Bus object.
+    // This is safe to call even if quiesceQueries() was already called.
     try {
         adapter_->onTransportStopping();
     } catch (const std::exception& e) {

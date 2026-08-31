@@ -12,6 +12,45 @@
 Readiness does **not** imply full health, and liveness failures do **not** silently redefine
 existing `GetReady()` / `GetPhase()` meanings.
 
+## Shutdown semantics and signal ordering
+
+Both services follow a strict externally observable shutdown order for each service epoch:
+
+1. **Query quiescence** — D-Bus query admission closes; in-flight `Get*` and `Refresh` handlers
+   complete before any service dependency is torn down.  Queries arriving after quiescence return
+   safe defaults.
+2. **Worker stop and drain** — service-owned worker threads and runtime input producers stop and
+   drain.  Domain signals produced by already-admitted work may still be emitted at this stage
+   because transports remain open.
+3. **Terminal readiness transition** — after all event producers have drained, `ReadyChanged(false)`
+   is emitted if the service was ready.  This is the final service-originated signal of the epoch.
+4. **Transport close** — D-Bus object unregistration and connection release happen only after the
+   terminal readiness signal.
+
+**Intentional ordering note**: query methods become unavailable (step 1) *before* subscribers
+receive the terminal `ReadyChanged(false)` (step 3).  Clients that rely on re-querying state after
+observing `ReadyChanged(false)` will receive safe defaults or errors.
+
+`ReadyChanged(true)` is rejected once shutdown has been claimed.  No domain signal or
+readiness-true transition may occur after the terminal readiness-false transition.
+
+## Asynchronous Refresh shutdown semantics
+
+A D-Bus `Refresh()` call admitted before query quiescence may finish enqueueing its asynchronous
+work request.  A refresh already running may complete and publish results before the terminal
+`ReadyChanged(false)`.  A refresh that is merely pending in the event queue may be discarded once
+the worker has been stopped.
+
+## LLDP callback lifecycle
+
+The LLDP watch callback captures only a `weak_ptr` to the internal callback state.  `stop()` on
+the LLDP source closes the admission gate *before* destroying the watch handle and waits for all
+active callback leases to drain before clearing cache state.
+
+Observation callbacks must **not** synchronously drive source lifecycle (e.g. call `stop()` or
+`refreshAll()` from within a callback).  Doing so is a programming error and may log a warning or
+fail an assertion.
+
 ## Inventory semantics
 
 - `GetReady()` remains the existing readiness latch.
