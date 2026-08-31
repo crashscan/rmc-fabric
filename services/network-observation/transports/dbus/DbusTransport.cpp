@@ -1,7 +1,5 @@
-//
-// Created by vvass on 21-Jul-26.
-//
 #include "DbusTransport.h"
+
 #include "NetworkObservationDbusAdapter.h"
 
 #include <interop_contract/network_observation/NetworkObservationContracts.hpp>
@@ -9,7 +7,6 @@
 #include <glog/logging.h>
 
 namespace RSCGroup {
-
 namespace {
 using namespace interop_contract::network_observation;
 } // namespace
@@ -20,16 +17,17 @@ DbusTransport::DbusTransport(const std::string& busType)
                         std::string(SERVICE_NAME),
                         std::string(OBJECT_PATH),
                         std::string(INTERFACE))
-{}
+{
+}
 
 NetworkObservationDbusAdapter* DbusTransport::obsAdapter() const
 {
     return getTypedAdapter<NetworkObservationDbusAdapter>();
 }
 
-void DbusTransport::setQueryProvider(IObservationQueryService* provider)
+void DbusTransport::bindQueryService(IObservationQueryService& provider)
 {
-    obsAdapter()->setService(provider);
+    obsAdapter()->setService(&provider);
 }
 
 bool DbusTransport::start()
@@ -47,8 +45,11 @@ bool DbusTransport::start()
 void DbusTransport::stop()
 {
     DbusTransportBase::stop();
-    // onTransportStopping() (called by DbusTransportBase::stop()) already clears
-    // the service pointer via NetworkObservationDbusAdapter::onTransportStopping().
+}
+
+std::string DbusTransport::name() const
+{
+    return "dbus";
 }
 
 void DbusTransport::publishLocalStateChanged()

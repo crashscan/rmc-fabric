@@ -1,19 +1,17 @@
-//
-// Created by vvass on 21-Jul-26.
-//
-/**
- * @file StdoutTransport.h
- * @brief Stdout transport — logs entity notifications to stdout.
- */
 #pragma once
-#include "ITransport.h"
+
+#include "IObservationTransport.h"
+
+#include <string>
 
 namespace RSCGroup {
 
-class StdoutTransport : public ITransport {
+class StdoutTransport : public IObservationTransport {
 public:
-    bool start() override;
+    void bindQueryService(IObservationQueryService& provider) override;
+    [[nodiscard]] bool start() override;
     void stop() override;
+    [[nodiscard]] std::string name() const override;
 
     void publishLocalStateChanged() override;
     void publishInterfaceChanged(const std::string& ifname) override;

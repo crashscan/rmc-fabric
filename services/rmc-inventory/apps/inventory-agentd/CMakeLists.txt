@@ -7,8 +7,7 @@ target_link_libraries(inventory-agentd
         pthread glog gflags jsoncpp
         inventory_service
         inventory_core
-        inventory_service_ports
+        inventory_file_inputs
         inventory_transport
-        service_framework
         daemon_support
 )

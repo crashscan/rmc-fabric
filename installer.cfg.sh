@@ -3,9 +3,9 @@
 copy "services/network-observation/apps/network-observationd/network-observationd" "/usr/sbin/"
 copy "services/network-observation/apps/net-observe/net-observe" "/usr/bin/"
 
-copy "services/network-observation/observation-model/libobservation-model.so" "/usr/lib"
-copy "services/network-observation/netlink-monitor/libnetlink-monitor.so"     "/usr/lib"
-copy "services/network-observation/lldp-observer/liblldp-observer.so"         "/usr/lib"
+copy "services/network-observation/core/libobservation-model.so" "/usr/lib"
+copy "services/network-observation/inputs/netlink/libnetlink-monitor.so"     "/usr/lib"
+copy "services/network-observation/inputs/lldp/liblldp-observer.so"         "/usr/lib"
 
 make_dir "/etc/network-observation/"
 copy "services/network-observation/packaging/config/network-observationd.conf" "/etc/network-observation/"

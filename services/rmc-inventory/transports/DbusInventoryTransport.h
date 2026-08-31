@@ -1,7 +1,7 @@
 #pragma once
 
-#include <ITransport.h>
 #include <DbusTransportBase.h>
+#include <IInventoryTransport.h>
 
 #include "InventoryDbusAdapter.h"
 
@@ -27,12 +27,11 @@ public:
     DbusInventoryTransport(const DbusInventoryTransport&) = delete;
     DbusInventoryTransport& operator=(const DbusInventoryTransport&) = delete;
 
-    // ITypedTransport<IInventoryQueryService> (inherited via IInventoryTransport)
     void bindQueryService(IInventoryQueryService& queryService) override;
 
-    // IInventoryTransport
-    void start() override;
+    [[nodiscard]] bool start() override;
     void stop() override;
+    [[nodiscard]] std::string name() const override;
 
     void publishInventoryChanged(const std::string& fieldPath) override;
     void publishSourceStateChanged(const std::string& sourceName) override;

@@ -1,10 +1,13 @@
-//
-// Created by vvass on 21-Jul-26.
-//
 #include "StdoutTransport.h"
+
 #include <iostream>
 
 namespace RSCGroup {
+
+void StdoutTransport::bindQueryService(IObservationQueryService& provider)
+{
+    (void)provider;
+}
 
 bool StdoutTransport::start()
 {
@@ -15,6 +18,11 @@ bool StdoutTransport::start()
 void StdoutTransport::stop()
 {
     running_ = false;
+}
+
+std::string StdoutTransport::name() const
+{
+    return "stdout";
 }
 
 void StdoutTransport::publishLocalStateChanged()

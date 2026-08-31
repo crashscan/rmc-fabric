@@ -1,8 +1,9 @@
 #pragma once
 
-#include <ITransport.h>
+#include <IInventoryTransport.h>
 
 #include <atomic>
+#include <string>
 
 namespace RSCGroup {
 
@@ -11,8 +12,9 @@ class IInventoryQueryService;
 class StdoutInventoryTransport final : public IInventoryTransport {
 public:
     void bindQueryService(IInventoryQueryService& queryService) override;
-    void start() override;
+    [[nodiscard]] bool start() override;
     void stop() override;
+    [[nodiscard]] std::string name() const override;
 
     void publishInventoryChanged(const std::string& fieldPath) override;
     void publishSourceStateChanged(const std::string& sourceName) override;

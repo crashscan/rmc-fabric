@@ -1,5 +1,8 @@
 #include "DbusInventoryTransport.h"
+
 #include "InventoryDbusAdapter.h"
+
+#include <glog/logging.h>
 
 namespace RSCGroup {
 
@@ -27,16 +30,26 @@ void DbusInventoryTransport::bindQueryService(IInventoryQueryService& queryServi
     inventoryAdapter()->setService(&queryService);
 }
 
-void DbusInventoryTransport::start()
+bool DbusInventoryTransport::start()
 {
-    DbusTransportBase::start();
+    try {
+        DbusTransportBase::start();
+        return true;
+    } catch (const std::exception& e) {
+        LOG(ERROR) << "DbusInventoryTransport start failed: " << e.what();
+        inventoryAdapter()->setService(nullptr);
+        return false;
+    }
 }
 
 void DbusInventoryTransport::stop()
 {
     DbusTransportBase::stop();
-    // onTransportStopping() (called by DbusTransportBase::stop()) already clears
-    // the service pointer via InventoryDbusAdapter::onTransportStopping().
+}
+
+std::string DbusInventoryTransport::name() const
+{
+    return "dbus";
 }
 
 void DbusInventoryTransport::publishInventoryChanged(const std::string& fieldPath)
