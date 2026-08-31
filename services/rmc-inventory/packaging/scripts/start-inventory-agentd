@@ -33,7 +33,11 @@ while [ "$i" -lt "$STARTUP_WAIT_SEC" ]; do
     [ "$TRANSPORT_CONFIG" != "session" ] && [ -S "$DBUS_SOCKET" ] && break
     sleep 1; i=$((i+1))
 done
-[ "$TRANSPORT_CONFIG" = "session" ] || [ -S "$DBUS_SOCKET" ] || { echo "system D-Bus unavailable" >&2; exit 1; }
+if [ "$TRANSPORT_CONFIG" = "session" ]; then
+    [ -n "$DBUS_SOCKET" ] || { echo "session D-Bus unavailable: DBUS_SESSION_BUS_ADDRESS is unset" >&2; exit 1; }
+else
+    [ -S "$DBUS_SOCKET" ] || { echo "system D-Bus unavailable" >&2; exit 1; }
+fi
 
 mkdir -p "$RUNDIR"
 

@@ -47,20 +47,34 @@ PrivateBus::PrivateBus(const std::string& socketPath)
         throw std::runtime_error("failed to start private dbus-daemon");
     }
 
-    char addressBuffer[1024];
-    char pidBuffer[128];
-    const bool haveAddress = std::fgets(addressBuffer, sizeof(addressBuffer), pipe) != nullptr;
-    const bool havePid = std::fgets(pidBuffer, sizeof(pidBuffer), pipe) != nullptr;
+    char firstBuffer[1024];
+    char secondBuffer[1024];
+    const bool haveFirst = std::fgets(firstBuffer, sizeof(firstBuffer), pipe) != nullptr;
+    const bool haveSecond = std::fgets(secondBuffer, sizeof(secondBuffer), pipe) != nullptr;
     const int rc = ::pclose(pipe);
-    if (!haveAddress || !havePid || rc != 0) {
+    if (!haveFirst || !haveSecond || rc != 0) {
         throw std::runtime_error("failed to capture private dbus-daemon address/pid");
     }
 
-    address_ = std::string(addressBuffer);
-    while (!address_.empty() && (address_.back() == '\n' || address_.back() == '\r')) {
-        address_.pop_back();
+    auto trim = [](std::string value) {
+        while (!value.empty() && (value.back() == '\n' || value.back() == '\r')) {
+            value.pop_back();
+        }
+        return value;
+    };
+
+    const std::string first = trim(firstBuffer);
+    const std::string second = trim(secondBuffer);
+
+    if (first.rfind("unix:", 0) == 0) {
+        address_ = first;
+        pid_ = static_cast<pid_t>(std::stoi(second));
+    } else if (second.rfind("unix:", 0) == 0) {
+        address_ = second;
+        pid_ = static_cast<pid_t>(std::stoi(first));
+    } else {
+        throw std::runtime_error("failed to parse private dbus-daemon address/pid output");
     }
-    pid_ = static_cast<pid_t>(std::stoi(pidBuffer));
 }
 
 PrivateBus::~PrivateBus()

@@ -1,5 +1,6 @@
 #include "ScalarFileSource.h"
 
+#include <filesystem>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -39,8 +40,8 @@ public:
     ~TempDir()
     {
         if (!path_.empty()) {
-            const std::string cleanup = "rm -rf '" + path_ + "'";
-            (void)std::system(cleanup.c_str());
+            std::error_code ec;
+            std::filesystem::remove_all(path_, ec);
         }
     }
 

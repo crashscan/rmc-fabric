@@ -118,16 +118,7 @@ public:
 
     void stop() override
     {
-        if (!running_.exchange(false)) {
-            if (worker_.joinable()) {
-                worker_.join();
-            }
-            return;
-        }
-        if (readFd_ >= 0) {
-            ::close(readFd_);
-            readFd_ = -1;
-        }
+        running_.exchange(false);
         if (worker_.joinable()) {
             worker_.join();
         }
@@ -187,6 +178,10 @@ private:
     {
         FILE* input = ::fdopen(readFd_, "r");
         if (!input) {
+            if (readFd_ >= 0) {
+                ::close(readFd_);
+                readFd_ = -1;
+            }
             running_ = false;
             return;
         }

@@ -62,7 +62,8 @@ std::string FileBackedInventorySource::scalarFromContents(const std::string& con
 
 std::string FileBackedInventorySource::readFileContents(const std::string& filePath)
 {
-    const int fd = ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW | O_NONBLOCK);
+    const int fd =
+        ::open(filePath.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
     if (fd < 0) {
         if (errno == ELOOP) {
             throw std::runtime_error("refusing to open symlink '" + filePath + "'");
@@ -84,12 +85,17 @@ std::string FileBackedInventorySource::readFileContents(const std::string& fileP
     if (!S_ISREG(st.st_mode)) {
         throw std::runtime_error("refusing non-regular file '" + filePath + "'");
     }
-    if (st.st_size < 0 || static_cast<std::uintmax_t>(st.st_size) > kMaxFileBytes) {
+    if (st.st_size < 0) {
+        throw std::runtime_error("unexpected negative file size '" + filePath + "'");
+    }
+    if (static_cast<std::uintmax_t>(st.st_size) > kMaxFileBytes) {
         throw std::runtime_error("file exceeds size limit '" + filePath + "'");
     }
 
     std::string contents;
-    contents.reserve(static_cast<std::size_t>(st.st_size));
+    if (st.st_size > 0) {
+        contents.reserve(static_cast<std::size_t>(st.st_size));
+    }
 
     char buffer[4096];
     for (;;) {

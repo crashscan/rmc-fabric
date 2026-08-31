@@ -109,7 +109,7 @@ void testInventoryDaemonLifecycle(const std::string& daemonPath)
     InventoryClient client("session");
     expect(waitFor([&] {
         const auto ready = client.tryGetReady();
-        return ready.hasValue() || ready.error().code != interop_contract::ClientErrorCode::service_unavailable;
+        return ready.hasValue();
     }, std::chrono::seconds(10)), "inventory service did not become queryable\n" + readFile(daemon.logPath()));
 
     auto ready = client.tryGetReady();
@@ -193,11 +193,14 @@ void testInventoryDaemonLifecycle(const std::string& daemonPath)
     expect(std::get<std::string>(retainedFirmware.value().at(std::string(inventory::FIELD_FIRMWARE_VERSION))) == "2.7.1",
            "firmware removal should retain last-known-good value");
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(300));
-    {
-        std::scoped_lock lock(eventsMutex);
-        expect(events.size() == inventoryEventCount + 1 || events.size() == inventoryEventCount + 2,
-               "firmware removal should not trigger unrelated event storms");
+    const auto stormDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
+    while (std::chrono::steady_clock::now() < stormDeadline) {
+        {
+            std::scoped_lock lock(eventsMutex);
+            expect(events.size() == inventoryEventCount + 1 || events.size() == inventoryEventCount + 2,
+                   "firmware removal should not trigger unrelated event storms");
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
     }
 
     replaceFile(sandbox.path() + "/rmc/firmware", "2.7.2\n");
