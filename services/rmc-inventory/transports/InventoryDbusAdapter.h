@@ -9,7 +9,7 @@
 
 namespace DBus {
 class Object;
-class Signal;
+template<typename...> class Signal;
 }
 
 namespace RSCGroup {

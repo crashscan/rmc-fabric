@@ -12,8 +12,8 @@ target_include_directories(inventory-client PUBLIC
 target_link_libraries(inventory-client
     PUBLIC
         interop_contract
-        inventory_dbus_codec
     PRIVATE
+        inventory_dbus_codec
         DBusCxx::DBusCxx
         SigCxx::SigCxx
 )

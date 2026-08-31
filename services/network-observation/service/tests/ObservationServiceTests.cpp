@@ -133,8 +133,14 @@ private:
 
 class FakeObservationTransport final : public IObservationTransport {
 public:
-    explicit FakeObservationTransport(bool startResult = true)
+    explicit FakeObservationTransport(bool startResult = true,
+                                      bool throwOnLocal = false,
+                                      bool throwOnInterface = false,
+                                      bool throwOnCandidate = false)
         : startResult_(startResult)
+        , throwOnLocal_(throwOnLocal)
+        , throwOnInterface_(throwOnInterface)
+        , throwOnCandidate_(throwOnCandidate)
     {
     }
 
@@ -169,26 +175,69 @@ public:
         }
     }
 
-    void publishLocalStateChanged() override {}
-    void publishInterfaceChanged(const std::string&) override {}
-    void publishInterfaceRemoved(const std::string&) override {}
-    void publishCandidateChanged(const std::string&) override {}
-    void publishCandidateRemoved(const std::string&) override {}
+    void publishLocalStateChanged() override
+    {
+        ++localStateChangedCount_;
+        if (throwOnLocal_) {
+            throw std::runtime_error("publishLocalStateChanged failed");
+        }
+    }
+    void publishInterfaceChanged(const std::string&) override
+    {
+        ++interfaceChangedCount_;
+        if (throwOnInterface_) {
+            throw std::runtime_error("publishInterfaceChanged failed");
+        }
+    }
+    void publishInterfaceRemoved(const std::string&) override
+    {
+        ++interfaceRemovedCount_;
+        if (throwOnInterface_) {
+            throw std::runtime_error("publishInterfaceRemoved failed");
+        }
+    }
+    void publishCandidateChanged(const std::string&) override
+    {
+        ++candidateChangedCount_;
+        if (throwOnCandidate_) {
+            throw std::runtime_error("publishCandidateChanged failed");
+        }
+    }
+    void publishCandidateRemoved(const std::string&) override
+    {
+        ++candidateRemovedCount_;
+        if (throwOnCandidate_) {
+            throw std::runtime_error("publishCandidateRemoved failed");
+        }
+    }
 
     [[nodiscard]] bool startSawBound() const { return startSawBound_.load(); }
     [[nodiscard]] int startCount() const { return startCount_.load(); }
     [[nodiscard]] int stopCount() const { return stopCount_.load(); }
     [[nodiscard]] int readyTrueCount() const { return readyTrueCount_.load(); }
     [[nodiscard]] int readyFalseCount() const { return readyFalseCount_.load(); }
+    [[nodiscard]] int localStateChangedCount() const { return localStateChangedCount_.load(); }
+    [[nodiscard]] int interfaceChangedCount() const { return interfaceChangedCount_.load(); }
+    [[nodiscard]] int interfaceRemovedCount() const { return interfaceRemovedCount_.load(); }
+    [[nodiscard]] int candidateChangedCount() const { return candidateChangedCount_.load(); }
+    [[nodiscard]] int candidateRemovedCount() const { return candidateRemovedCount_.load(); }
 
 private:
     bool startResult_{true};
+    bool throwOnLocal_{false};
+    bool throwOnInterface_{false};
+    bool throwOnCandidate_{false};
     IObservationQueryService* provider_{nullptr};
     std::atomic<bool> startSawBound_{false};
     std::atomic<int> startCount_{0};
     std::atomic<int> stopCount_{0};
     std::atomic<int> readyTrueCount_{0};
     std::atomic<int> readyFalseCount_{0};
+    std::atomic<int> localStateChangedCount_{0};
+    std::atomic<int> interfaceChangedCount_{0};
+    std::atomic<int> interfaceRemovedCount_{0};
+    std::atomic<int> candidateChangedCount_{0};
+    std::atomic<int> candidateRemovedCount_{0};
 };
 
 void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
@@ -246,6 +295,33 @@ void testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport()
     expect(transport->stopCount() == 1, "transport should stop after runtime shutdown");
 }
 
+void testPublishFailureDoesNotBlockLaterTransports()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto throwing = std::make_shared<FakeObservationTransport>(true, true, true, true);
+    auto observing = std::make_shared<FakeObservationTransport>();
+
+    ObservationService service(std::move(runtime), throwing, std::chrono::milliseconds(100));
+    service.addTransport(observing);
+
+    expect(service.start(), "service should start with throwing publish transport");
+
+    ModelEvent localChanged;
+    localChanged.kind = ModelEventKind::LocalInterfaceChanged;
+    localChanged.ifname = std::string("eth0");
+    service.onModelEvent(localChanged);
+
+    ModelEvent candidateChanged;
+    candidateChanged.kind = ModelEventKind::CandidateChanged;
+    candidateChanged.mac = std::string("00:11:22:33:44:55");
+    service.onModelEvent(candidateChanged);
+
+    expect(observing->interfaceChangedCount() == 1, "later transport should still receive interface change");
+    expect(observing->localStateChangedCount() == 1, "later transport should still receive local-state change");
+    expect(observing->candidateChangedCount() == 1, "later transport should still receive candidate change");
+    service.stop();
+}
+
 } // namespace
 
 int main()
@@ -253,5 +329,6 @@ int main()
     testStartStopBindsTransportAndPublishesReadinessExactlyOnce();
     testTransportFailurePreventsRuntimeStart();
     testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport();
+    testPublishFailureDoesNotBlockLaterTransports();
     return EXIT_SUCCESS;
 }

@@ -19,6 +19,7 @@ target_link_libraries(inventory_service
         service_framework
     PRIVATE
         file_watcher
+        linux_support
         glog
 )
 
@@ -38,4 +39,5 @@ if(BUILD_TESTING)
     )
 
     add_test(NAME inventory_service_tests COMMAND inventory_service_tests)
+    set_tests_properties(inventory_service_tests PROPERTIES TIMEOUT 15)
 endif()

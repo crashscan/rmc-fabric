@@ -37,13 +37,13 @@ find_package_handle_standard_args(SigCxx
 
 if(SigCxx_FOUND AND NOT TARGET SigCxx::SigCxx)
     if(PC_SIGCXX_FOUND)
-        add_library(SigCxx::SigCxx INTERFACE IMPORTED)
+        add_library(SigCxx::SigCxx INTERFACE IMPORTED GLOBAL)
         set_target_properties(SigCxx::SigCxx PROPERTIES
                 INTERFACE_INCLUDE_DIRECTORIES "${SigCxx_INCLUDE_DIRS}"
                 INTERFACE_LINK_LIBRARIES "${SigCxx_LIBRARIES}"
         )
     else()
-        add_library(SigCxx::SigCxx UNKNOWN IMPORTED)
+        add_library(SigCxx::SigCxx UNKNOWN IMPORTED GLOBAL)
         set_target_properties(SigCxx::SigCxx PROPERTIES
                 IMPORTED_LOCATION "${SigCxx_LIBRARY}"
                 INTERFACE_INCLUDE_DIRECTORIES "${SigCxx_INCLUDE_DIR}"

@@ -32,4 +32,5 @@ if(BUILD_TESTING)
             pthread
     )
     add_test(NAME service_framework_tests COMMAND service_framework_tests)
+    set_tests_properties(service_framework_tests PROPERTIES TIMEOUT 10)
 endif()

@@ -34,27 +34,21 @@ target_compile_options(rmc_fabric_warnings INTERFACE
     >
 )
 
-if(RMC_FABRIC_SANITIZE)
-    target_compile_options(rmc_fabric_warnings INTERFACE
-        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
-            -fsanitize=${RMC_FABRIC_SANITIZE}
-            -fno-omit-frame-pointer
-        >
-    )
-    target_link_options(rmc_fabric_warnings INTERFACE
-        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
-            -fsanitize=${RMC_FABRIC_SANITIZE}
-        >
-    )
+if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+    add_compile_options(-Wall -Wextra -Wshadow -Wno-unused-parameter)
+    if(RMC_FABRIC_WERROR)
+        add_compile_options(-Werror)
+    endif()
+
+    if(RMC_FABRIC_SANITIZE)
+        add_compile_options(-fsanitize=${RMC_FABRIC_SANITIZE} -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=${RMC_FABRIC_SANITIZE})
+    endif()
 endif()
 
-if(RMC_FABRIC_COVERAGE)
-    target_compile_options(rmc_fabric_warnings INTERFACE
-        $<$<CXX_COMPILER_ID:GNU>:--coverage>
-    )
-    target_link_options(rmc_fabric_warnings INTERFACE
-        $<$<CXX_COMPILER_ID:GNU>:--coverage>
-    )
+if(RMC_FABRIC_COVERAGE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_compile_options(--coverage)
+    add_link_options(--coverage)
 endif()
 
 # Global compile flags: -g is intentionally omitted here; debug symbols are
@@ -73,10 +67,14 @@ find_path(RSC_UTIL_INCLUDE_DIR
 )
 include_directories(
         ${PROJECT_BINARY_DIR}
-        ${RSC_UTIL_INCLUDE_DIR}/
-        ${RSC_UTIL_INCLUDE_DIR}/rsc_util
         ${GLOG_INCLUDE_DIRS}
 )
+if(RSC_UTIL_INCLUDE_DIR)
+    include_directories(
+            ${RSC_UTIL_INCLUDE_DIR}/
+            ${RSC_UTIL_INCLUDE_DIR}/rsc_util
+    )
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -108,6 +106,18 @@ if(BUILD_TESTING)
   set_tests_properties(architecture_component_boundaries PROPERTIES
     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
   )
+
+  add_test(
+    NAME package_consumer_verification
+    COMMAND ${CMAKE_COMMAND}
+      -DVERIFY_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+      -DVERIFY_CONSUMER_BINARY_DIR=${CMAKE_BINARY_DIR}
+      -DVERIFY_CONSUMER_GENERATOR=${CMAKE_GENERATOR}
+      -DVERIFY_CONSUMER_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+      -DVERIFY_CONSUMER_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
+      -P ${CMAKE_SOURCE_DIR}/cmake/VerifyPackageConsumers.cmake
+  )
+  set_tests_properties(package_consumer_verification PROPERTIES TIMEOUT 180)
 endif()
 
 add_subdirectory(lib)
@@ -136,6 +146,12 @@ configure_package_config_file(
     "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rmc_fabricConfig.cmake.in"
     "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfig.cmake"
     INSTALL_DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
+)
+
+export(
+    EXPORT rmc_fabricTargets
+    FILE "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricTargets.cmake"
+    NAMESPACE rmc_fabric::
 )
 
 write_basic_package_version_file(

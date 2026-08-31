@@ -2,7 +2,7 @@
 
 #include "NetworkObservationDbusAdapter.h"
 
-#include <interop_contract/network_observation/NetworkObservationContracts.hpp>
+#include <network_observation/NetworkObservationContracts.hpp>
 
 #include <glog/logging.h>
 

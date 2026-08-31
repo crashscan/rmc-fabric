@@ -1,3 +1,5 @@
+find_package(DBusCxx REQUIRED MODULE)
+
 add_library(dbus_transport_base STATIC
     DbusTransportBase.cpp
     DbusServiceAdapter.cpp
@@ -23,4 +25,5 @@ if(BUILD_TESTING)
     )
     target_link_libraries(service_binding_tests PRIVATE pthread)
     add_test(NAME service_binding_tests COMMAND service_binding_tests)
+    set_tests_properties(service_binding_tests PROPERTIES TIMEOUT 10)
 endif()

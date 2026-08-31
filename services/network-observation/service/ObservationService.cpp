@@ -1,5 +1,7 @@
 #include "ObservationService.h"
 
+#include <glog/logging.h>
+
 #include <stdexcept>
 
 namespace RSCGroup {
@@ -70,11 +72,25 @@ bool ObservationService::start()
 
     ServiceBase::setReady(true);
     try {
-        agingThread_ = std::jthread([this](std::stop_token st) { agingLoop(st); });
+        agingThread_ = std::jthread([this](std::stop_token st) {
+            try {
+                agingLoop(st);
+            } catch (const std::exception& e) {
+                LOG(ERROR) << "ObservationService: aging loop failed: " << e.what();
+            } catch (...) {
+                LOG(ERROR) << "ObservationService: aging loop failed";
+            }
+        });
+    } catch (const std::exception& e) {
+        runtime_->stop();
+        ServiceBase::stop();
+        LOG(ERROR) << "ObservationService: failed to start aging thread: " << e.what();
+        return false;
     } catch (...) {
         runtime_->stop();
         ServiceBase::stop();
-        throw;
+        LOG(ERROR) << "ObservationService: failed to start aging thread";
+        return false;
     }
     return true;
 }
@@ -108,33 +124,81 @@ void ObservationService::onModelEvent(const ModelEvent& event)
         case ModelEventKind::LocalInterfaceChanged:
             if (event.ifname) {
                 for (const auto& transport : typedTransports) {
-                    transport->publishInterfaceChanged(*event.ifname);
+                    try {
+                        transport->publishInterfaceChanged(*event.ifname);
+                    } catch (const std::exception& e) {
+                        LOG(ERROR) << "ObservationService: publishInterfaceChanged failed for transport "
+                                   << transport->name() << ": " << e.what();
+                    } catch (...) {
+                        LOG(ERROR) << "ObservationService: publishInterfaceChanged failed for transport "
+                                   << transport->name();
+                    }
                 }
             }
             for (const auto& transport : typedTransports) {
-                transport->publishLocalStateChanged();
+                try {
+                    transport->publishLocalStateChanged();
+                } catch (const std::exception& e) {
+                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
+                               << transport->name() << ": " << e.what();
+                } catch (...) {
+                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
+                               << transport->name();
+                }
             }
             break;
 
         case ModelEventKind::LocalInterfaceRemoved:
             if (event.ifname) {
                 for (const auto& transport : typedTransports) {
-                    transport->publishInterfaceRemoved(*event.ifname);
+                    try {
+                        transport->publishInterfaceRemoved(*event.ifname);
+                    } catch (const std::exception& e) {
+                        LOG(ERROR) << "ObservationService: publishInterfaceRemoved failed for transport "
+                                   << transport->name() << ": " << e.what();
+                    } catch (...) {
+                        LOG(ERROR) << "ObservationService: publishInterfaceRemoved failed for transport "
+                                   << transport->name();
+                    }
                 }
             }
             for (const auto& transport : typedTransports) {
-                transport->publishLocalStateChanged();
+                try {
+                    transport->publishLocalStateChanged();
+                } catch (const std::exception& e) {
+                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
+                               << transport->name() << ": " << e.what();
+                } catch (...) {
+                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
+                               << transport->name();
+                }
             }
             break;
 
         case ModelEventKind::LocalAddressChanged:
             if (event.ifname) {
                 for (const auto& transport : typedTransports) {
-                    transport->publishInterfaceChanged(*event.ifname);
+                    try {
+                        transport->publishInterfaceChanged(*event.ifname);
+                    } catch (const std::exception& e) {
+                        LOG(ERROR) << "ObservationService: publishInterfaceChanged failed for transport "
+                                   << transport->name() << ": " << e.what();
+                    } catch (...) {
+                        LOG(ERROR) << "ObservationService: publishInterfaceChanged failed for transport "
+                                   << transport->name();
+                    }
                 }
             }
             for (const auto& transport : typedTransports) {
-                transport->publishLocalStateChanged();
+                try {
+                    transport->publishLocalStateChanged();
+                } catch (const std::exception& e) {
+                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
+                               << transport->name() << ": " << e.what();
+                } catch (...) {
+                    LOG(ERROR) << "ObservationService: publishLocalStateChanged failed for transport "
+                               << transport->name();
+                }
             }
             break;
 
@@ -145,7 +209,15 @@ void ObservationService::onModelEvent(const ModelEvent& event)
         case ModelEventKind::ClassificationChanged:
             if (event.mac) {
                 for (const auto& transport : typedTransports) {
-                    transport->publishCandidateChanged(*event.mac);
+                    try {
+                        transport->publishCandidateChanged(*event.mac);
+                    } catch (const std::exception& e) {
+                        LOG(ERROR) << "ObservationService: publishCandidateChanged failed for transport "
+                                   << transport->name() << ": " << e.what();
+                    } catch (...) {
+                        LOG(ERROR) << "ObservationService: publishCandidateChanged failed for transport "
+                                   << transport->name();
+                    }
                 }
             }
             break;
@@ -154,7 +226,15 @@ void ObservationService::onModelEvent(const ModelEvent& event)
         case ModelEventKind::CandidateRemoved:
             if (event.mac) {
                 for (const auto& transport : typedTransports) {
-                    transport->publishCandidateRemoved(*event.mac);
+                    try {
+                        transport->publishCandidateRemoved(*event.mac);
+                    } catch (const std::exception& e) {
+                        LOG(ERROR) << "ObservationService: publishCandidateRemoved failed for transport "
+                                   << transport->name() << ": " << e.what();
+                    } catch (...) {
+                        LOG(ERROR) << "ObservationService: publishCandidateRemoved failed for transport "
+                                   << transport->name();
+                    }
                 }
             }
             break;

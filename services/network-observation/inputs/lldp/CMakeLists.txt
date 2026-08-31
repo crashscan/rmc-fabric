@@ -16,6 +16,7 @@ target_include_directories(lldp-observer PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}/public
     ${CMAKE_CURRENT_SOURCE_DIR}/lldpd
     ${CMAKE_CURRENT_SOURCE_DIR}/../../core
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../core/public
     ${LLDP_CPP_INCLUDE_DIR}
 )
 
@@ -39,6 +40,7 @@ if(BUILD_TESTING)
             ${CMAKE_CURRENT_SOURCE_DIR}/public
             ${CMAKE_CURRENT_SOURCE_DIR}/lldpd
             ${CMAKE_CURRENT_SOURCE_DIR}/../../core
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../core/public
             ${LLDP_CPP_INCLUDE_DIR}
         )
         target_link_libraries(lldp_observer_tests PRIVATE

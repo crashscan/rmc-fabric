@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ServiceBase.h>
+#include <ScopedFd.h>
 
 #include <IFileWatcher.h>
 #include <IInventoryManager.h>
@@ -63,7 +64,10 @@ private:
                      const interop_contract::inventory::SourceStateMap& newStates,
                      bool oldReady,
                      bool newReady);
-    void closeRefreshEventFd() noexcept;
+    void publishInventoryChange(const std::shared_ptr<IInventoryTransport>& transport,
+                                const std::string& fieldName) const noexcept;
+    void publishSourceStateChange(const std::shared_ptr<IInventoryTransport>& transport,
+                                  const std::string& sourceName) const noexcept;
 
     static std::unique_ptr<IFileWatcher> makeDefaultFileWatcher();
 
@@ -83,7 +87,7 @@ private:
     std::chrono::steady_clock::time_point lastRefreshSteadyTs_{};
     std::chrono::steady_clock::time_point nextReconcileTs_{};
 
-    int refreshEventFd_{-1};
+    ScopedFd refreshEventFd_;
 };
 
 } // namespace RSCGroup

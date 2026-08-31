@@ -5,7 +5,7 @@
 
 namespace DBus {
 class Object;
-template<typename> class Signal;
+template<typename...> class Signal;
 }
 
 namespace RSCGroup {

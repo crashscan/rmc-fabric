@@ -129,7 +129,7 @@ Component-specific tools may later move to separate repositories if they become 
 
 ### Quick start
 
-Requires: cmake ≥ 3.25, ninja, libglog-dev, libgflags-dev, libjsoncpp-dev, libdbus-cxx-dev, libsigc++-2.0-dev, liblldpctl-dev.
+Requires: cmake ≥ 3.25, ninja, libgoogle-glog-dev, libgflags-dev, libjsoncpp-dev, nlohmann-json3-dev, libsigc++-3.0-dev, liblldpctl-dev, and DBusCxx (distro package or source build).
 
 ```bash
 # Developer build with tests
@@ -199,4 +199,3 @@ uses a `std::shared_mutex`:
 ### Service framework
 
 See `lib/service_framework/README.md` for the supported framework surface and lifecycle ownership rules.
-

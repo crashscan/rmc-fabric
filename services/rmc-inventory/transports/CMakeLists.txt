@@ -66,18 +66,10 @@ if(BUILD_TESTING)
         NAME inventory_dbus_codec_characterization_tests
         COMMAND inventory_dbus_codec_characterization_tests
     )
+    set_tests_properties(inventory_dbus_codec_characterization_tests PROPERTIES TIMEOUT 10)
 endif()
-
 install(
     TARGETS inventory_dbus_codec
     EXPORT  rmc_fabricTargets
     ARCHIVE COMPONENT dev
 )
-
-install(
-    FILES
-        ${CMAKE_CURRENT_SOURCE_DIR}/InventoryDbusCodec.h
-    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/inventory
-    COMPONENT   dev
-)
-

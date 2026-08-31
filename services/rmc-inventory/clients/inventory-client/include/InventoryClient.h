@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ClientResult.hpp>
 #include <inventory.hpp>
 
 #include <chrono>
@@ -7,10 +8,6 @@
 #include <map>
 #include <memory>
 #include <string>
-
-namespace DBus {
-class Connection;
-} // namespace DBus
 
 namespace RSCGroup {
 
@@ -20,7 +17,13 @@ public:
     using BoolCallback   = std::function<void(bool)>;
 
     explicit InventoryClient(
-        std::shared_ptr<DBus::Connection> connection,
+        std::shared_ptr<void> connection,
+        std::string serviceName    = std::string(interop_contract::inventory::SERVICE_NAME),
+        std::string objectPath     = std::string(interop_contract::inventory::OBJECT_PATH),
+        std::string interfaceName  = std::string(interop_contract::inventory::INTERFACE)
+    );
+    explicit InventoryClient(
+        std::string busType,
         std::string serviceName    = std::string(interop_contract::inventory::SERVICE_NAME),
         std::string objectPath     = std::string(interop_contract::inventory::OBJECT_PATH),
         std::string interfaceName  = std::string(interop_contract::inventory::INTERFACE)
@@ -29,6 +32,16 @@ public:
 
     InventoryClient(const InventoryClient&) = delete;
     InventoryClient& operator=(const InventoryClient&) = delete;
+
+    [[nodiscard]] interop_contract::ClientResult<interop_contract::inventory::InventorySnapshot> tryGetIdentity() const;
+    [[nodiscard]] interop_contract::ClientResult<interop_contract::inventory::InventoryFields> tryGetField(const std::string& fieldName) const;
+    [[nodiscard]] interop_contract::ClientResult<interop_contract::inventory::SourceStateMap> tryGetSourceStates() const;
+    [[nodiscard]] interop_contract::ClientResult<bool> tryGetReady() const;
+    [[nodiscard]] interop_contract::ClientResult<std::string> tryGetPhase() const;
+    [[nodiscard]] interop_contract::ClientResult<uint64_t> tryGetVersion() const;
+    [[nodiscard]] interop_contract::ClientResult<interop_contract::inventory::InventoryIssues> tryGetIssues() const;
+    [[nodiscard]] interop_contract::ClientResult<void> tryRefresh() const;
+    [[nodiscard]] interop_contract::ClientResult<bool> tryWaitReady(std::chrono::milliseconds timeout) const;
 
     [[nodiscard]] interop_contract::inventory::InventorySnapshot getIdentity() const;
     [[nodiscard]] interop_contract::inventory::InventoryFields getField(const std::string& fieldName) const;
