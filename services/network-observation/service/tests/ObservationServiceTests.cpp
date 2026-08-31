@@ -440,10 +440,10 @@ void testOperationScopedIssueCodesPreserveInterfaceFailureAfterLocalStateSuccess
     const auto interfaceIssueCode = "observation.transport.fake.publish_interface_changed.failed";
     const auto localStateIssueCode = "observation.transport.fake.publish_local_state_changed.failed";
 
-    const auto issues = service.getIssues();
-    expect(issues.contains(interfaceIssueCode),
-           "interface-changed failure must remain even after local-state success");
-    expect(!issues.contains(localStateIssueCode),
+    expect(waitFor([&] {
+        return service.getIssues().contains(interfaceIssueCode);
+    }), "interface-changed failure must remain even after local-state success");
+    expect(!service.getIssues().contains(localStateIssueCode),
            "local-state issue must not be present when publish_local_state_changed succeeded");
 
     service.stop();
@@ -463,15 +463,17 @@ void testOperationScopedIssueClearedBySubsequentSuccess()
     service.onModelEvent(ev);
 
     const auto interfaceIssueCode = "observation.transport.fake.publish_interface_changed.failed";
-    expect(service.getIssues().contains(interfaceIssueCode),
-           "interface issue must be present after failure");
+    expect(waitFor([&] {
+        return service.getIssues().contains(interfaceIssueCode);
+    }), "interface issue must be present after failure");
 
     // Recover: stop throwing on publishInterfaceChanged.
     transport->setThrowOnInterface(false);
     service.onModelEvent(ev);
 
-    expect(!service.getIssues().contains(interfaceIssueCode),
-           "interface issue must be cleared after subsequent publishInterfaceChanged success");
+    expect(waitFor([&] {
+        return !service.getIssues().contains(interfaceIssueCode);
+    }), "interface issue must be cleared after subsequent publishInterfaceChanged success");
 
     service.stop();
 }
@@ -494,10 +496,10 @@ void testTwoOperationIssuesCanCoexist()
     const auto localStateIssueCode = "observation.transport.fake.publish_local_state_changed.failed";
 
     const auto issues = service.getIssues();
-    expect(issues.contains(interfaceIssueCode),
-           "interface issue must be present when publishInterfaceChanged throws");
-    expect(issues.contains(localStateIssueCode),
-           "local-state issue must be present when publishLocalStateChanged throws");
+    expect(waitFor([&] {
+        const auto i = service.getIssues();
+        return i.contains(interfaceIssueCode) && i.contains(localStateIssueCode);
+    }), "both operation issues must be present when both publish calls throw");
 
     service.stop();
 }
