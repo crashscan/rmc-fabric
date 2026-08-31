@@ -8,7 +8,7 @@ target_compile_features(network_observation_dbus_codec PUBLIC cxx_std_20)
 target_include_directories(network_observation_dbus_codec
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dbus>
-        $<INSTALL_INTERFACE:include/network-observation/transports/dbus>
+        $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/network_observation>
 )
 target_link_libraries(network_observation_dbus_codec
     PUBLIC
@@ -87,3 +87,17 @@ if(BUILD_TESTING)
     )
     add_test(NAME network_observation_dbus_codec_tests COMMAND network_observation_dbus_codec_tests)
 endif()
+
+install(
+    TARGETS network_observation_dbus_codec
+    EXPORT  rmc_fabricTargets
+    ARCHIVE COMPONENT dev
+)
+
+install(
+    FILES
+        ${CMAKE_CURRENT_SOURCE_DIR}/dbus/NetworkObservationDbusCodec.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/network_observation
+    COMPONENT   dev
+)
+

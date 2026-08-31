@@ -1,0 +1,75 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "copilot/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  build-and-test:
+    name: Build & Test (${{ matrix.preset }})
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        preset: [dev, asan]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            cmake ninja-build \
+            libglog-dev libgflags-dev \
+            libjsoncpp-dev \
+            libdbus-cxx-dev libsigc++-2.0-dev \
+            liblldpctl-dev \
+            lcov
+
+      - name: Configure (${{ matrix.preset }})
+        run: cmake --preset ${{ matrix.preset }}
+
+      - name: Build (${{ matrix.preset }})
+        run: cmake --build --preset ${{ matrix.preset }}
+
+      - name: Test (${{ matrix.preset }})
+        run: ctest --preset ${{ matrix.preset }} --output-on-failure
+
+  release-build:
+    name: Release build
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y \
+            cmake ninja-build \
+            libglog-dev libgflags-dev \
+            libjsoncpp-dev \
+            libdbus-cxx-dev libsigc++-2.0-dev \
+            liblldpctl-dev
+
+      - name: Configure (release)
+        run: cmake --preset release
+
+      - name: Build (release)
+        run: cmake --build --preset release
+
+  architecture-checks:
+    name: Architecture checks
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: No transport types in interop_contract
+        run: sh tools/check_no_transport_in_interop_contract.sh
+
+      - name: Component boundary enforcement
+        run: sh tools/check_component_boundaries.sh .

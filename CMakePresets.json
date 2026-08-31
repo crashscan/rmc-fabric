@@ -1,0 +1,80 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": { "major": 3, "minor": 25, "patch": 0 },
+  "configurePresets": [
+    {
+      "name": "base",
+      "hidden": true,
+      "binaryDir": "${sourceDir}/build/${presetName}",
+      "generator": "Ninja",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+      }
+    },
+    {
+      "name": "dev",
+      "displayName": "Developer Debug",
+      "description": "Debug build with tests and all warnings",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TESTING": "ON",
+        "RMC_FABRIC_WERROR": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Release",
+      "description": "Optimised release build",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "BUILD_TESTING": "OFF",
+        "RMC_FABRIC_WERROR": "OFF"
+      }
+    },
+    {
+      "name": "asan",
+      "displayName": "ASan/UBSan",
+      "description": "Debug build with address and undefined behaviour sanitizers",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TESTING": "ON",
+        "RMC_FABRIC_SANITIZE": "address,undefined",
+        "RMC_FABRIC_WERROR": "ON"
+      }
+    },
+    {
+      "name": "coverage",
+      "displayName": "Coverage",
+      "description": "Debug build with gcov/lcov coverage instrumentation (requires lcov)",
+      "inherits": "base",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "BUILD_TESTING": "ON",
+        "RMC_FABRIC_COVERAGE": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "dev",      "configurePreset": "dev" },
+    { "name": "release",  "configurePreset": "release" },
+    { "name": "asan",     "configurePreset": "asan" },
+    { "name": "coverage", "configurePreset": "coverage" }
+  ],
+  "testPresets": [
+    {
+      "name": "dev",
+      "configurePreset": "dev",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    },
+    {
+      "name": "asan",
+      "configurePreset": "asan",
+      "output": { "outputOnFailure": true },
+      "execution": { "noTestsAction": "error" }
+    }
+  ]
+}

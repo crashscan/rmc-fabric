@@ -6,7 +6,7 @@ target_compile_features(inventory-client PUBLIC cxx_std_20)
 
 target_include_directories(inventory-client PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include/rmc-inventory/inventory-client>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/inventory>
 )
 
 target_link_libraries(inventory-client
@@ -16,4 +16,17 @@ target_link_libraries(inventory-client
     PRIVATE
         DBusCxx::DBusCxx
         SigCxx::SigCxx
+)
+
+install(
+    TARGETS inventory-client
+    EXPORT  rmc_fabricTargets
+    ARCHIVE COMPONENT dev
+)
+
+install(
+    DIRECTORY   ${CMAKE_CURRENT_SOURCE_DIR}/include/
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/inventory
+    COMPONENT   dev
+    FILES_MATCHING PATTERN "*.h" PATTERN "*.hpp"
 )

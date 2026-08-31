@@ -127,12 +127,39 @@ Component-specific tools may later move to separate repositories if they become 
 
 ## Build and Packaging
 
-Build, packaging, and deployment details are expected to be defined per service and per library.
+### Quick start
+
+Requires: cmake ≥ 3.25, ninja, libglog-dev, libgflags-dev, libjsoncpp-dev, libdbus-cxx-dev, libsigc++-2.0-dev, liblldpctl-dev.
+
+```bash
+# Developer build with tests
+cmake --preset dev
+cmake --build --preset dev
+ctest --preset dev
+
+# Optimised release
+cmake --preset release
+cmake --build --preset release
+```
+
+See [docs/architecture.md](docs/architecture.md) for all available presets (including ASan/UBSan and coverage) and install/package consumption instructions.
 
 Recommended general approach:
 - keep internal helper libraries small and focused
 - publish stable contracts and client APIs intentionally
 - avoid one large catch-all shared library unless there is a strong packaging/runtime reason
+
+## Documentation
+
+See [docs/architecture.md](docs/architecture.md) for:
+- supported public libraries and include paths;
+- internal target dependency graph;
+- D-Bus contracts and wire semantics;
+- service lifecycle invariants;
+- how to configure, build, and test via presets;
+- how to consume installed CMake packages.
+
+Architecture Decision Records are in [docs/adr/](docs/adr/).
 
 ## Future Direction
 
@@ -145,15 +172,11 @@ Possible future areas include:
 - inventory synchronization
 - event-driven orchestration across services
 
-## Status
-
-This repository is under active development, and both structure and APIs may evolve as the fabric model becomes more clearly defined.
-
 ---
 
 ## Architecture Notes
 
-### D-Bus Adapter Lifetime Invariant (Phase 1)
+### D-Bus Adapter Lifetime Invariant
 
 Both `InventoryDbusAdapter` and `NetworkObservationDbusAdapter` expose service
 query methods over D-Bus.  The D-Bus dispatcher calls handler methods on its
@@ -173,13 +196,7 @@ uses a `std::shared_mutex`:
 - Deadlock risk is absent because service methods never call back into the
   transport layer.
 
-### Current service composition
-
-- Each app directory builds only its local `main.cpp` and links service/component targets.
-- Service-local transport ports now extend `IServiceTransport`, and `ServiceBase` owns transport startup, rollback, stop ordering, and ready-state fan-out.
-- Inventory file-backed sources live under `services/rmc-inventory/inputs/files/` instead of `core/`.
-- `network-observation` keeps pure model code in `core/`, runtime orchestration in `service/`, Linux/LLDP ingestion in `inputs/`, and typed clients in `clients/`.
-
-### Service framework notes
+### Service framework
 
 See `lib/service_framework/README.md` for the supported framework surface and lifecycle ownership rules.
+

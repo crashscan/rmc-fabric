@@ -10,11 +10,58 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+# ---------------------------------------------------------------------------
+# Developer/CI options (not exported to downstream consumers)
+# ---------------------------------------------------------------------------
+option(RMC_FABRIC_WERROR   "Treat warnings as errors (CI/developer builds)"   OFF)
+option(RMC_FABRIC_COVERAGE "Enable gcov/lcov coverage instrumentation"        OFF)
+set(RMC_FABRIC_SANITIZE "" CACHE STRING
+    "Comma-separated sanitizer list, e.g. address,undefined (passed to -fsanitize=)")
+
+# ---------------------------------------------------------------------------
+# rmc_fabric_warnings — INTERFACE target consumed only by in-tree targets.
+# Downstream consumers never see these flags.
+# ---------------------------------------------------------------------------
+add_library(rmc_fabric_warnings INTERFACE)
+
+target_compile_options(rmc_fabric_warnings INTERFACE
+    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
+        -Wall
+        -Wextra
+        -Wshadow
+        -Wno-unused-parameter
+        $<$<BOOL:${RMC_FABRIC_WERROR}>:-Werror>
+    >
+)
+
+if(RMC_FABRIC_SANITIZE)
+    target_compile_options(rmc_fabric_warnings INTERFACE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
+            -fsanitize=${RMC_FABRIC_SANITIZE}
+            -fno-omit-frame-pointer
+        >
+    )
+    target_link_options(rmc_fabric_warnings INTERFACE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
+            -fsanitize=${RMC_FABRIC_SANITIZE}
+        >
+    )
+endif()
+
+if(RMC_FABRIC_COVERAGE)
+    target_compile_options(rmc_fabric_warnings INTERFACE
+        $<$<CXX_COMPILER_ID:GNU>:--coverage>
+    )
+    target_link_options(rmc_fabric_warnings INTERFACE
+        $<$<CXX_COMPILER_ID:GNU>:--coverage>
+    )
+endif()
+
 # Global compile flags: -g is intentionally omitted here; debug symbols are
 # controlled by CMAKE_BUILD_TYPE / CMAKE_C(XX)_FLAGS_DEBUG.
 # Position-independent code and thread support are set repository-wide because
 # all targets are either shared libs or executables that link shared libs.
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -fPIC -pthread")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -pthread")
 set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -fPIC -pthread")
 
 set(BASEPATH "${CMAKE_SOURCE_DIR}")
@@ -56,12 +103,49 @@ if(BUILD_TESTING)
   )
 endif()
 
-add_subdirectory(services)
 add_subdirectory(lib)
+add_subdirectory(services)
 
 if(BUILD_MANUAL_TESTS)
   add_subdirectory(tests_manual)
 endif()
+
+# ---------------------------------------------------------------------------
+# Install and CMake package export
+# ---------------------------------------------------------------------------
+include(GNUInstallDirs)
+include(CMakePackageConfigHelpers)
+
+# Install the rmc_fabric_warnings helper (in-tree only — do NOT export to consumers)
+
+set(RMC_FABRIC_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/rmc_fabric")
+
+install(
+    EXPORT      rmc_fabricTargets
+    NAMESPACE   rmc_fabric::
+    DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
+    COMPONENT   dev
+)
+
+configure_package_config_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rmc_fabricConfig.cmake.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfig.cmake"
+    INSTALL_DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
+)
+
+write_basic_package_version_file(
+    "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfigVersion.cmake"
+    VERSION       ${PROJECT_VERSION}
+    COMPATIBILITY SameMajorVersion
+)
+
+install(
+    FILES
+        "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfig.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfigVersion.cmake"
+    DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
+    COMPONENT   dev
+)
 
 # ---------------------------------------------------------------------------
 # Packaging — derive all version variables from the single project() declaration.

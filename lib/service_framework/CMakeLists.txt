@@ -16,6 +16,7 @@ target_link_libraries(service_framework
         lifecycle_runner
         daemon_support
     PRIVATE
+        rmc_fabric_warnings
         glog
         gflags
 )
