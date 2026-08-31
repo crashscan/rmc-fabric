@@ -61,7 +61,8 @@ private:
     void noteTransportPublishFailure(const std::string& transportName,
                                      const std::string& operation,
                                      const std::string& message);
-    void clearTransportPublishFailure(const std::string& transportName);
+    void clearTransportPublishFailure(const std::string& transportName,
+                                      const std::string& operation);
 
     std::unique_ptr<IObservationRuntime> runtime_;
     std::chrono::steady_clock::duration agingInterval_;

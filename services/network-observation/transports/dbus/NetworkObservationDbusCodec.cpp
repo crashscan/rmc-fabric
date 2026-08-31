@@ -303,9 +303,20 @@ fromVariantMapCandidate(const std::map<std::string, DBus::Variant>& m)
 contract::ObservationIssues
 decodeIssues(const std::map<std::string, std::map<std::string, DBus::Variant>>& issues)
 {
+    if (issues.size() > interop_contract::ingress::network_observation::kMaxIssues) {
+        throw DecodeError(DecodeErrorCode::limit_exceeded,
+                          "issues map exceeds ingress limit");
+    }
+
     contract::ObservationIssues decoded;
     for (const auto& [issueCode, fields] : issues) {
-        validateString(issueCode, "issue code");
+        validateKey(issueCode);
+
+        if (fields.size() > interop_contract::ingress::network_observation::kMaxIssueFields) {
+            throw DecodeError(DecodeErrorCode::limit_exceeded,
+                              "issue '" + issueCode + "' fields map exceeds ingress limit");
+        }
+
         contract::ObservationIssueFields decodedFields;
         for (const auto& [name, value] : fields) {
             validateKey(name);
@@ -317,6 +328,24 @@ decodeIssues(const std::map<std::string, std::map<std::string, DBus::Variant>>& 
             validateString(stringValue, name.c_str());
             decodedFields.emplace(name, std::move(stringValue));
         }
+
+        // Validate required fields are present.
+        static constexpr std::string_view kRequired[] = {
+            contract::ISSUE_SEVERITY,
+            contract::ISSUE_MESSAGE,
+            contract::ISSUE_COMPONENT,
+            contract::ISSUE_OPERATION,
+            contract::ISSUE_CATEGORY,
+            contract::ISSUE_IDENTITY,
+        };
+        for (const auto& req : kRequired) {
+            if (decodedFields.find(std::string(req)) == decodedFields.end()) {
+                throw DecodeError(DecodeErrorCode::missing_required_field,
+                                  "issue '" + issueCode + "' is missing required field '" +
+                                      std::string(req) + "'");
+            }
+        }
+
         decoded.emplace(issueCode, std::move(decodedFields));
     }
     return decoded;

@@ -247,11 +247,15 @@ public:
     [[nodiscard]] int candidateChangedCount() const { return candidateChangedCount_.load(); }
     [[nodiscard]] int candidateRemovedCount() const { return candidateRemovedCount_.load(); }
 
+    void setThrowOnLocal(bool v) { throwOnLocal_.store(v); }
+    void setThrowOnInterface(bool v) { throwOnInterface_.store(v); }
+    void setThrowOnCandidate(bool v) { throwOnCandidate_.store(v); }
+
 private:
     bool startResult_{true};
-    bool throwOnLocal_{false};
-    bool throwOnInterface_{false};
-    bool throwOnCandidate_{false};
+    std::atomic<bool> throwOnLocal_{false};
+    std::atomic<bool> throwOnInterface_{false};
+    std::atomic<bool> throwOnCandidate_{false};
     IObservationQueryService* provider_{nullptr};
     std::atomic<bool> startSawBound_{false};
     std::atomic<int> startCount_{0};
@@ -349,7 +353,9 @@ void testPublishFailureDoesNotBlockLaterTransports()
     expect(observing->localStateChangedCount() == 1, "later transport should still receive local-state change");
     expect(observing->candidateChangedCount() == 1, "later transport should still receive candidate change");
     expect(waitFor([&] {
-        return service.getIssues().contains("observation.transport.fake.publish.failed");
+        return service.getIssues().contains("observation.transport.fake.publish_interface_changed.failed")
+            || service.getIssues().contains("observation.transport.fake.publish_local_state_changed.failed")
+            || service.getIssues().contains("observation.transport.fake.publish_candidate_changed.failed");
     }), "transport publish failure should surface as an issue");
     service.stop();
 }
@@ -413,6 +419,89 @@ void testAgingLoopFailureSurfacesIssueWithoutClearingReadiness()
     service.stop();
 }
 
+void testOperationScopedIssueCodesPreserveInterfaceFailureAfterLocalStateSuccess()
+{
+    // Verifies that a successful publishLocalStateChanged does not erase the
+    // issue created by a prior publishInterfaceChanged failure on the same
+    // transport (they use separate operation-scoped issue codes).
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto transport = std::make_shared<FakeObservationTransport>(true, false, true, false);
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(100));
+    expect(service.start(), "service should start");
+
+    ModelEvent ev;
+    ev.kind = ModelEventKind::LocalInterfaceChanged;
+    ev.ifname = std::string("eth0");
+    service.onModelEvent(ev);
+
+    // publishInterfaceChanged throws -> issue recorded.
+    // publishLocalStateChanged succeeds -> only that operation's issue is cleared.
+    const auto interfaceIssueCode = "observation.transport.fake.publish_interface_changed.failed";
+    const auto localStateIssueCode = "observation.transport.fake.publish_local_state_changed.failed";
+
+    const auto issues = service.getIssues();
+    expect(issues.contains(interfaceIssueCode),
+           "interface-changed failure must remain even after local-state success");
+    expect(!issues.contains(localStateIssueCode),
+           "local-state issue must not be present when publish_local_state_changed succeeded");
+
+    service.stop();
+}
+
+void testOperationScopedIssueClearedBySubsequentSuccess()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto transport = std::make_shared<FakeObservationTransport>(true, false, true, false);
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(100));
+    expect(service.start(), "service should start");
+
+    ModelEvent ev;
+    ev.kind = ModelEventKind::LocalInterfaceChanged;
+    ev.ifname = std::string("eth0");
+    service.onModelEvent(ev);
+
+    const auto interfaceIssueCode = "observation.transport.fake.publish_interface_changed.failed";
+    expect(service.getIssues().contains(interfaceIssueCode),
+           "interface issue must be present after failure");
+
+    // Recover: stop throwing on publishInterfaceChanged.
+    transport->setThrowOnInterface(false);
+    service.onModelEvent(ev);
+
+    expect(!service.getIssues().contains(interfaceIssueCode),
+           "interface issue must be cleared after subsequent publishInterfaceChanged success");
+
+    service.stop();
+}
+
+void testTwoOperationIssuesCanCoexist()
+{
+    // Both publishInterfaceChanged and publishLocalStateChanged throw.
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto transport = std::make_shared<FakeObservationTransport>(true, true, true, false);
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(100));
+    expect(service.start(), "service should start");
+
+    ModelEvent ev;
+    ev.kind = ModelEventKind::LocalInterfaceChanged;
+    ev.ifname = std::string("eth0");
+    service.onModelEvent(ev);
+
+    const auto interfaceIssueCode = "observation.transport.fake.publish_interface_changed.failed";
+    const auto localStateIssueCode = "observation.transport.fake.publish_local_state_changed.failed";
+
+    const auto issues = service.getIssues();
+    expect(issues.contains(interfaceIssueCode),
+           "interface issue must be present when publishInterfaceChanged throws");
+    expect(issues.contains(localStateIssueCode),
+           "local-state issue must be present when publishLocalStateChanged throws");
+
+    service.stop();
+}
+
 } // namespace
 
 int main()
@@ -424,5 +513,8 @@ int main()
     testAddTransportAfterStartIsRejected();
     testReadinessIsIndependentFromRuntimeIssuesAndIssuesResetOnRestart();
     testAgingLoopFailureSurfacesIssueWithoutClearingReadiness();
+    testOperationScopedIssueCodesPreserveInterfaceFailureAfterLocalStateSuccess();
+    testOperationScopedIssueClearedBySubsequentSuccess();
+    testTwoOperationIssuesCanCoexist();
     return EXIT_SUCCESS;
 }

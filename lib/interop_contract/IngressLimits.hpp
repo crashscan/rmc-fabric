@@ -18,6 +18,8 @@ namespace network_observation {
 inline constexpr std::size_t kMaxInterfaces = 256;
 inline constexpr std::size_t kMaxCandidates = 1024;
 inline constexpr std::size_t kMaxStringSetEntries = 128;
+inline constexpr std::size_t kMaxIssues = 128;
+inline constexpr std::size_t kMaxIssueFields = 16;
 } // namespace network_observation
 
 } // namespace interop_contract::ingress

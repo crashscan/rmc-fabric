@@ -1,6 +1,8 @@
 #include "NetworkObservationDbusCodec.h"
 
 #include <DecodeError.hpp>
+#include <IngressLimits.hpp>
+#include <network_observation/NetworkObservationContracts.hpp>
 
 #include <cstdlib>
 #include <dbus-cxx/variant.h>
@@ -126,6 +128,120 @@ void testRemoteCandidateRejectsUnknownStatus()
     expect(threw, "fromVariantMapCandidate should reject unknown status");
 }
 
+// Build a complete, valid issue fields variant map.
+[[nodiscard]] std::map<std::string, DBus::Variant> makeValidIssueFields()
+{
+    return {
+        {std::string(contract::ISSUE_SEVERITY),  DBus::Variant(std::string("warning"))},
+        {std::string(contract::ISSUE_MESSAGE),   DBus::Variant(std::string("something failed"))},
+        {std::string(contract::ISSUE_COMPONENT), DBus::Variant(std::string("transport.dbus"))},
+        {std::string(contract::ISSUE_OPERATION), DBus::Variant(std::string("publish"))},
+        {std::string(contract::ISSUE_CATEGORY),  DBus::Variant(std::string("transport_publish_failed"))},
+        {std::string(contract::ISSUE_IDENTITY),  DBus::Variant(std::string("dbus"))},
+    };
+}
+
+void testDecodeIssuesValidRoundTrip()
+{
+    std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
+    encoded["observation.transport.dbus.publish.failed"] = makeValidIssueFields();
+
+    const auto decoded = codec::decodeIssues(encoded);
+    expect(decoded.size() == 1, "decoded issues count mismatch");
+    expect(decoded.count("observation.transport.dbus.publish.failed") == 1,
+           "decoded issue key missing");
+    const auto& fields = decoded.at("observation.transport.dbus.publish.failed");
+    expect(fields.at(std::string(contract::ISSUE_SEVERITY)) == "warning",
+           "decoded severity mismatch");
+}
+
+void testDecodeIssuesRejectsOversizedOuterMap()
+{
+    std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
+    const auto limit = interop_contract::ingress::network_observation::kMaxIssues;
+    for (std::size_t i = 0; i <= limit; ++i) {
+        encoded["issue." + std::to_string(i)] = makeValidIssueFields();
+    }
+
+    bool threw = false;
+    try {
+        (void)codec::decodeIssues(encoded);
+    } catch (const interop_contract::DecodeError& e) {
+        threw = e.code() == interop_contract::DecodeErrorCode::limit_exceeded;
+    }
+    expect(threw, "decodeIssues should reject outer map exceeding kMaxIssues");
+}
+
+void testDecodeIssuesRejectsOversizedInnerMap()
+{
+    std::map<std::string, DBus::Variant> bigFields = makeValidIssueFields();
+    const auto limit = interop_contract::ingress::network_observation::kMaxIssueFields;
+    for (std::size_t i = bigFields.size(); i <= limit; ++i) {
+        bigFields["extra_" + std::to_string(i)] = DBus::Variant(std::string("x"));
+    }
+
+    std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
+    encoded["some.issue"] = bigFields;
+
+    bool threw = false;
+    try {
+        (void)codec::decodeIssues(encoded);
+    } catch (const interop_contract::DecodeError& e) {
+        threw = e.code() == interop_contract::DecodeErrorCode::limit_exceeded;
+    }
+    expect(threw, "decodeIssues should reject inner fields map exceeding kMaxIssueFields");
+}
+
+void testDecodeIssuesRejectsOversizedKey()
+{
+    const std::string longKey(interop_contract::ingress::kMaxKeyLength + 1, 'a');
+    std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
+    encoded[longKey] = makeValidIssueFields();
+
+    bool threw = false;
+    try {
+        (void)codec::decodeIssues(encoded);
+    } catch (const interop_contract::DecodeError& e) {
+        threw = e.code() == interop_contract::DecodeErrorCode::limit_exceeded;
+    }
+    expect(threw, "decodeIssues should reject oversized issue code key");
+}
+
+void testDecodeIssuesRejectsMissingRequiredField()
+{
+    auto fields = makeValidIssueFields();
+    fields.erase(std::string(contract::ISSUE_SEVERITY));
+
+    std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
+    encoded["some.issue"] = fields;
+
+    bool threw = false;
+    try {
+        (void)codec::decodeIssues(encoded);
+    } catch (const interop_contract::DecodeError& e) {
+        threw = e.code() == interop_contract::DecodeErrorCode::missing_required_field;
+    }
+    expect(threw, "decodeIssues should reject issue missing required 'severity' field");
+}
+
+void testDecodeIssuesRejectsWrongFieldType()
+{
+    auto fields = makeValidIssueFields();
+    // Replace string "severity" with a non-string variant.
+    fields[std::string(contract::ISSUE_SEVERITY)] = DBus::Variant(int32_t{1});
+
+    std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
+    encoded["some.issue"] = fields;
+
+    bool threw = false;
+    try {
+        (void)codec::decodeIssues(encoded);
+    } catch (const interop_contract::DecodeError& e) {
+        threw = e.code() == interop_contract::DecodeErrorCode::invalid_type;
+    }
+    expect(threw, "decodeIssues should reject non-string issue field value");
+}
+
 } // namespace
 
 int main()
@@ -134,5 +250,11 @@ int main()
     testRemoteCandidateRoundTrip();
     testLocalInterfaceRejectsMissingRequiredField();
     testRemoteCandidateRejectsUnknownStatus();
+    testDecodeIssuesValidRoundTrip();
+    testDecodeIssuesRejectsOversizedOuterMap();
+    testDecodeIssuesRejectsOversizedInnerMap();
+    testDecodeIssuesRejectsOversizedKey();
+    testDecodeIssuesRejectsMissingRequiredField();
+    testDecodeIssuesRejectsWrongFieldType();
     return EXIT_SUCCESS;
 }

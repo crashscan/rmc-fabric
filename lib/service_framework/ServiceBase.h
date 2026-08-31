@@ -2,6 +2,7 @@
 
 #include <Startable.h>
 
+#include <atomic>
 #include <memory>
 #include <string>
 #include <vector>
@@ -132,8 +133,8 @@ private:
 
     std::string serviceName_;
     std::vector<std::shared_ptr<IServiceTransport>> transports_;
-    bool running_{false};
-    bool ready_{false};
+    std::atomic<bool> running_{false};
+    std::atomic<bool> ready_{false};
 };
 
 } // namespace RSCGroup

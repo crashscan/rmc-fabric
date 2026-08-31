@@ -1,0 +1,75 @@
+name: Install rmc-fabric dependencies
+description: >
+  Install system packages and build/install DBusCxx 2.6.2 from source.
+  Requires sigc++-3.0 (DBusCxx 2.6.2 does not support sigc++ 2.x).
+
+inputs:
+  extra-packages:
+    description: Additional apt packages to install (space-separated)
+    required: false
+    default: ''
+  cc:
+    description: C compiler to use when building DBusCxx
+    required: false
+    default: gcc
+  cxx:
+    description: C++ compiler to use when building DBusCxx
+    required: false
+    default: g++
+
+runs:
+  using: composite
+  steps:
+    - name: Install system packages
+      shell: bash
+      run: |
+        set -euxo pipefail
+        sudo apt-get update -y
+        # DBusCxx 2.6.2 requires sigc++-3.0; the 2.x package does NOT satisfy it.
+        sudo apt-get install -y \
+          cmake ninja-build pkg-config curl dbus dbus-user-session \
+          libdbus-1-dev \
+          libunwind-dev \
+          libgoogle-glog-dev libgflags-dev \
+          libjsoncpp-dev \
+          nlohmann-json3-dev \
+          libsigc++-3.0-dev \
+          liblldpctl-dev \
+          ${{ inputs.extra-packages }}
+
+    - name: Verify sigc++-3.0 availability
+      shell: bash
+      run: |
+        set -euo pipefail
+        if ! pkg-config --modversion sigc++-3.0; then
+          echo "::error::sigc++-3.0 is not available via pkg-config." \
+               "DBusCxx ${{ env.DBUSCXX_VERSION }} requires sigc++ 3.x." \
+               "Ensure libsigc++-3.0-dev is installed on this runner."
+          exit 1
+        fi
+
+    - name: Build and install DBusCxx
+      shell: bash
+      env:
+        CC: ${{ inputs.cc }}
+        CXX: ${{ inputs.cxx }}
+        DBUSCXX_SHA256: a4134d793cc8f943aed6544697098656b039fb78ac60097ada8119b918db42eb
+      run: |
+        set -euxo pipefail
+        ARCHIVE=/tmp/dbus-cxx-${DBUSCXX_VERSION}.tar.gz
+        curl -L \
+          "https://github.com/dbus-cxx/dbus-cxx/archive/refs/tags/${DBUSCXX_VERSION}.tar.gz" \
+          -o "$ARCHIVE"
+        echo "${DBUSCXX_SHA256}  ${ARCHIVE}" | sha256sum --check --strict
+        tar -C /tmp -xzf "$ARCHIVE"
+        cmake -S /tmp/dbus-cxx-${DBUSCXX_VERSION} -B /tmp/dbus-cxx-build -G Ninja \
+          -DCMAKE_BUILD_TYPE=Release \
+          -DBUILD_TESTING=OFF \
+          -DENABLE_EXAMPLES=OFF \
+          -DENABLE_TOOLS=OFF \
+          -DENABLE_GLIB_SUPPORT=OFF \
+          -DENABLE_QT_SUPPORT=OFF \
+          -DENABLE_UV_SUPPORT=OFF
+        cmake --build /tmp/dbus-cxx-build
+        sudo cmake --install /tmp/dbus-cxx-build
+        sudo ldconfig

@@ -42,13 +42,12 @@ const std::vector<std::shared_ptr<IServiceTransport>>& ServiceBase::transports()
 
 void ServiceBase::setReady(bool ready)
 {
-    if (ready_ == ready) {
+    if (ready_.exchange(ready) == ready) {
         return;
     }
-    ready_ = ready;
     for (auto& transport : transports_) {
         try {
-            transport->publishReadyChanged(ready_);
+            transport->publishReadyChanged(ready);
         } catch (const std::exception& e) {
             diagnostics::logError(serviceName_,
                                   "transport." + diagnostics::sanitizeField(transport->name()),
