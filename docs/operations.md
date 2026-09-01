@@ -34,12 +34,56 @@ observing `ReadyChanged(false)` will receive safe defaults or errors.
 `ReadyChanged(true)` is rejected once shutdown has been claimed.  No domain signal or
 readiness-true transition may occur after the terminal readiness-false transition.
 
+### Query quiescence is a structural barrier
+
+`quiesceQueries()` is `noexcept` on the transport interface and on every concrete override.  It
+performs **local synchronization only**: it closes query admission and waits for admitted handlers to
+finish.  It performs no D-Bus/network I/O, no object unregistration, no disconnect, and destroys no
+publication resources — all of that belongs to `stop()`.  A quiescence violation is a structural
+programming defect, not an ordinary recoverable transport error, so teardown must not appear
+abortable at that step.
+
+Worker wake and exit-handler callbacks are treated differently.  They are signalling mechanisms, so
+callback exceptions are caught and logged and worker state still finalizes.  The cost of a swallowed
+or failed wake is latency: stop may be delayed until the worker's natural poll/condition-variable
+wake interval, potentially up to inventory's reconcile interval or observation's aging interval.
+That containment is degradation tolerance, not free recovery.
+
+### Concurrent `stop()` now waits for completion
+
+**Behaviour change.**  Before the lifecycle-runner migration, a second concurrent `stop()` could
+return while teardown was still active.  After the migration, every normal return from `stop()`
+means the active teardown has completed and the service epoch is observably `stopped`.
+
+Because a second `stop()` now waits, no in-process component may synchronously call `stop()` on its
+own owner.  Worker loops, worker exit handlers, LLDP callbacks, netlink callbacks, and runtime
+callbacks that attempt a self stop are **rejected** with a stable operational diagnostic
+(`category=self_stop_rejected`).  No worker thread is ever detached, and a rejected self stop
+never pretends a clean stop completed.  Components needing shutdown must raise an external shutdown
+request instead.
+
+### Worker stop mechanics
+
+- Worker `start()`/`stop()`/`join()` are internally serialized, so concurrent stop and join callers
+  cannot double-join.
+- A worker that has finished but has not yet been joined is reaped before a new worker launches, so a
+  restart after a worker failure still works at the primitive level.
+- Fallible final cleanup (transport unregistration, disconnect, close, runtime/source cleanup) is
+  exception-isolated per step: one failure cannot prevent later cleanup and cannot leave lifecycle
+  coordination stuck in a transitional state.
+- An abandoned or unresolved start resolves to `stopped`; an abandoned or unresolved stop also
+  resolves to `stopped`.  Lifecycle state can never wedge in `starting` or `stopping`.
+
 ## Asynchronous Refresh shutdown semantics
 
 A D-Bus `Refresh()` call admitted before query quiescence may finish enqueueing its asynchronous
 work request.  A refresh already running may complete and publish results before the terminal
 `ReadyChanged(false)`.  A refresh that is merely pending in the event queue may be discarded once
 the worker has been stopped.
+
+The refresh eventfd is closed only *after* the refresh worker has been joined, so no admitted
+`Refresh()` can ever signal a closed descriptor, and no worker touches the inventory manager, file
+watcher, eventfd, or transports after `stop()` returns.
 
 ## LLDP callback lifecycle
 

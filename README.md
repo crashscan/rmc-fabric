@@ -51,7 +51,7 @@ lib/
   dbus_transport_base/      — reusable D-Bus service adapter base
   dbus_client_support/      — reusable D-Bus client helpers (header-only)
   service_framework/        — adopted lifecycle surface (`ServiceBase`, `IServiceTransport`, `DaemonRunner`)
-  lifecycle_runner/         — lower-level thread/lifecycle primitives
+  lifecycle_runner/         — shared lifecycle primitives (`ManagedWorker`, `LifecycleCoordinator`, `Startable`)
   daemon_support/           — signal handling for daemon processes
   file_watcher/             — inotify file watcher
 ```
