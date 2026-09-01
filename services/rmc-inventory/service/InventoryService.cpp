@@ -176,7 +176,10 @@ bool InventoryService::start()
             diagnostics::logError(name(), "worker.refresh", "start", "restart_requires_stop", "refresh-loop", "loop thread is dead; call stop() before start()");
             throw std::logic_error("InventoryService: restart after crash requires stop() first");
         }
-        return lifecycle_.isRunning();
+        // beginStart() returns an unowned transition only when the epoch was
+        // observed running under the coordinator lock, so this start() is an
+        // idempotent no-op on a healthy service.
+        return true;
     }
 
     if (!ServiceBase::start()) {

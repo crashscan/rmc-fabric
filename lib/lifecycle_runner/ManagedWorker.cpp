@@ -24,12 +24,13 @@ ManagedWorker::ManagedWorker(std::string name,
 ManagedWorker::~ManagedWorker()
 {
     if (isCurrentThread()) {
-        // Ownership violation: the worker cannot outlive or destroy its owner.
-        // Detaching is forbidden because the work/wake/exit callbacks capture
-        // the owning object, so there is no safe recovery here.
-        LOG(ERROR) << "ManagedWorker '" << name_
+        // Ownership violation: the worker cannot destroy its owner.  Detaching
+        // is forbidden because the work/wake/exit callbacks capture the owning
+        // object, and returning here would let ~jthread attempt a self-join
+        // (which throws and then terminates with no useful diagnostic).  Fail
+        // deterministically with an actionable message instead.
+        LOG(FATAL) << "ManagedWorker '" << name_
                    << "': destroyed from its own worker thread; this is an ownership violation";
-        return;
     }
 
     requestStop();

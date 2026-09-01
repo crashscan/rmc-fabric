@@ -104,8 +104,10 @@ public:
      * @brief Requests stop and joins.  Never detaches.
      *
      * Destruction from the worker thread is an ownership/programming
-     * violation: it is logged and the join is skipped, because joining
-     * oneself is impossible and detaching is forbidden.
+     * violation.  Joining oneself is impossible and detaching is forbidden,
+     * so the violation is reported fatally and the process aborts with an
+     * actionable diagnostic rather than terminating inside `~jthread` on a
+     * failed self-join.
      */
     ~ManagedWorker();
 

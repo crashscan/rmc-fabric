@@ -98,7 +98,11 @@ bool ObservationService::start()
 {
     auto transition = lifecycle_.beginStart();
     if (!transition) {
-        return lifecycle_.isRunning();
+        // beginStart() returns an unowned transition only when the epoch was
+        // observed running under the coordinator lock.  Unlike inventory,
+        // observation treats an aging-worker crash as degradation, so a
+        // repeated start() is an idempotent no-op.
+        return true;
     }
 
     if (!ServiceBase::start()) {
