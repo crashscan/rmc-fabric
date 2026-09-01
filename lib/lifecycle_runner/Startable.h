@@ -7,8 +7,10 @@ namespace RSCGroup {
 /**
  * @brief Minimal interface for components that have a start/stop lifecycle.
  *
- * LifecycleManager operates on Startable components: it starts them in
- * registration order and stops them in reverse order, rolling back on failure.
+ * `ServiceBase` implements `Startable`, and `DaemonRunner` wraps process
+ * lifecycle around one.  Startable carries no orchestration policy of its own:
+ * service-epoch serialization belongs to `LifecycleCoordinator` and
+ * worker-thread mechanics belong to `ManagedWorker`.
  */
 class Startable {
 public:
