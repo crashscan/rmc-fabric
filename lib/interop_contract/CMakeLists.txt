@@ -28,7 +28,7 @@ install(
 
 if(BUILD_TESTING)
     add_executable(interop_contract_tests
-        tests/StatusTests.cpp
+        tests/InteropContractUmbrellaTests.cpp
     )
 
     add_executable(interop_inventory_contract_tests

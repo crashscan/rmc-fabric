@@ -1,6 +1,8 @@
-#pragma once
+ #pragma once
 
+#include "ClientResult.hpp"
 #include "ContractVersion.hpp"
-#include "Error.hpp"
-#include "Status.hpp"
+#include "DecodeError.hpp"
+#include "IngressLimits.hpp"
 #include "inventory.hpp"
+#include "network_observation.hpp"
