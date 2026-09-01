@@ -65,6 +65,9 @@ public:
     InventoryDiff refreshAll() override
     {
         ++refreshCalls_;
+        if (onRefresh_) {
+            onRefresh_();
+        }
         if (throwOnRefresh_) {
             throw std::runtime_error("refresh failed");
         }
@@ -90,6 +93,8 @@ public:
     [[nodiscard]] std::string getPhase() const override { return snapshot_.phase; }
     [[nodiscard]] uint64_t getVersion() const override { return snapshot_.version; }
     void setRefreshDiff(InventoryDiff diff) { refreshDiff_ = std::move(diff); }
+    void setThrowOnRefresh(bool value) { throwOnRefresh_ = value; }
+    void setOnRefresh(std::function<void()> hook) { onRefresh_ = std::move(hook); }
     void setRefreshedStates(interop_contract::inventory::SourceStateMap states) { refreshedStates_ = std::move(states); }
 
 private:
@@ -98,6 +103,7 @@ private:
     InventoryDiff refreshDiff_{};
     interop_contract::inventory::SourceStateMap sourceStates_{};
     interop_contract::inventory::SourceStateMap refreshedStates_{};
+    std::function<void()> onRefresh_;
     bool readyAfterRefresh_{true};
     bool throwOnRefresh_{false};
     bool ready_{false};
@@ -201,6 +207,11 @@ public:
         started_ = false;
     }
 
+    void quiesceQueries() noexcept override
+    {
+        ++quiesceCount_;
+    }
+
     [[nodiscard]] std::string name() const override
     {
         return startResult_ ? "fake" : "failing";
@@ -238,6 +249,7 @@ public:
     [[nodiscard]] int readyFalseCount() const { return readyFalseCount_.load(); }
     [[nodiscard]] int inventoryChangedCount() const { return inventoryChangedCount_.load(); }
     [[nodiscard]] int sourceStateChangedCount() const { return sourceStateChangedCount_.load(); }
+    [[nodiscard]] int quiesceCount() const { return quiesceCount_.load(); }
 
 private:
     bool startResult_{true};
@@ -251,6 +263,7 @@ private:
     std::atomic<int> readyFalseCount_{0};
     std::atomic<int> inventoryChangedCount_{0};
     std::atomic<int> sourceStateChangedCount_{0};
+    std::atomic<int> quiesceCount_{0};
 };
 
 class FakeWatchableSource final : public IInventorySource, public IWatchableInventorySource {
@@ -353,9 +366,132 @@ void testStopWaitsForWorkerBeforeStoppingTransports()
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     expect(transport->stopCount() == 0, "transport stop must wait for the worker loop to exit");
 
+    expect(waitFor([&] { return transport->quiesceCount() == 1; }),
+           "query admission must be quiesced before the producer drain");
+    expect(transport->readyFalseCount() == 0,
+           "terminal ReadyChanged(false) must not be published before the worker drains");
+
     watcher->releaseMaintain();
     stopFuture.get();
+    expect(transport->readyFalseCount() == 1, "terminal ReadyChanged(false) should be published after the drain");
     expect(transport->stopCount() == 1, "transport should stop after the worker loop exits");
+}
+
+// Inventory Policy A characterization.
+//
+// A repeated start() on a *healthy* running service is a no-op returning true,
+// but a repeated start() while the refresh worker has crashed must throw and
+// require an intervening stop().  The lifecycle coordinator never decides
+// worker health; inventory owns this through loopFailed_.
+void testRestartAfterWorkerCrashRequiresStopFirst()
+{
+    auto manager = std::make_shared<FakeInventoryManager>(true, true);
+    auto transport = std::make_shared<FakeInventoryTransport>();
+
+    InventoryService service(manager, {}, [] {
+        return std::make_unique<FakeFileWatcher>();
+    });
+    service.addTransport(transport);
+
+    expect(service.start(), "service should start");
+    expect(waitFor([&] { return service.getIssues().contains("inventory.loop.stopped"); }),
+           "refresh worker crash should surface inventory.loop.stopped");
+
+    bool threw = false;
+    try {
+        (void)service.start();
+    } catch (const std::logic_error&) {
+        threw = true;
+    }
+    expect(threw, "start() after a refresh worker crash must throw std::logic_error");
+
+    // stop() reaps and resets the failed epoch.
+    service.stop();
+    expect(!service.isRunning(), "service should be stopped after stop()");
+    expect(!service.getIssues().contains("inventory.loop.stopped"),
+           "stop() must clear the inventory-owned crash state");
+
+    manager->setThrowOnRefresh(false);
+    expect(service.start(), "start() must succeed after the failed epoch has been reaped");
+    service.stop();
+}
+
+void testRepeatedStartOnHealthyServiceReturnsTrue()
+{
+    auto manager = std::make_shared<FakeInventoryManager>();
+    auto transport = std::make_shared<FakeInventoryTransport>();
+
+    InventoryService service(manager, {}, [] {
+        return std::make_unique<FakeFileWatcher>();
+    });
+    service.addTransport(transport);
+
+    expect(service.start(), "service should start");
+    expect(service.start(), "a repeated start() on a healthy service must return true");
+    expect(transport->startCount() == 1, "a repeated start() must not restart transports");
+    service.stop();
+}
+
+void testSelfStopFromWorkerThreadIsRejected()
+{
+    auto manager = std::make_shared<FakeInventoryManager>();
+    auto transport = std::make_shared<FakeInventoryTransport>();
+
+    InventoryService service(manager, {}, [] {
+        return std::make_unique<FakeFileWatcher>();
+    });
+    service.addTransport(transport);
+
+    std::atomic<bool> selfStopAttempted{false};
+    manager->setOnRefresh([&] {
+        if (selfStopAttempted.exchange(true)) {
+            return;
+        }
+        // Rejected before shutdown is claimed: no detach, no partial teardown.
+        service.stop();
+    });
+
+    expect(service.start(), "service should start");
+    expect(waitFor([&] { return selfStopAttempted.load(); }), "the worker should attempt a self stop");
+    expect(waitFor([&] { return transport->readyTrueCount() == 1; }),
+           "a rejected self stop must not tear the service down");
+    expect(service.isRunning(), "service must still be running after a rejected self stop");
+    expect(transport->stopCount() == 0, "a rejected self stop must not close transports");
+
+    service.stop();
+    expect(!service.isRunning(), "an external stop must still work after a rejected self stop");
+    expect(transport->stopCount() == 1, "transports should close exactly once");
+}
+
+void testConcurrentStopWaitsForTeardownCompletion()
+{
+    auto manager = std::make_shared<FakeInventoryManager>();
+    auto transport = std::make_shared<FakeInventoryTransport>();
+    FakeFileWatcher* watcher = nullptr;
+
+    InventoryService service(manager, {}, [&watcher] {
+        auto impl = std::make_unique<FakeFileWatcher>(true);
+        watcher = impl.get();
+        return impl;
+    });
+    service.addTransport(transport);
+
+    expect(service.start(), "service should start");
+    watcher->waitUntilMaintainEntered();
+
+    auto first = std::async(std::launch::async, [&service] { service.stop(); });
+    auto second = std::async(std::launch::async, [&service] { service.stop(); });
+
+    expect(second.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout ||
+           first.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout,
+           "a concurrent stop must not return while teardown is still active");
+
+    watcher->releaseMaintain();
+    first.get();
+    second.get();
+
+    expect(!service.isRunning(), "every stop() must return only after teardown completed");
+    expect(transport->stopCount() == 1, "transports must be closed exactly once");
 }
 
 void testPublishFailureDoesNotBlockLaterTransports()
@@ -414,5 +550,9 @@ int main()
     testStopWaitsForWorkerBeforeStoppingTransports();
     testPublishFailureDoesNotBlockLaterTransports();
     testLoopFailurePublishesInventoryLoopIssue();
+    testRestartAfterWorkerCrashRequiresStopFirst();
+    testRepeatedStartOnHealthyServiceReturnsTrue();
+    testSelfStopFromWorkerThreadIsRejected();
+    testConcurrentStopWaitsForTeardownCompletion();
     return EXIT_SUCCESS;
 }

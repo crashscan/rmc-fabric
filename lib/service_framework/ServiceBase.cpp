@@ -178,28 +178,12 @@ void ServiceBase::stop()
     diagnostics::logInfo(serviceName_, "service.lifecycle", "stop", "service_stopped", serviceName_, "stopped");
 }
 
-void ServiceBase::quiesceQueriesOnTransports()
+void ServiceBase::quiesceQueriesOnTransports() noexcept
 {
+    // IServiceTransport::quiesceQueries() is noexcept and local-only, so this
+    // is a plain iteration: teardown must not appear abortable here.
     for (auto& transport : transports_) {
-        try {
-            transport->quiesceQueries();
-        } catch (const std::exception& e) {
-            diagnostics::logError(serviceName_,
-                                  "transport." + diagnostics::sanitizeField(transport->name()),
-                                  "quiesce_queries",
-                                  "transport_quiesce_failed",
-                                  transport->name(),
-                                  e.what());
-            throw;
-        } catch (...) {
-            diagnostics::logError(serviceName_,
-                                  "transport." + diagnostics::sanitizeField(transport->name()),
-                                  "quiesce_queries",
-                                  "transport_quiesce_failed",
-                                  transport->name(),
-                                  "unknown exception");
-            throw;
-        }
+        transport->quiesceQueries();
     }
 }
 

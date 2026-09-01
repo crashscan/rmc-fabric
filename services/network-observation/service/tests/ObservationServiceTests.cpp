@@ -99,6 +99,9 @@ public:
 
     void age(std::chrono::steady_clock::time_point) override
     {
+        if (onAge_) {
+            onAge_();
+        }
         if (throwOnAge_.load()) {
             throw std::runtime_error("age failed");
         }
@@ -132,6 +135,7 @@ public:
     void setLldpAvailable(bool value) { lldpAvailable_.store(value); }
     void setRunning(bool value) { running_.store(value); }
     void setThrowOnAge(bool value) { throwOnAge_.store(value); }
+    void setOnAge(std::function<void()> hook) { onAge_ = std::move(hook); }
     void setBlockInAge(bool value)
     {
         std::scoped_lock lock(mutex_);
@@ -144,6 +148,7 @@ private:
     std::atomic<bool> running_{false};
     std::atomic<bool> lldpAvailable_{true};
     std::atomic<bool> throwOnAge_{false};
+    std::function<void()> onAge_;
     std::atomic<int> startCount_{0};
     std::atomic<int> stopCount_{0};
     std::atomic<bool> stopSawActiveAge_{false};
@@ -186,10 +191,20 @@ public:
         ++stopCount_;
     }
 
+    void quiesceQueries() noexcept override
+    {
+        ++quiesceCount_;
+    }
+
     std::string name() const override
     {
+        if (!name_.empty()) {
+            return name_;
+        }
         return startResult_ ? "fake" : "failing";
     }
+
+    void setName(std::string name) { name_ = std::move(name); }
 
     void publishReadyChanged(bool ready) override
     {
@@ -246,6 +261,7 @@ public:
     [[nodiscard]] int interfaceRemovedCount() const { return interfaceRemovedCount_.load(); }
     [[nodiscard]] int candidateChangedCount() const { return candidateChangedCount_.load(); }
     [[nodiscard]] int candidateRemovedCount() const { return candidateRemovedCount_.load(); }
+    [[nodiscard]] int quiesceCount() const { return quiesceCount_.load(); }
 
     void setThrowOnLocal(bool v) { throwOnLocal_.store(v); }
     void setThrowOnInterface(bool v) { throwOnInterface_.store(v); }
@@ -267,6 +283,8 @@ private:
     std::atomic<int> interfaceRemovedCount_{0};
     std::atomic<int> candidateChangedCount_{0};
     std::atomic<int> candidateRemovedCount_{0};
+    std::atomic<int> quiesceCount_{0};
+    std::string name_;
 };
 
 void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
@@ -310,6 +328,7 @@ void testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport()
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     auto transport = std::make_shared<FakeObservationTransport>();
+    runtimePtr->setBlockInAge(true);
 
     ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(1));
     expect(service.start(), "service should start with fast aging interval");
@@ -319,10 +338,15 @@ void testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport()
     std::this_thread::sleep_for(std::chrono::milliseconds(50));
     expect(runtimePtr->stopCount() == 0, "runtime stop must wait for the aging thread to exit");
     expect(transport->stopCount() == 0, "transport stop must wait for runtime-owned worker shutdown");
+    expect(transport->quiesceCount() == 1, "query admission must be quiesced before the producer drain");
+    expect(transport->readyFalseCount() == 0,
+           "terminal ReadyChanged(false) must not be published before the producer drain");
 
     runtimePtr->releaseAge();
     stopFuture.get();
 
+    expect(transport->readyFalseCount() == 1,
+           "terminal ReadyChanged(false) should be published after the producer drain");
     expect(runtimePtr->stopCount() == 1, "runtime should stop after aging thread exits");
     expect(!runtimePtr->stopSawActiveAge(), "runtime stop must observe no active aging callback");
     expect(transport->stopCount() == 1, "transport should stop after runtime shutdown");
@@ -333,6 +357,7 @@ void testPublishFailureDoesNotBlockLaterTransports()
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto throwing = std::make_shared<FakeObservationTransport>(true, true, true, true);
     auto observing = std::make_shared<FakeObservationTransport>();
+    observing->setName("observer");
 
     ObservationService service(std::move(runtime), throwing, std::chrono::milliseconds(100));
     service.addTransport(observing);
@@ -345,7 +370,7 @@ void testPublishFailureDoesNotBlockLaterTransports()
     service.onModelEvent(localChanged);
 
     ModelEvent candidateChanged;
-    candidateChanged.kind = ModelEventKind::CandidateChanged;
+    candidateChanged.kind = ModelEventKind::CandidateUpdated;
     candidateChanged.mac = std::string("00:11:22:33:44:55");
     service.onModelEvent(candidateChanged);
 
@@ -504,6 +529,82 @@ void testTwoOperationIssuesCanCoexist()
     service.stop();
 }
 
+void testSelfStopFromAgingThreadIsRejected()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto runtimePtr = runtime.get();
+    auto transport = std::make_shared<FakeObservationTransport>();
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(1));
+
+    std::atomic<bool> selfStopAttempted{false};
+    runtimePtr->setOnAge([&] {
+        if (selfStopAttempted.exchange(true)) {
+            return;
+        }
+        // Rejected before shutdown is claimed: no detach, no partial teardown.
+        service.stop();
+    });
+
+    expect(service.start(), "service should start");
+    expect(waitFor([&] { return selfStopAttempted.load(); }), "the aging worker should attempt a self stop");
+    expect(service.isReady(), "a rejected self stop must not tear the service down");
+    expect(transport->stopCount() == 0, "a rejected self stop must not close transports");
+    expect(runtimePtr->stopCount() == 0, "a rejected self stop must not stop the runtime");
+
+    service.stop();
+    expect(transport->stopCount() == 1, "an external stop must still close transports exactly once");
+    expect(runtimePtr->stopCount() == 1, "an external stop must still stop the runtime exactly once");
+}
+
+void testAgingWorkerCrashRemainsObservationOwnedDegradation()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto runtimePtr = runtime.get();
+    runtimePtr->setThrowOnAge(true);
+    auto transport = std::make_shared<FakeObservationTransport>();
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(1));
+    expect(service.start(), "service should start");
+    expect(waitFor([&] { return service.getIssues().contains("observation.worker.aging.stopped"); }),
+           "aging worker crash should surface as an observation-owned issue");
+
+    // Unlike inventory Policy A, observation treats an aging-worker crash as
+    // degradation: readiness is unchanged and a repeated start() is a no-op.
+    expect(service.isReady(), "aging worker crash must not clear readiness");
+    expect(service.start(), "a repeated start() after an aging crash must not throw");
+    expect(transport->startCount() == 1, "a repeated start() must not restart transports");
+
+    service.stop();
+    expect(service.getIssues().empty(), "stop() should clear runtime issue state");
+}
+
+void testConcurrentStopWaitsForTeardownCompletion()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto runtimePtr = runtime.get();
+    runtimePtr->setBlockInAge(true);
+    auto transport = std::make_shared<FakeObservationTransport>();
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(1));
+    expect(service.start(), "service should start");
+    runtimePtr->waitUntilAgeEntered();
+
+    auto first = std::async(std::launch::async, [&service] { service.stop(); });
+    auto second = std::async(std::launch::async, [&service] { service.stop(); });
+
+    expect(second.wait_for(std::chrono::milliseconds(50)) == std::future_status::timeout ||
+           first.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout,
+           "a concurrent stop must not return while teardown is still active");
+
+    runtimePtr->releaseAge();
+    first.get();
+    second.get();
+
+    expect(transport->stopCount() == 1, "transports must be closed exactly once");
+    expect(runtimePtr->stopCount() == 1, "the runtime must be stopped exactly once");
+}
+
 } // namespace
 
 int main()
@@ -518,5 +619,8 @@ int main()
     testOperationScopedIssueCodesPreserveInterfaceFailureAfterLocalStateSuccess();
     testOperationScopedIssueClearedBySubsequentSuccess();
     testTwoOperationIssuesCanCoexist();
+    testSelfStopFromAgingThreadIsRejected();
+    testAgingWorkerCrashRemainsObservationOwnedDegradation();
+    testConcurrentStopWaitsForTeardownCompletion();
     return EXIT_SUCCESS;
 }

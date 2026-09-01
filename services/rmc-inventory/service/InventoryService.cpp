@@ -87,6 +87,10 @@ InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
     : ServiceBase("inventory-service")
     , manager_(std::move(manager))
     , settings_(settings)
+    , refreshWorker_("inventory-refresh",
+                     [this](std::stop_token stopToken) { runLoop(std::move(stopToken)); },
+                     [this] { signalFd(refreshEventFd_.get()); },
+                     [this](const ManagedWorker::Exit& exit) { onRefreshWorkerExit(exit); })
 {
     if (!manager_) {
         throw std::invalid_argument("InventoryService: manager is null");
@@ -99,7 +103,13 @@ InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
 
 InventoryService::~InventoryService()
 {
-    stop();
+    // Destructors must not throw.  stop() is structurally non-throwing, but
+    // the guard makes that explicit at the destruction boundary.
+    try {
+        stop();
+    } catch (...) {
+        diagnostics::logError(name(), "service.lifecycle", "destroy", "service_stop_failed", "inventory-service", "stop() threw during destruction");
+    }
 }
 
 void InventoryService::addSource(std::shared_ptr<IInventorySource> source)
@@ -108,7 +118,6 @@ void InventoryService::addSource(std::shared_ptr<IInventorySource> source)
         throw std::invalid_argument("InventoryService::addSource: source is null");
     }
 
-    std::scoped_lock lock(lifecycleMutex_);
     if (ServiceBase::isRunning()) {
         throw std::runtime_error("InventoryService::addSource: cannot add sources after start");
     }
@@ -126,7 +135,6 @@ void InventoryService::addTransport(std::shared_ptr<IInventoryTransport> transpo
         throw std::invalid_argument("InventoryService::addTransport: transport is null");
     }
 
-    std::scoped_lock lock(lifecycleMutex_);
     if (ServiceBase::isRunning()) {
         throw std::runtime_error("InventoryService::addTransport: cannot add transports after start");
     }
@@ -159,94 +167,78 @@ bool InventoryService::initializeComponents()
 
 bool InventoryService::start()
 {
-    std::scoped_lock lock(lifecycleMutex_);
-    if (ServiceBase::isRunning()) {
+    auto transition = lifecycle_.beginStart();
+    if (!transition) {
+        // Inventory Policy A: the coordinator only reports that the epoch is
+        // already running; inventory alone decides whether the refresh worker
+        // is healthy enough for a repeated start to be a no-op.
         if (loopFailed_.load(std::memory_order_acquire)) {
             diagnostics::logError(name(), "worker.refresh", "start", "restart_requires_stop", "refresh-loop", "loop thread is dead; call stop() before start()");
             throw std::logic_error("InventoryService: restart after crash requires stop() first");
         }
+        // beginStart() returns an unowned transition only when the epoch was
+        // observed running under the coordinator lock, so this start() is an
+        // idempotent no-op on a healthy service.
         return true;
-    }
-    if (loopThread_.joinable()) {
-        throw std::logic_error("InventoryService: internal error: loop thread must be reaped by stop() before start()");
     }
 
     if (!ServiceBase::start()) {
         refreshEventFd_.reset();
+        transition.fail();
         return false;
     }
 
     loopFailed_.store(false, std::memory_order_release);
-    loopAlive_.store(true, std::memory_order_release);
     nextReconcileTs_ = std::chrono::steady_clock::now();
     try {
-        loopThread_ = std::jthread([this](std::stop_token st) {
-            try {
-                runLoop(st);
-            } catch (const std::exception& e) {
-                loopFailed_.store(true, std::memory_order_release);
-                diagnostics::logError(name(), "worker.refresh", "run_loop", "worker_loop_failed", "refresh-loop", e.what());
-            } catch (...) {
-                loopFailed_.store(true, std::memory_order_release);
-                diagnostics::logError(name(), "worker.refresh", "run_loop", "worker_loop_failed", "refresh-loop", "unknown exception");
-            }
-            loopAlive_.store(false, std::memory_order_release);
-        });
+        // ManagedWorker::start() reaps a finished-but-unjoined worker before
+        // launching, so a previously crashed epoch never blocks a new launch
+        // at the primitive level.
+        (void)refreshWorker_.start();
     } catch (const std::exception& e) {
-        loopAlive_.store(false, std::memory_order_release);
         loopFailed_.store(false, std::memory_order_release);
         refreshEventFd_.reset();
         ServiceBase::stop();
         diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", e.what());
+        transition.fail();
         return false;
     } catch (...) {
-        loopAlive_.store(false, std::memory_order_release);
         loopFailed_.store(false, std::memory_order_release);
         refreshEventFd_.reset();
         ServiceBase::stop();
         diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", "unknown exception");
+        transition.fail();
         return false;
     }
+
+    transition.complete();
     return true;
 }
 
 void InventoryService::stop()
 {
-    // Claim shutdown. If another stop() is already in progress or the service
-    // has never started, return immediately.
-    {
-        std::scoped_lock lock(lifecycleMutex_);
-        if (stopping_) return;
-        if (!ServiceBase::isRunning() && !loopThread_.joinable()) return;
-        stopping_ = true;
+    // Self-stop is rejected *before* shutdown is claimed.  There is no detach
+    // path: a detached worker capturing `this` would open a use-after-free
+    // window and break the producer-drain guarantee.
+    if (refreshWorker_.isCurrentThread()) {
+        diagnostics::logError(name(), "worker.refresh", "stop", "self_stop_rejected", "refresh-loop", "stop() called from the refresh worker thread; request shutdown externally");
+        return;
     }
 
-    // Step 1: Quiesce D-Bus query admission — no new Refresh/Get calls
-    // will be admitted after this returns.
-    // Must NOT hold lifecycleMutex_ while blocking on query drain.
+    // Claim shutdown.  A concurrent stop() waits here and returns only once
+    // the active teardown has completed.
+    auto transition = lifecycle_.beginStop();
+    if (!transition) {
+        return;
+    }
+
+    // Step 1: Quiesce D-Bus query admission — no new Refresh/Get calls are
+    // admitted after this returns.  Structural, local, noexcept.
     quiesceQueriesOnTransports();
 
-    // Step 2: Signal the worker and join it.
+    // Step 2: Request stop, wake the poll loop through the eventfd, and join.
     // After quiescence, no new Refresh() can enqueue a signal on the eventfd.
-    {
-        std::scoped_lock lock(lifecycleMutex_);
-        if (loopThread_.joinable()) {
-            loopThread_.request_stop();
-            signalFd(refreshEventFd_.get());
-        }
-    }
-    // Join outside the mutex — the worker must not hold it when exiting.
-    // Self-join guard: if stop() is called from within the loop thread itself
-    // (e.g. a downstream callback drives lifecycle), skip the join to avoid
-    // a deadlock — the caller is responsible for the thread completing.
-    bool selfJoinPath = false;
-    if (loopThread_.joinable() && loopThread_.get_id() != std::this_thread::get_id()) {
-        loopThread_.join();
-    } else if (loopThread_.joinable()) {
-        LOG(WARNING) << "InventoryService::stop() called from within loop thread; join skipped";
-        loopThread_.detach();
-        selfJoinPath = true;
-    }
+    refreshWorker_.stop();
 
     // Step 3: Clear worker-related state.
     loopFailed_.store(false, std::memory_order_release);
@@ -255,27 +247,37 @@ void InventoryService::stop()
         refreshRequested_ = false;
     }
 
-    // Step 4: Close eventfd only after the worker has been fully joined.
-    // On the self-join path the detached thread is still executing (it will
-    // exit the event loop shortly), so we must NOT close the fd here — the
-    // thread holds references to it via its poll/read loop.  On that path we
-    // leave refreshEventFd_ open; start() will reinitialise it on next boot.
-    if (!selfJoinPath) {
-        refreshEventFd_.reset();
-    }
-    // else: detach path — leave fd alive so the still-running thread can exit
+    // Step 4: Close the eventfd only after the worker has been fully joined.
+    refreshEventFd_.reset();
 
     // Step 5: Emit ReadyChanged(false) (terminal readiness transition) and
-    // fully stop/unregister transports.
-    // ServiceBase::stop() emits setReady(false) before stopping transports,
-    // satisfying the terminal-signal ordering requirement.
+    // stop/unregister transports in reverse registration order.
     ServiceBase::stop();
 
-    // Reset stopping_ so the service can be restarted.
-    {
-        std::scoped_lock lock(lifecycleMutex_);
-        stopping_ = false;
+    transition.complete();
+}
+
+void InventoryService::onRefreshWorkerExit(const ManagedWorker::Exit& exit)
+{
+    // Runs on the worker thread after the worker state has been finalized.
+    // It records inventory-owned crash state and diagnostics only; it must
+    // never drive service or worker lifecycle.
+    if (exit.reason != ManagedWorker::ExitReason::exception) {
+        return;
     }
+
+    loopFailed_.store(true, std::memory_order_release);
+
+    std::string detail = "unknown exception";
+    try {
+        if (exit.exception) {
+            std::rethrow_exception(exit.exception);
+        }
+    } catch (const std::exception& e) {
+        detail = e.what();
+    } catch (...) {
+    }
+    diagnostics::logError(name(), "worker.refresh", "run_loop", "worker_loop_failed", "refresh-loop", detail);
 }
 
 bool InventoryService::isRunning() const

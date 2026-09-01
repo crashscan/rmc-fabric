@@ -136,9 +136,9 @@ protected:
      * @brief Quiesce query admission on all registered transports.
      *
      * Iterates transports in registration order and calls
-     * transport->quiesceQueries() on each.  A failure is a safety-barrier
-     * failure and is re-thrown after logging; it must not be silently
-     * swallowed.
+     * transport->quiesceQueries() on each.  Query quiescence is a structural
+     * safety barrier: `IServiceTransport::quiesceQueries()` is `noexcept` and
+     * local-only, so teardown is not abortable here.
      *
      * Callers must not hold the service lifecycle mutex while calling this,
      * as each quiesce may block waiting for in-flight handlers to drain.
@@ -146,7 +146,7 @@ protected:
      * Postcondition: no new externally-initiated query is admitted; all
      * previously admitted query calls have returned.
      */
-    void quiesceQueriesOnTransports();
+    void quiesceQueriesOnTransports() noexcept;
 
     /**
      * @brief Stop all registered transports without touching the ready state.

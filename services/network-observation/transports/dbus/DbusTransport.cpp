@@ -48,7 +48,7 @@ void DbusTransport::stop()
     DbusTransportBase::stop();
 }
 
-void DbusTransport::quiesceQueries()
+void DbusTransport::quiesceQueries() noexcept
 {
     DbusTransportBase::quiesceQueries();
 }

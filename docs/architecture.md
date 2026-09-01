@@ -102,6 +102,87 @@ Contracts are defined in `lib/interop_contract/` and are the only layer allowed 
 
 All wire-level types, method names, signal names, and field key constants are in `lib/interop_contract/`.
 
+## Service lifecycle primitives
+
+Service lifecycle mechanics live in `lib/lifecycle_runner/` and are shared by both production
+services.  The responsibility split is strict:
+
+| Component | Owns | Never owns |
+| --- | --- | --- |
+| `ManagedWorker` | worker-thread mechanics: launch, cooperative stop request, wake, serialized join, exit capture, reap/restart | health policy, domain state, service ordering |
+| `LifecycleCoordinator` | service-epoch transition serialization: `stopped`/`starting`/`running`/`stopping`, concurrent lifecycle-call coordination, RAII transition completion | worker health, transports, readiness |
+| `ServiceBase` | transport registration/startup/rollback/reverse-order close, query quiescence, ready state, terminal `ReadyChanged(false)` fan-out | worker mechanics, epoch serialization |
+| Inventory / observation services | domain work loops, runtime/source dependencies, error/issue policy, readiness meaning, restart and crash policy | thread mechanics, epoch serialization |
+
+`lifecycle_runner` deliberately contains no event bus, no generic component orchestrator, no
+publication queue, and no domain knowledge.
+
+### Primitive mechanics versus service policy
+
+The primitives never decide whether a service should restart.  Both services observe worker exit
+through a `ManagedWorker` exit handler and then apply their own policy:
+
+- **Inventory Policy A** — a repeated `start()` on a *healthy* running service returns `true`, but a
+  repeated `start()` while the refresh worker has crashed throws `std::logic_error` and requires an
+  intervening `stop()` to reap and reset the failed epoch.  Inventory owns this through its
+  `loopFailed_` flag; the coordinator only reports that the epoch is already running.
+- **Observation degradation policy** — an aging-worker crash is service-owned degradation.  It is
+  surfaced as an issue (`observation.worker.aging.stopped`), readiness is not cleared, and a
+  repeated `start()` remains a no-op.
+
+### `ManagedWorker` contract highlights
+
+- `start()`, `stop()`, and `join()` are internally serialized; concurrent `stop()`/`join()` callers
+  cannot double-join and both return only after the worker has finished.
+- `start()` defines all three prior states: running (returns `false`), finished-but-unjoined (reaps
+  the completed thread, then launches), and never-started (launches).  A finished thread is reaped
+  with an explicit join rather than move-assignment, because move-assigning a `std::jthread`
+  implicitly requests stop and joins *without* invoking the configured wake callback.
+- `requestStop()` is safe from any thread including the worker, and never joins.
+- `join()` and `stop()` reject execution from the worker thread with a deterministic
+  `std::logic_error`.  **No detach path exists anywhere.**
+- Worker exceptions never escape the thread entry point; they are captured into `Exit`.
+- The exit handler runs **on the worker thread** after `running=false` and `lastExit` are recorded,
+  and the worker's thread id stays valid for the whole handler invocation so `isCurrentThread()` and
+  self-operation detection work inside it.
+- The exit handler must not call `start()`, `stop()`, or `join()` on its own worker.
+- `Wake` and `ExitHandler` must not throw and must not block; `std::function` cannot enforce
+  `noexcept`, so violations are caught and logged.
+- `ExitReason::returned` versus `ExitReason::stop_requested` is **advisory only**: a worker return
+  can race a stop request.  Services must not treat it as an authoritative synchronization fact.
+- Thread construction failure propagates from `ManagedWorker::start()` and leaves the object
+  restartable.  Services catch it, roll startup back, log, and return `false`.
+
+### Member declaration and destruction order
+
+> If worker callbacks capture the owning object, the `ManagedWorker` member must be declared **after**
+> every sibling member those callbacks access, so reverse member destruction destroys the worker
+> first.
+
+Both `InventoryService` and `ObservationService` keep their `ManagedWorker` as the last relevant
+member with an explanatory comment at the declaration site.
+
+### `LifecycleCoordinator` contract highlights
+
+- `beginStart()` claims `starting` from `stopped`; from `running` it returns an unowned transition so
+  the service can apply its own health policy; during `starting`/`stopping` it waits for resolution
+  and re-evaluates.
+- `beginStop()` claims `stopping` from `running`; from `stopped` it returns unowned; during
+  `starting` it waits for startup to resolve and then claims stop only if startup succeeded.
+- **Asymmetric abandoned transitions**: an abandoned or unresolved *start* resolves `starting →
+  stopped`, and an abandoned or unresolved *stop* resolves `stopping → stopped`.  An abandoned stop
+  is never rolled back to `running`, and state is never left stuck in `stopping`.  This is safe
+  because teardown is structurally non-throwing: quiescence is `noexcept`, self-stop is rejected,
+  worker join is serialized, and final cleanup failures are isolated per step.
+- The coordinator mutex is never held while `ServiceBase`, runtime, worker, transport, or domain code
+  runs, and every success/failure/exception path notifies waiters.
+
+### Intentional two-level state
+
+`LifecycleCoordinator::State` (complete service-epoch serialization) and `ServiceBase` running/ready
+state (transport and readiness lifecycle) both exist **on purpose**.  Merging them is explicitly out
+of scope; see `lib/service_framework/README.md`.
+
 ## Service lifecycle invariants
 
 Both services inherit `ServiceBase` which provides:
@@ -116,6 +197,11 @@ Both services inherit `ServiceBase` which provides:
 - Port boundaries — service ports stay adapter-free; concrete D-Bus/stdout/input types remain outside `service/ports`.
 
 **Failed `start()`:** any transport or worker-thread creation failure rolls back already-started transports in reverse order exactly once, clears service-owned startup state, and leaves the service restartable.
+
+**No callback-originated synchronous owner lifecycle calls:** a service worker, worker exit handler,
+LLDP callback, netlink callback, or runtime callback must never synchronously call `stop()` on its
+own owner.  Such calls are rejected with a stable diagnostic (never detached, never silently treated
+as a clean stop); a component that needs shutdown must raise an external shutdown request instead.
 
 **Shutdown ordering:** service-owned workers stop before state they access is destroyed. `ServiceBinding` is detached from D-Bus transports during transport shutdown, before service dependencies are destroyed. Cleanup failures are logged per step and do not stop later cleanup actions.
 

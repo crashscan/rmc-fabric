@@ -1,5 +1,7 @@
 #pragma once
 
+#include <LifecycleCoordinator.h>
+#include <ManagedWorker.h>
 #include <ServiceBase.h>
 
 #include "IObservationQueryService.h"
@@ -12,8 +14,8 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <stop_token>
 #include <string>
-#include <thread>
 #include <vector>
 
 namespace RSCGroup {
@@ -45,7 +47,7 @@ public:
 
 private:
     void agingLoop(std::stop_token st);
-    void stopOwnedState();
+    void onAgingWorkerExit(const ManagedWorker::Exit& exit);
     void refreshRuntimeIssues();
     void reportIssue(const std::string& issueCode,
                      const std::string& severity,
@@ -66,13 +68,23 @@ private:
 
     std::unique_ptr<IObservationRuntime> runtime_;
     std::chrono::steady_clock::duration agingInterval_;
-    mutable std::mutex lifecycleMutex_;
-    bool stopping_{false};  ///< Protected by lifecycleMutex_; prevents concurrent teardowns
     std::mutex agingMutex_;
     std::condition_variable_any agingCv_;
-    std::jthread agingThread_;
     mutable std::mutex issuesMutex_;
     interop_contract::network_observation::ObservationIssues issues_;
+
+    /// Serializes complete service-epoch transitions only.
+    LifecycleCoordinator lifecycle_;
+
+    // ------------------------------------------------------------------ //
+    // Member destruction order
+    // ------------------------------------------------------------------ //
+    // agingWorker_ MUST be the last member: its work/wake/exit callbacks
+    // capture `this` and access runtime_, agingInterval_, agingMutex_,
+    // agingCv_, issuesMutex_, and issues_.  Declaring it last means reverse
+    // member destruction destroys (and therefore stops and joins) the worker
+    // before any state it touches goes away.
+    ManagedWorker agingWorker_;
 };
 
 } // namespace RSCGroup

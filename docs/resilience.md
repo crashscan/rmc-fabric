@@ -61,6 +61,30 @@ It repeatedly starts and stops `ObservationService`, then reports:
 
 Manual/scheduled longer variants can increase `RMC_FABRIC_SOAK_CYCLES`.
 
+## Worker and lifecycle resilience
+
+Both services share `lifecycle_runner::ManagedWorker` and
+`lifecycle_runner::LifecycleCoordinator`.  Neither primitive decides service health; restart and
+degradation policy stays service-owned.
+
+- **Inventory (Policy A)** — a repeated `start()` on a healthy running service returns `true`.  If
+  the refresh worker has crashed, `start()` throws `std::logic_error` and an explicit `stop()` is
+  required to reap and reset the failed epoch before the service can start again.
+- **Observation** — an aging-worker crash is degradation, not a hard failure.  It is reported as
+  `observation.worker.aging.stopped`, readiness is preserved, and a repeated `start()` remains a
+  no-op.
+- **Worker exceptions** are captured, never propagated out of the thread entry point.  The exit
+  handler runs on the worker thread with the worker identity still valid, and must not drive its own
+  worker's lifecycle.
+- **Wake and exit-handler exceptions** are contained and logged.  A swallowed wake degrades stop
+  latency to the worker's natural wake interval; it cannot deadlock or lose the stop request.
+- **`ExitReason::returned` versus `stop_requested`** is advisory only — a worker return can race a
+  stop request — so services must not use it as an authoritative synchronization fact.
+- **No detach path exists.**  Self-stop from a worker thread or worker callback is rejected before
+  shutdown is claimed.
+- **Concurrent `stop()` waits for actual completion**, and abandoned transitions always resolve to
+  `stopped`, so lifecycle state cannot wedge in `starting` or `stopping`.
+
 ## Client restart policy
 
 - `network_observation` `DbusClient` does **not** auto-reconnect in the background.
@@ -75,4 +99,3 @@ The following larger items remain intentionally deferred to future work:
 - deterministic transport backpressure benchmarking with a bounded async dispatcher
 - package-upgrade container smoke coverage
 - full long-run fuzz/performance governance beyond the new scheduled/manual jobs
-- full concurrent lifecycle state machine (start-during-stop, stop-during-start with wait semantics)

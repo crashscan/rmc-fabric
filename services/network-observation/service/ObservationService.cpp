@@ -40,6 +40,13 @@ ObservationService::ObservationService(std::unique_ptr<IObservationRuntime> runt
     : ServiceBase("observation-service")
     , runtime_(std::move(runtime))
     , agingInterval_(agingInterval)
+    , agingWorker_("observation-aging",
+                   [this](std::stop_token st) { agingLoop(std::move(st)); },
+                   [this] {
+                       std::scoped_lock agingLock(agingMutex_);
+                       agingCv_.notify_all();
+                   },
+                   [this](const ManagedWorker::Exit& exit) { onAgingWorkerExit(exit); })
 {
     if (!runtime_) {
         throw std::invalid_argument("ObservationService: runtime is null");
@@ -52,7 +59,13 @@ ObservationService::ObservationService(std::unique_ptr<IObservationRuntime> runt
 
 ObservationService::~ObservationService()
 {
-    stop();
+    // Destructors must not throw.  stop() is structurally non-throwing, but
+    // the guard makes that explicit at the destruction boundary.
+    try {
+        stop();
+    } catch (...) {
+        diagnostics::logError(name(), "service.lifecycle", "destroy", "service_stop_failed", "observation-service", "stop() threw during destruction");
+    }
 }
 
 void ObservationService::addTransport(std::shared_ptr<IObservationTransport> transport)
@@ -61,7 +74,6 @@ void ObservationService::addTransport(std::shared_ptr<IObservationTransport> tra
         throw std::invalid_argument("ObservationService::addTransport: transport is null");
     }
 
-    std::scoped_lock lock(lifecycleMutex_);
     if (ServiceBase::isRunning()) {
         throw std::runtime_error("ObservationService::addTransport: cannot add transports after start");
     }
@@ -84,91 +96,82 @@ bool ObservationService::initializeComponents()
 
 bool ObservationService::start()
 {
-    std::scoped_lock lock(lifecycleMutex_);
-    if (ServiceBase::isRunning()) {
+    auto transition = lifecycle_.beginStart();
+    if (!transition) {
+        // beginStart() returns an unowned transition only when the epoch was
+        // observed running under the coordinator lock.  Unlike inventory,
+        // observation treats an aging-worker crash as degradation, so a
+        // repeated start() is an idempotent no-op.
         return true;
     }
 
     if (!ServiceBase::start()) {
+        transition.fail();
         return false;
     }
     if (!runtime_->start()) {
         diagnostics::logError(name(), "runtime", "start", "runtime_start_failed", "runtime", "runtime start returned failure");
         ServiceBase::stop();
+        transition.fail();
         return false;
     }
 
     refreshRuntimeIssues();
     ServiceBase::setReady(true);
     try {
-        agingThread_ = std::jthread([this](std::stop_token st) {
-            try {
-                agingLoop(st);
-            } catch (const std::exception& e) {
-                reportIssue(std::string(contract::ISSUE_CODE_AGING_LOOP_STOPPED),
-                            std::string(contract::SEVERITY_ERROR),
-                            "worker.aging",
-                            "age",
-                            "worker_loop_failed",
-                            "aging",
-                            e.what());
-            } catch (...) {
-                reportIssue(std::string(contract::ISSUE_CODE_AGING_LOOP_STOPPED),
-                            std::string(contract::SEVERITY_ERROR),
-                            "worker.aging",
-                            "age",
-                            "worker_loop_failed",
-                            "aging",
-                            "unknown exception");
-            }
-        });
+        (void)agingWorker_.start();
     } catch (const std::exception& e) {
         runtime_->stop();
         ServiceBase::stop();
         diagnostics::logError(name(), "worker.aging", "start", "worker_start_failed", "aging", e.what());
+        transition.fail();
         return false;
     } catch (...) {
         runtime_->stop();
         ServiceBase::stop();
         diagnostics::logError(name(), "worker.aging", "start", "worker_start_failed", "aging", "unknown exception");
+        transition.fail();
         return false;
     }
+
+    transition.complete();
     return true;
 }
 
 void ObservationService::stop()
 {
-    // Claim shutdown.
-    {
-        std::scoped_lock lock(lifecycleMutex_);
-        if (stopping_) return;
-        if (!ServiceBase::isRunning() && !agingThread_.joinable()) return;
-        stopping_ = true;
+    // Self-stop is rejected *before* shutdown is claimed.  There is no detach
+    // path: a detached worker capturing `this` would open a use-after-free
+    // window and break the producer-drain guarantee.
+    if (agingWorker_.isCurrentThread()) {
+        diagnostics::logError(name(), "worker.aging", "stop", "self_stop_rejected", "aging", "stop() called from the aging worker thread; request shutdown externally");
+        return;
+    }
+
+    // Claim shutdown.  A concurrent stop() waits here and returns only once
+    // the active teardown has completed.
+    auto transition = lifecycle_.beginStop();
+    if (!transition) {
+        return;
     }
 
     // Step 1: Quiesce D-Bus query admission — snapshot/query calls drain.
-    // Must NOT hold lifecycleMutex_ while blocking on query drain.
+    // Structural, local, noexcept.
     quiesceQueriesOnTransports();
 
-    // Step 2: Stop and join the aging worker.
-    // Self-join guard: if stop() is called from the aging thread itself,
-    // detach instead of joining to avoid a deadlock.
-    if (agingThread_.joinable()) {
-        agingThread_.request_stop();
-        {
-            std::scoped_lock agingLock(agingMutex_);
-            agingCv_.notify_all();
-        }
-        if (agingThread_.get_id() == std::this_thread::get_id()) {
-            LOG(WARNING) << "ObservationService::stop() called from aging thread; join skipped";
-            agingThread_.detach();
-        } else {
-            agingThread_.join();
-        }
-    }
+    // Step 2: Request stop, notify the aging condition variable, and join.
+    agingWorker_.stop();
 
-    // Step 3: Stop the runtime (drains netlink + LLDP producers, detaches sink).
-    runtime_->stop();
+    // Step 3: Stop the runtime (netlink join → LLDP callback drain → sink
+    // detach).  Failures are isolated so they cannot leave the lifecycle
+    // coordinator stuck in a transitional state.
+    try {
+        runtime_->stop();
+    } catch (const std::exception& e) {
+        diagnostics::logError(name(), "runtime", "stop", "runtime_stop_failed", "runtime", e.what());
+    } catch (...) {
+        diagnostics::logError(name(), "runtime", "stop", "runtime_stop_failed", "runtime", "unknown exception");
+    }
 
     // Step 4: Clear runtime issue state.
     {
@@ -176,15 +179,39 @@ void ObservationService::stop()
         issues_.clear();
     }
 
-    // Step 5: Emit terminal ReadyChanged(false) and fully stop transports.
-    // ServiceBase::stop() emits setReady(false) before stopping transports.
+    // Step 5: Emit terminal ReadyChanged(false) and stop transports in
+    // reverse registration order.
     ServiceBase::stop();
 
-    // Reset stopping_ for potential restart.
-    {
-        std::scoped_lock lock(lifecycleMutex_);
-        stopping_ = false;
+    transition.complete();
+}
+
+void ObservationService::onAgingWorkerExit(const ManagedWorker::Exit& exit)
+{
+    // Runs on the worker thread after the worker state has been finalized.
+    // Aging-worker failure is observation-owned degradation policy: it is
+    // surfaced as an issue and never changes readiness or drives lifecycle.
+    if (exit.reason != ManagedWorker::ExitReason::exception) {
+        return;
     }
+
+    std::string detail = "unknown exception";
+    try {
+        if (exit.exception) {
+            std::rethrow_exception(exit.exception);
+        }
+    } catch (const std::exception& e) {
+        detail = e.what();
+    } catch (...) {
+    }
+
+    reportIssue(std::string(contract::ISSUE_CODE_AGING_LOOP_STOPPED),
+                std::string(contract::SEVERITY_ERROR),
+                "worker.aging",
+                "age",
+                "worker_loop_failed",
+                "aging",
+                detail);
 }
 
 void ObservationService::agingLoop(std::stop_token st)
@@ -354,15 +381,6 @@ contract::ObservationIssues ObservationService::getIssues() const
 {
     std::scoped_lock lock(issuesMutex_);
     return issues_;
-}
-
-void ObservationService::stopOwnedState()
-{
-    if (agingThread_.joinable()) {
-        agingThread_.request_stop();
-        agingThread_.join();
-    }
-    runtime_->stop();
 }
 
 void ObservationService::refreshRuntimeIssues()

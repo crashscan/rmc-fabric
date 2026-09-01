@@ -130,7 +130,7 @@ void NetworkObservationDbusAdapter::bind(const std::shared_ptr<DBus::Object>& ob
     bindMethods(object, interfaceName);
 }
 
-void NetworkObservationDbusAdapter::quiesceQueries()
+void NetworkObservationDbusAdapter::quiesceQueries() noexcept
 {
     binding_.detach();
 }
