@@ -40,6 +40,17 @@ public:
      * @brief Close query admission and wait for all in-flight query handlers
      *        to complete before returning.
      *
+     * This is a **structural safety barrier**, not an ordinary recoverable
+     * transport operation, so it is `noexcept` and every concrete override
+     * must be `noexcept` too.
+     *
+     * Contract:
+     *  - query admission closure is *local synchronization only*;
+     *  - it performs no D-Bus/network I/O, no object unregistration, no
+     *    disconnect, and no destruction of publication resources;
+     *  - all admitted query handlers have finished when it returns;
+     *  - I/O teardown belongs to stop(), not here.
+     *
      * Postconditions (when this method returns):
      *  - no new externally-initiated query call is admitted;
      *  - all previously admitted query calls have returned;
@@ -47,10 +58,10 @@ public:
      *  - stop() remains safe to call without an explicit prior quiesceQueries().
      *
      * Default is a no-op for transports that have no query methods.
-     * Failure to quiesce is a safety-barrier failure: implementations should
-     * log or throw rather than silently continue.
+     * A violation of this contract is a programming defect, not a recoverable
+     * transport error.
      */
-    virtual void quiesceQueries() {}
+    virtual void quiesceQueries() noexcept {}
 
     /**
      * @brief Notify subscribers that the service ready state has changed.

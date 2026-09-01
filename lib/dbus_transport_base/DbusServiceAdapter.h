@@ -44,9 +44,13 @@ public:
      * Postcondition: no query handler is executing; no new query can be
      * admitted; publication resources remain open.
      *
+     * Local synchronization only: no D-Bus I/O and no destruction of
+     * publication resources.  Query quiescence is a structural safety
+     * barrier, so this is `noexcept` and every override must be `noexcept`.
+     *
      * Default is a no-op for adapters without query methods.
      */
-    virtual void quiesceQueries() {}
+    virtual void quiesceQueries() noexcept {}
 
     /**
      * @brief Called by DbusTransportBase::stop() just before the D-Bus object

@@ -69,10 +69,13 @@ public:
      * remain registered and publication signals remain open.  stop() must
      * remain safe to call without an explicit prior quiesceQueries().
      *
-     * Failure is logged as a safety-barrier failure; no exception is
-     * suppressed silently.
+     * Local synchronization only: no D-Bus/network I/O, no unregistration,
+     * no disconnect, no destruction of publication resources.  It is
+     * `noexcept` because query quiescence is a structural safety barrier;
+     * an adapter that violates the non-throwing contract is logged, not
+     * propagated.
      */
-    void quiesceQueries();
+    void quiesceQueries() noexcept;
 
     void stop();
 

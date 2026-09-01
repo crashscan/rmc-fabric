@@ -1,5 +1,7 @@
 #pragma once
 
+#include <LifecycleCoordinator.h>
+#include <ManagedWorker.h>
 #include <ServiceBase.h>
 #include <ScopedFd.h>
 
@@ -14,8 +16,8 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <stop_token>
 #include <string>
-#include <thread>
 
 namespace RSCGroup {
 
@@ -60,6 +62,7 @@ public:
 
 private:
     void runLoop(std::stop_token stopToken);
+    void onRefreshWorkerExit(const ManagedWorker::Exit& exit);
     void doRefreshCycle(bool force);
     void publishDiff(const InventoryDiff& diff,
                      const interop_contract::inventory::SourceStateMap& oldStates,
@@ -77,12 +80,9 @@ private:
     std::unique_ptr<IFileWatcher> fileWatcher_;
     Settings settings_;
 
-    std::atomic<bool> loopAlive_{false};
+    /// Inventory-owned worker health state (Policy A).  The lifecycle
+    /// coordinator never decides worker health.
     std::atomic<bool> loopFailed_{false};
-
-    mutable std::mutex lifecycleMutex_;
-    bool stopping_{false};  ///< Protected by lifecycleMutex_; prevents concurrent teardowns
-    std::jthread loopThread_;
 
     mutable std::mutex refreshMutex_;
     bool refreshRequested_{false};
@@ -91,6 +91,20 @@ private:
     std::chrono::steady_clock::time_point nextReconcileTs_{};
 
     ScopedFd refreshEventFd_;
+
+    /// Serializes complete service-epoch transitions only.
+    LifecycleCoordinator lifecycle_;
+
+    // ------------------------------------------------------------------ //
+    // Member destruction order
+    // ------------------------------------------------------------------ //
+    // refreshWorker_ MUST be the last member: its work/wake/exit callbacks
+    // capture `this` and access manager_, fileWatcher_, settings_,
+    // loopFailed_, refreshMutex_, refreshRequested_, the reconcile
+    // timestamps, and refreshEventFd_.  Declaring it last means reverse
+    // member destruction destroys (and therefore stops and joins) the worker
+    // before any state it touches goes away.
+    ManagedWorker refreshWorker_;
 };
 
 } // namespace RSCGroup

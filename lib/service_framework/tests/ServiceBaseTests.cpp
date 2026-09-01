@@ -4,9 +4,11 @@
 
 #include <atomic>
 #include <cstdlib>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -53,9 +55,18 @@ public:
         }
     }
 
+    void quiesceQueries() noexcept override
+    {
+        events_.push_back(name_ + ".quiesce");
+        ++quiesceCount_;
+    }
+
     void publishReadyChanged(bool ready) override
     {
         events_.push_back(name_ + (ready ? ".ready.true" : ".ready.false"));
+        if (onReadyChanged_) {
+            onReadyChanged_(ready);
+        }
         readyTrueCount_ += ready ? 1 : 0;
         readyFalseCount_ += ready ? 0 : 1;
         if (throwOnReady_) {
@@ -72,6 +83,9 @@ public:
     [[nodiscard]] int stopCount() const { return stopCount_.load(); }
     [[nodiscard]] int readyTrueCount() const { return readyTrueCount_.load(); }
     [[nodiscard]] int readyFalseCount() const { return readyFalseCount_.load(); }
+    [[nodiscard]] int quiesceCount() const { return quiesceCount_.load(); }
+
+    void setOnReadyChanged(std::function<void(bool)> hook) { onReadyChanged_ = std::move(hook); }
 
 private:
     std::string name_;
@@ -83,6 +97,8 @@ private:
     std::atomic<int> stopCount_{0};
     std::atomic<int> readyTrueCount_{0};
     std::atomic<int> readyFalseCount_{0};
+    std::atomic<int> quiesceCount_{0};
+    std::function<void(bool)> onReadyChanged_;
 };
 
 class TestService final : public ServiceBase {
@@ -106,6 +122,9 @@ public:
 
     [[nodiscard]] int initializeCalls() const { return initializeCalls_; }
     [[nodiscard]] int validateCalls() const { return validateCalls_; }
+
+    /// Exposes the protected safety barrier so the ordering can be asserted.
+    void quiesce() noexcept { quiesceQueriesOnTransports(); }
 
 private:
     bool initializeResult_{true};
@@ -218,6 +237,70 @@ void testOperationalDiagnosticFormattingIsBoundedAndSanitized()
     expect(formatted.size() < 512, "diagnostic output should stay bounded");
 }
 
+void testQuiesceQueriesIsNoexceptAndPrecedesTerminalReadinessAndClose()
+{
+    static_assert(noexcept(std::declval<IServiceTransport&>().quiesceQueries()),
+                  "IServiceTransport::quiesceQueries() must be noexcept");
+
+    std::vector<std::string> events;
+    auto first = std::make_shared<RecordingTransport>("first", events);
+    auto second = std::make_shared<RecordingTransport>("second", events);
+
+    TestService service;
+    service.addTransport(first);
+    service.addTransport(second);
+
+    expect(service.start(), "ServiceBase should start successfully");
+    service.setReady(true);
+    service.quiesce();
+    service.stop();
+
+    const std::vector<std::string> expected = {
+        "first.start",
+        "second.start",
+        "first.ready.true",
+        "second.ready.true",
+        "first.quiesce",
+        "second.quiesce",
+        "first.ready.false",
+        "second.ready.false",
+        "second.stop",
+        "first.stop",
+    };
+    expect(events == expected,
+           "query quiescence must run in registration order, before terminal ReadyChanged(false) and transport close");
+    expect(first->quiesceCount() == 1 && second->quiesceCount() == 1,
+           "each transport should be quiesced exactly once");
+}
+
+void testLateSetReadyTrueAfterShutdownClaimIsRejected()
+{
+    std::vector<std::string> events;
+    auto transport = std::make_shared<RecordingTransport>("only", events);
+
+    TestService service;
+    service.addTransport(transport);
+
+    expect(service.start(), "ServiceBase should start successfully");
+    service.setReady(true);
+
+    // Simulates a producer draining during shutdown that tries to re-assert
+    // readiness after stop() has claimed shutdown.
+    transport->setOnReadyChanged([&service](bool ready) {
+        if (!ready) {
+            service.setReady(true);
+        }
+    });
+
+    service.stop();
+
+    expect(transport->readyTrueCount() == 1,
+           "setReady(true) must be rejected once shutdown has been claimed");
+    expect(transport->readyFalseCount() == 1,
+           "terminal ReadyChanged(false) must be published exactly once");
+    expect(!service.isReady(), "service must not be ready after stop");
+}
+
 } // namespace
 
 int main()
@@ -226,6 +309,8 @@ int main()
     testRollbackStopsStartedTransportsExactlyOnce();
     testReadyPublicationFailureDoesNotBlockLaterTransports();
     testStopFailureDoesNotBlockRemainingTransports();
+    testQuiesceQueriesIsNoexceptAndPrecedesTerminalReadinessAndClose();
+    testLateSetReadyTrueAfterShutdownClaimIsRejected();
     testOperationalDiagnosticFormattingIsBoundedAndSanitized();
     return EXIT_SUCCESS;
 }

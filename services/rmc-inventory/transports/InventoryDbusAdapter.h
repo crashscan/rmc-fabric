@@ -37,7 +37,7 @@ public:
      * After this returns, no query handler executes and no new query is
      * admitted.  Publication signals remain open.
      */
-    void quiesceQueries() override;
+    void quiesceQueries() noexcept override;
 
     /**
      * @brief Revokes handler access to the service and waits for in-flight

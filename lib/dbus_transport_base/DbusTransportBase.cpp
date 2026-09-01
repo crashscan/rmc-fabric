@@ -130,18 +130,18 @@ void DbusTransportBase::start()
     }
 }
 
-void DbusTransportBase::quiesceQueries()
+void DbusTransportBase::quiesceQueries() noexcept
 {
     if (!running_.load(std::memory_order_acquire)) return;
 
+    // DbusServiceAdapter::quiesceQueries() is noexcept; the guard exists only
+    // so a contract violation is logged rather than terminating the process.
     try {
         adapter_->quiesceQueries();
     } catch (const std::exception& e) {
         diagnostics::logError(serviceName_, "transport.dbus", "quiesce_queries", "transport_quiesce_failed", serviceName_, e.what());
-        throw;
     } catch (...) {
         diagnostics::logError(serviceName_, "transport.dbus", "quiesce_queries", "transport_quiesce_failed", serviceName_, "unknown exception");
-        throw;
     }
 }
 

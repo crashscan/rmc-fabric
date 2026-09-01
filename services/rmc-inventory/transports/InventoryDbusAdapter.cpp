@@ -92,7 +92,7 @@ InventoryDbusAdapter::InventoryDbusAdapter()
     handler_->binding = &binding_;
 }
 
-void InventoryDbusAdapter::quiesceQueries()
+void InventoryDbusAdapter::quiesceQueries() noexcept
 {
     binding_.detach();
 }
