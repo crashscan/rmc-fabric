@@ -1,7 +1,7 @@
 #include "DbusClient.h"
 #include "NetworkObservationDbusCodec.h"
 
-#include <DecodeError.hpp>
+#include <DbusClientInvoke.h>
 #include <IngressLimits.hpp>
 #include <network_observation/NetworkObservationContracts.hpp>
 

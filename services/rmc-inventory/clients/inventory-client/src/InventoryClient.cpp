@@ -2,10 +2,9 @@
 
 #include "InventoryDbusCodec.h"
 
-#include <DecodeError.hpp>
+#include <DbusClientInvoke.h>
 
 #include <dbus-cxx.h>
-#include <glog/logging.h>
 #include <sigc++/sigc++.h>
 
 #include <chrono>
