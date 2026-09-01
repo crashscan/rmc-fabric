@@ -20,62 +20,7 @@ namespace RSCGroup {
 
 namespace {
 namespace contract = interop_contract::network_observation;
-
-interop_contract::ClientError classifyDbusError(const DBus::Error& error)
-{
-    using interop_contract::ClientError;
-    using interop_contract::ClientErrorCode;
-
-    if (dynamic_cast<const DBus::ErrorTimeout*>(&error) ||
-        dynamic_cast<const DBus::ErrorTimedOut*>(&error) ||
-        dynamic_cast<const DBus::ErrorNoReply*>(&error)) {
-        return {ClientErrorCode::timeout, error.what()};
-    }
-
-    if (dynamic_cast<const DBus::ErrorServiceUnknown*>(&error) ||
-        dynamic_cast<const DBus::ErrorNameHasNoOwner*>(&error) ||
-        dynamic_cast<const DBus::ErrorNoConnection*>(&error) ||
-        dynamic_cast<const DBus::ErrorNoServer*>(&error) ||
-        dynamic_cast<const DBus::ErrorUnknownObject*>(&error) ||
-        dynamic_cast<const DBus::ErrorUnknownInterface*>(&error) ||
-        dynamic_cast<const DBus::ErrorUnknownMethod*>(&error)) {
-        return {ClientErrorCode::service_unavailable, error.what()};
-    }
-
-    if (dynamic_cast<const DBus::ErrorUnexpectedResponse*>(&error) ||
-        dynamic_cast<const DBus::ErrorInvalidReturn*>(&error) ||
-        dynamic_cast<const DBus::ErrorInvalidSignature*>(&error) ||
-        dynamic_cast<const DBus::ErrorInvalidMessageType*>(&error) ||
-        dynamic_cast<const DBus::ErrorBadVariantCast*>(&error)) {
-        return {ClientErrorCode::invalid_response, error.what()};
-    }
-
-    return {ClientErrorCode::transport_error, error.what()};
-}
-
-template <class T, class Fn>
-interop_contract::ClientResult<T> invokeQuery(const char* operation, Fn&& fn)
-{
-    try {
-        return fn();
-    } catch (const interop_contract::DecodeError& error) {
-        LOG(ERROR) << operation << " failed: " << error.what();
-        return interop_contract::ClientError{
-            interop_contract::ClientErrorCode::decode_error,
-            error.what(),
-        };
-    } catch (const DBus::Error& error) {
-        const auto mapped = classifyDbusError(error);
-        LOG(ERROR) << operation << " failed: " << mapped.message;
-        return mapped;
-    } catch (const std::exception& error) {
-        LOG(ERROR) << operation << " failed: " << error.what();
-        return interop_contract::ClientError{
-            interop_contract::ClientErrorCode::transport_error,
-            error.what(),
-        };
-    }
-}
+using dbus_client_support::invokeQuery;
 
 DBus::BusType toBusType(const std::string& busType)
 {

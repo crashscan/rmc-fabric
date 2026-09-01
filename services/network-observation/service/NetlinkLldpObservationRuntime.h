@@ -17,15 +17,15 @@ namespace RSCGroup {
 class NetlinkNetworkMonitor;
 class LldpObserver;
 
-class NetworkObservationAdapter final : public IObservationRuntime {
+class NetlinkLldpObservationRuntime final : public IObservationRuntime {
 public:
-    explicit NetworkObservationAdapter(ModelConfig config);
-    explicit NetworkObservationAdapter(std::unique_ptr<INetworkObservationModel> model);
+    explicit NetlinkLldpObservationRuntime(ModelConfig config);
+    explicit NetlinkLldpObservationRuntime(std::unique_ptr<INetworkObservationModel> model);
 
-    ~NetworkObservationAdapter() override;
+    ~NetlinkLldpObservationRuntime() override;
 
-    NetworkObservationAdapter(const NetworkObservationAdapter&) = delete;
-    NetworkObservationAdapter& operator=(const NetworkObservationAdapter&) = delete;
+    NetlinkLldpObservationRuntime(const NetlinkLldpObservationRuntime&) = delete;
+    NetlinkLldpObservationRuntime& operator=(const NetlinkLldpObservationRuntime&) = delete;
 
     [[nodiscard]] bool start() override;
     void stop() override;

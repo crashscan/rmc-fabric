@@ -5,7 +5,7 @@
 ```text
 network-observation/
   core/                 domain model (`observation-model` target)
-  service/              `ObservationService`, `NetworkObservationAdapter`, internal ports
+  service/              `ObservationService`, `NetlinkLldpObservationRuntime`, internal ports
     ports/
   inputs/
     netlink/
@@ -39,7 +39,7 @@ debt, not as service-specific design freedom.
 │                    (rmc-inventoryd / CLI)                        │
 └─────────────────────────────┬────────────────────────────────────┘
                               │
-                ModelConfig + NetworkObservationAdapter
+                ModelConfig + NetlinkLldpObservationRuntime
                               │
 ┌─────────────────────────────▼────────────────────────────────────┐
 │                    observation-model.so                          │
@@ -193,10 +193,10 @@ The `core/` domain model is still built as the `observation-model` library and a
 - **Provisional/confirmed lifecycle** — devices are provisional during startup, confirmed after baseline
 - **Publishability gate** — only confirmed, non-artifact candidates are returned
 
-### Preferred Usage — `NetworkObservationAdapter`
+### Preferred Usage — `NetlinkLldpObservationRuntime`
 
 ```cpp
-#include "NetworkObservationAdapter.h"
+#include "NetlinkLldpObservationRuntime.h"
 #include "ModelConfig.h"
 #include "INetworkObservationModel.h"
 
@@ -213,7 +213,7 @@ config.skipIeeeReservedMac = true;  // reject 01:80:c2:xx:xx:xx
 config.candidateAgeout = std::chrono::seconds(60);
 config.candidateExpire = std::chrono::seconds(300);
 
-NetworkObservationAdapter adapter(std::move(config));
+NetlinkLldpObservationRuntime adapter(std::move(config));
 adapter.start();
 
 // Query local state
@@ -268,14 +268,14 @@ class MyModel : public INetworkObservationModel {
 };
 
 auto myModel = std::make_unique<MyModel>();
-NetworkObservationAdapter adapter(std::move(myModel));
+NetlinkLldpObservationRuntime adapter(std::move(myModel));
 adapter.start();
 ```
 
 ### Runtime Configuration Changes
 
 ```cpp
-NetworkObservationAdapter adapter(ModelConfig{});
+NetlinkLldpObservationRuntime adapter(ModelConfig{});
 
 // Swap classifier at runtime (thread-safe, no restart)
 adapter.setClassifier(std::make_unique<ScoringClassifier>(30, 60, 90));
@@ -298,7 +298,7 @@ public:
 
 ModelConfig config;
 config.interfacePolicy = std::make_unique<MyPolicy>();
-NetworkObservationAdapter adapter(std::move(config));
+NetlinkLldpObservationRuntime adapter(std::move(config));
 ```
 
 ### RemoteCandidate Fields

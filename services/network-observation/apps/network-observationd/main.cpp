@@ -2,6 +2,7 @@
 // Created by vvass on 21-Jul-26.
 //
 #include "ObservationService.h"
+#include "NetlinkLldpObservationRuntime.h"
 #include "TransportFactory.h"
 #include "ModelConfig.h"
 #include <GflagsConfig.h>
@@ -31,8 +32,8 @@ int main(int argc, char* argv[])
         return 1;
     }
     RSCGroup::ModelConfig modelConfig;
-    auto adapter = std::make_unique<RSCGroup::NetworkObservationAdapter>(std::move(modelConfig));
-    RSCGroup::ObservationService service(std::move(adapter), std::move(transport));
+    auto runtime = std::make_unique<RSCGroup::NetlinkLldpObservationRuntime>(std::move(modelConfig));
+    RSCGroup::ObservationService service(std::move(runtime), std::move(transport));
 
     return RSCGroup::DaemonRunner::run(argv[0], service, cfg);
 }

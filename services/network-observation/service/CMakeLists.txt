@@ -2,7 +2,7 @@ add_subdirectory(ports)
 
 add_library(network_observation_service STATIC
     ObservationService.cpp
-    NetworkObservationAdapter.cpp
+    NetlinkLldpObservationRuntime.cpp
 )
 
 target_compile_features(network_observation_service PUBLIC cxx_std_20)

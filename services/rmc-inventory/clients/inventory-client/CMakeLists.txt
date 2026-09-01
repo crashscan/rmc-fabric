@@ -13,6 +13,7 @@ target_link_libraries(inventory-client
     PUBLIC
         interop_contract
     PRIVATE
+        $<BUILD_INTERFACE:dbus_client_support>
         inventory_dbus_codec
         DBusCxx::DBusCxx
         SigCxx::SigCxx

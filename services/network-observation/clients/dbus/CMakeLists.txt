@@ -11,6 +11,7 @@ target_link_libraries(network_observation_client
     PUBLIC
         interop_contract
     PRIVATE
+        $<BUILD_INTERFACE:dbus_client_support>
         network_observation_dbus_codec
         DBusCxx::DBusCxx
         SigCxx::SigCxx

@@ -1,4 +1,4 @@
-#include "NetworkObservationAdapter.h"
+#include "NetlinkLldpObservationRuntime.h"
 
 #include "LldpObserver.h"
 #include "LldpdSource.h"
@@ -46,17 +46,17 @@ static std::string makeCidr(const InterfaceIpEvent& e)
     return e.address + "/" + std::to_string(static_cast<int>(e.prefixLen));
 }
 
-NetworkObservationAdapter::NetworkObservationAdapter(ModelConfig config)
+NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(ModelConfig config)
     : model_(std::make_unique<ObservationModelEngine>(std::move(config)))
 {
 }
 
-NetworkObservationAdapter::NetworkObservationAdapter(std::unique_ptr<INetworkObservationModel> model)
+NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(std::unique_ptr<INetworkObservationModel> model)
     : model_(std::move(model))
 {
 }
 
-NetworkObservationAdapter::~NetworkObservationAdapter() = default;
+NetlinkLldpObservationRuntime::~NetlinkLldpObservationRuntime() = default;
 
 static MonitorCallbacks makeCallbacks(INetworkObservationModel& model, LldpObserver* lldpObserver)
 {
@@ -124,7 +124,7 @@ static MonitorCallbacks makeCallbacks(INetworkObservationModel& model, LldpObser
     return cb;
 }
 
-bool NetworkObservationAdapter::start()
+bool NetlinkLldpObservationRuntime::start()
 {
     model_->prepareForRestart();
 
@@ -148,11 +148,11 @@ bool NetworkObservationAdapter::start()
 
     model_->markLive();
 
-    LOG(INFO) << "NetworkObservationAdapter started";
+    LOG(INFO) << "NetlinkLldpObservationRuntime started";
     return true;
 }
 
-void NetworkObservationAdapter::stop()
+void NetlinkLldpObservationRuntime::stop()
 {
     // Ordering: stop netlink monitor first (its callbacks may call into LLDP),
     // then drain LLDP, then detach the event sink.  This ensures no
@@ -171,12 +171,12 @@ void NetworkObservationAdapter::stop()
     model_->setEventSink(nullptr);
 }
 
-bool NetworkObservationAdapter::isRunning() const
+bool NetlinkLldpObservationRuntime::isRunning() const
 {
     return monitor_ && monitor_->isRunning();
 }
 
-ObservationRuntimeHealth NetworkObservationAdapter::health() const
+ObservationRuntimeHealth NetlinkLldpObservationRuntime::health() const
 {
     ObservationRuntimeHealth result;
     result.running = monitor_ && monitor_->isRunning();
@@ -184,37 +184,37 @@ ObservationRuntimeHealth NetworkObservationAdapter::health() const
     return result;
 }
 
-void NetworkObservationAdapter::setEventSink(IModelEventSink* sink)
+void NetlinkLldpObservationRuntime::setEventSink(IModelEventSink* sink)
 {
     model_->setEventSink(sink);
 }
 
-void NetworkObservationAdapter::setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy)
+void NetlinkLldpObservationRuntime::setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy)
 {
     model_->setInterfacePolicy(std::move(policy));
 }
 
-void NetworkObservationAdapter::setClassifier(std::unique_ptr<ICandidateClassifier> classifier)
+void NetlinkLldpObservationRuntime::setClassifier(std::unique_ptr<ICandidateClassifier> classifier)
 {
     model_->setClassifier(std::move(classifier));
 }
 
-LocalNetworkSnapshot NetworkObservationAdapter::localSnapshot() const
+LocalNetworkSnapshot NetlinkLldpObservationRuntime::localSnapshot() const
 {
     return model_->localSnapshot();
 }
 
-std::vector<RemoteCandidate> NetworkObservationAdapter::remoteCandidates() const
+std::vector<RemoteCandidate> NetlinkLldpObservationRuntime::remoteCandidates() const
 {
     return model_->remoteCandidates();
 }
 
-std::optional<RemoteCandidate> NetworkObservationAdapter::findCandidateByMac(const std::string& mac) const
+std::optional<RemoteCandidate> NetlinkLldpObservationRuntime::findCandidateByMac(const std::string& mac) const
 {
     return model_->findCandidateByMac(mac);
 }
 
-void NetworkObservationAdapter::age(std::chrono::steady_clock::time_point now)
+void NetlinkLldpObservationRuntime::age(std::chrono::steady_clock::time_point now)
 {
     model_->age(now);
 }
