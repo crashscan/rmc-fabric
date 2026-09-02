@@ -6,12 +6,14 @@ target_include_directories(network_observation_client
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/network_observation>
+    PRIVATE
+        $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/lib/dbus_client_support>
 )
+
 target_link_libraries(network_observation_client
     PUBLIC
         interop_contract
     PRIVATE
-        $<BUILD_INTERFACE:dbus_client_support>
         network_observation_dbus_codec
         DBusCxx::DBusCxx
         SigCxx::SigCxx

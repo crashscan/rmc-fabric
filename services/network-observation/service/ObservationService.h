@@ -7,6 +7,7 @@
 #include "IObservationQueryService.h"
 #include "IObservationRuntime.h"
 #include "IObservationTransport.h"
+#include "INetworkObservationModel.h"
 
 #include <chrono>
 #include <condition_variable>
@@ -17,6 +18,8 @@
 #include <stop_token>
 #include <string>
 #include <vector>
+
+
 
 namespace RSCGroup {
 

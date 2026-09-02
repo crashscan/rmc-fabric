@@ -1,7 +1,7 @@
 #pragma once
 
 #include <dbus-cxx/variant.h>
-#include <jsoncpp/json/value.h>
+#include <json/json.h>
 
 #include <map>
 #include <string>

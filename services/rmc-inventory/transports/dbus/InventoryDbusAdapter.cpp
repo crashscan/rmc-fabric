@@ -1,6 +1,7 @@
 #include "InventoryDbusAdapter.h"
 
 #include "InventoryDbusCodec.h"
+#include "InventoryQueryHandler.h"
 #include <IInventoryQueryService.h>
 
 #include <inventory.hpp>
@@ -15,76 +16,6 @@
 #include <string>
 
 namespace RSCGroup {
-namespace {
-
-using namespace interop_contract::inventory;
-
-struct InventoryQueryHandler {
-    /// Thread-safe service access: shared lock held during the call, exclusive
-    /// lock taken by onTransportStopping() to clear the binding.
-    ServiceBinding<IInventoryQueryService>* binding = nullptr;
-
-    std::map<std::string, DBus::Variant> GetIdentity()
-    {
-        if (auto guard = binding->acquire()) {
-            try { return InventoryDbusCodec::encodeSnapshot(guard->getIdentity()); }
-            catch (const std::exception& e) { LOG(ERROR) << "GetIdentity failed: " << e.what(); }
-        }
-        return {};
-    }
-
-    std::map<std::string, DBus::Variant> GetField(std::string fieldName)
-    {
-        if (auto guard = binding->acquire()) {
-            try { return InventoryDbusCodec::encodeFields(guard->getField(fieldName)); }
-            catch (const std::exception& e) { LOG(ERROR) << "GetField failed: " << e.what(); }
-        }
-        return {};
-    }
-
-    std::map<std::string, std::map<std::string, DBus::Variant>> GetSourceStates()
-    {
-        if (auto guard = binding->acquire()) {
-            try { return InventoryDbusCodec::encodeSourceStates(guard->getSourceStates()); }
-            catch (const std::exception& e) { LOG(ERROR) << "GetSourceStates failed: " << e.what(); }
-        }
-        return {};
-    }
-
-    std::map<std::string, std::map<std::string, DBus::Variant>> GetIssues()
-    {
-        if (auto guard = binding->acquire()) {
-            try { return InventoryDbusCodec::encodeIssues(guard->getIssues()); }
-            catch (const std::exception& e) { LOG(ERROR) << "GetIssues failed: " << e.what(); }
-        }
-        return {};
-    }
-
-    bool GetReady()
-    {
-        if (auto guard = binding->acquire()) return guard->getReady();
-        return false;
-    }
-
-    std::string GetPhase()
-    {
-        if (auto guard = binding->acquire()) return guard->getPhase();
-        return "unknown";
-    }
-
-    uint64_t GetVersion()
-    {
-        if (auto guard = binding->acquire()) return guard->getVersion();
-        return 0;
-    }
-
-    void Refresh()
-    {
-        if (auto guard = binding->acquire()) guard->refresh();
-    }
-};
-
-} // namespace
 
 InventoryDbusAdapter::InventoryDbusAdapter()
     : handler_(std::make_shared<InventoryQueryHandler>())

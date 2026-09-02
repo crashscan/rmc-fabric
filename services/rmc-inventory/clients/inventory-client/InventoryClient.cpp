@@ -1,7 +1,6 @@
 #include "InventoryClient.h"
 
-#include "InventoryDbusCodec.h"
-
+#include <InventoryDbusCodec.h>
 #include <DbusClientInvoke.h>
 
 #include <dbus-cxx.h>
@@ -24,8 +23,9 @@ DBus::BusType toBusType(const std::string& busType)
 
 } // namespace
 
-struct InventoryClient::Impl
+class InventoryClient::Impl
 {
+public:
     std::shared_ptr<DBus::StandaloneDispatcher> dispatcher;
     std::shared_ptr<DBus::Connection> connection;
     std::shared_ptr<DBus::ObjectProxy> proxy;

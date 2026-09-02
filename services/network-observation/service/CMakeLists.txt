@@ -16,6 +16,10 @@ target_include_directories(network_observation_service
 target_include_directories(network_observation_service
     PRIVATE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../core/engine>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../core/classifier>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../core/policy>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../core/public>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../inputs/netlink/types>
 )
 
 target_link_libraries(network_observation_service

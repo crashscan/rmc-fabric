@@ -1,7 +1,7 @@
 #include "DbusFixtureJson.h"
 
 #include <dbus-cxx/variant.h>
-#include <jsoncpp/json/reader.h>
+#include <json/json.h>
 
 #include <cstdint>
 #include <fstream>

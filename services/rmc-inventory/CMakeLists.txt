@@ -3,6 +3,8 @@ find_package(DBusCxx REQUIRED MODULE)
 
 option(INVENTORY_ENABLE_STDOUT_TRANSPORT "Enable StdoutInventoryTransport for development/debugging" OFF)
 
+set(RMC_INVENTORY_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+
 add_subdirectory(core)
 add_subdirectory(service)
 add_subdirectory(inputs)

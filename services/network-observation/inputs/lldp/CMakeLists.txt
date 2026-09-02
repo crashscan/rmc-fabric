@@ -24,7 +24,8 @@ if(BUILD_MANUAL_TESTS)
     add_subdirectory(manual-tests)
 endif()
 
-target_link_libraries(lldp-observer PRIVATE
+target_link_libraries(lldp-observer
+    PRIVATE
         liblldpctl.so
 )
 

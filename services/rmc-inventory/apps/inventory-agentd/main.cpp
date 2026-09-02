@@ -17,14 +17,10 @@
 #include <chrono>
 #include <memory>
 
-DEFINE_string(transport, "dbus",
-    "Transport: dbus, stdout");
-DEFINE_string(transport_config, "system",
-    "Transport-specific config (e.g. D-Bus bus type)");
-DEFINE_int32(reconcile_ms, 60000,
-    "Periodic full-refresh interval in milliseconds");
-DEFINE_int32(min_refresh_ms, 1000,
-    "Minimum interval between forced refreshes (coalescing window)");
+DEFINE_string(transport,        "dbus",   "Transport: dbus, stdout");
+DEFINE_string(transport_config, "system", "Transport-specific config (e.g. D-Bus bus type)");
+DEFINE_int32(reconcile_ms,      60000,    "Periodic full-refresh interval in milliseconds");
+DEFINE_int32(min_refresh_ms,    1000,     "Minimum interval between forced refreshes (coalescing window)");
 
 // Source paths (overridable for sandbox testing)
 DEFINE_string(device_meta_path, "/data/info/device-meta.json", "Device metadata JSON");

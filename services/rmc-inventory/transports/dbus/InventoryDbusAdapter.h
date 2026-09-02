@@ -2,6 +2,7 @@
 
 #include <DbusServiceAdapter.h>
 #include <ServiceBinding.h>
+#include <InventoryQueryHandler.h>
 
 #include <memory>
 #include <string>
@@ -15,7 +16,6 @@ template<typename...> class Signal;
 namespace RSCGroup {
 
 class IInventoryQueryService;
-struct InventoryQueryHandler;
 
 class InventoryDbusAdapter : public DbusServiceAdapter {
 public:
@@ -26,8 +26,7 @@ public:
 
     void setService(IInventoryQueryService* service);
 
-    void bind(const std::shared_ptr<DBus::Object>& object,
-              const std::string& interfaceName) override;
+    void bind(const std::shared_ptr<DBus::Object>& object, const std::string& interfaceName) override;
 
     /**
      * @brief Closes query admission and waits for in-flight D-Bus handler
@@ -64,10 +63,8 @@ private:
     std::shared_ptr<DBus::Signal<void(std::string)>> signalSourceStateChanged_;
     std::shared_ptr<DBus::Signal<void(bool)>> signalReadyChanged_;
 
-    void createSignals(const std::shared_ptr<DBus::Object>& object,
-                       const std::string& interfaceName);
-    void bindMethods(const std::shared_ptr<DBus::Object>& object,
-                     const std::string& interfaceName);
+    void createSignals(const std::shared_ptr<DBus::Object>& object, const std::string& interfaceName);
+    void bindMethods(const std::shared_ptr<DBus::Object>& object, const std::string& interfaceName);
 };
 
 } // namespace RSCGroup

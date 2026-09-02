@@ -1,5 +1,4 @@
 #include "DbusInventoryTransport.h"
-
 #include "InventoryDbusAdapter.h"
 
 #include <glog/logging.h>

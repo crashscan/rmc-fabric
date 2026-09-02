@@ -1,4 +1,4 @@
-#include "InventoryDbusCodec.h"
+#include "../dbus/InventoryDbusCodec.h"
 #include <inventory.hpp>
 #include <DecodeError.hpp>
 

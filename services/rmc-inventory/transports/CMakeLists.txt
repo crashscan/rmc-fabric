@@ -1,16 +1,17 @@
 set(TRANSPORT_SOURCES
-    DbusInventoryTransport.cpp
-    InventoryDbusAdapter.cpp
+        dbus/DbusInventoryTransport.cpp
+        dbus/InventoryDbusAdapter.cpp
+        dbus/InventoryQueryHandler.cpp
     TransportFactory.cpp
 )
 
 if(INVENTORY_ENABLE_STDOUT_TRANSPORT)
-    list(APPEND TRANSPORT_SOURCES StdoutInventoryTransport.cpp)
+    list(APPEND TRANSPORT_SOURCES stdout/StdoutInventoryTransport.cpp)
     add_compile_definitions(INVENTORY_ENABLE_STDOUT_TRANSPORT)
 endif()
 
 add_library(inventory_transport STATIC ${TRANSPORT_SOURCES})
-add_library(inventory_dbus_codec STATIC InventoryDbusCodec.cpp)
+add_library(inventory_dbus_codec STATIC dbus/InventoryDbusCodec.cpp)
 
 target_compile_features(inventory_transport PUBLIC cxx_std_20)
 target_compile_features(inventory_dbus_codec PUBLIC cxx_std_20)
@@ -18,6 +19,8 @@ target_compile_features(inventory_dbus_codec PUBLIC cxx_std_20)
 target_include_directories(inventory_transport
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/dbus
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/stdout
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../service/ports>
         $<INSTALL_INTERFACE:include/rmc-inventory/transports>
 )
