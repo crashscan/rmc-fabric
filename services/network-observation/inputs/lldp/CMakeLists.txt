@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.16)
 
-add_library(lldp-observer SHARED
+add_library(lldp-observer STATIC
     LldpObserver.cpp
     lldpd/LldpdSource.cpp
 )
@@ -27,12 +27,6 @@ endif()
 target_link_libraries(lldp-observer
     PRIVATE
         liblldpctl.so
-)
-
-install(
-    TARGETS lldp-observer
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT rel
 )
 
 if(BUILD_TESTING)

@@ -16,10 +16,10 @@ target_include_directories(network_observation_service
 
 target_link_libraries(network_observation_service
     PUBLIC
-        observation-model
         network_observation_service_ports
         service_framework
     PRIVATE
+        observation-model
         lldp-observer
         netlink-monitor
         glog

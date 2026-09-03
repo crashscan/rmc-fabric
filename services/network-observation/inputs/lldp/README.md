@@ -1,6 +1,6 @@
 # lldp-observer
 
-`lldp-observer` provides LLDP-backed topology observation.
+`lldp-observer` is an internal static target providing LLDP-backed topology observation. It is linked into `network-observationd` and is not a separately installed runtime library.
 
 ## Responsibilities
 - consume LLDP data from `lldpd` via `liblldpctl`

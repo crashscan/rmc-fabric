@@ -1,4 +1,4 @@
-add_library(netlink-monitor SHARED
+add_library(netlink-monitor STATIC
         NetlinkNetworkMonitor.cpp
         parser/NetlinkParser.cpp
         state/NetlinkState.cpp
@@ -20,10 +20,10 @@ if(RSC_UTIL_INCLUDE_DIR)
             ${RSC_UTIL_INCLUDE_DIR}/rsc_util
     )
 endif()
-target_link_libraries(netlink-monitor pthread glog rsc_util)
 
-install(
-    TARGETS netlink-monitor
-    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-    COMPONENT rel
+target_link_libraries(netlink-monitor
+    PRIVATE
+        pthread
+        glog
+        rsc_util
 )

@@ -1,4 +1,4 @@
-add_library(observation-model SHARED
+add_library(observation-model STATIC
         engine/ObservationModelEngine.cpp
         engine/NetworkObservationModelFactory.cpp
         engine/HardFilter.cpp
@@ -47,10 +47,4 @@ if(BUILD_TESTING)
             COMMAND observation_model_public_headers_test
     )
 endif()
-
-install(
-        TARGETS observation-model
-        LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
-        COMPONENT rel
-)
 

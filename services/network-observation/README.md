@@ -42,7 +42,7 @@ debt, not as service-specific design freedom.
                 ModelConfig + NetlinkLldpObservationRuntime
                               │
 ┌─────────────────────────────▼────────────────────────────────────┐
-│                    observation-model.so                          │
+│               observation-model (static library)                 │
 │  ┌───────────────────┐  ┌──────────────────┐  ┌────────────────┐ │
 │  │ ObservationModel  │  │   HardFilter     │  │  Classifiers   │ │
 │  │     Engine        │  │ (multi/IP/mac)   │  │ (Rule/Scoring) │ │
@@ -55,7 +55,7 @@ debt, not as service-specific design freedom.
                          MonitorCallbacks
                               │
 ┌─────────────────────────────▼────────────────────────────────────┐
-│                     netlink-monitor.so                           │
+│                netlink-monitor (static library)                  │
 │  ┌────────────┐  ┌────────────┐  ┌────────────┐                  │
 │  │  Parser    │  │   State    │  │   Utils    │                  │
 │  │ (handle*)  │  │ (Netlink   │  │ (format)   │                  │
@@ -71,13 +71,17 @@ debt, not as service-specific design freedom.
 └──────────────────────────────────────────────────────────────────┘
 ```
 
-## Libraries
+## Internal libraries
 
-| Library | `.so` name | Purpose |
+| Target | Linkage | Purpose |
 |---|---|---|
-| `netlink-monitor` | `libnetlink-monitor.so` | Raw netlink event monitor (links, addresses, FDB, neighbors) |
-| `observation-model` | `libobservation-model.so` | Source-agnostic model with hard filtering, classification, and device inference |
+| `netlink-monitor` | Static, internal | Raw netlink event monitor for links, addresses, FDB entries, and neighbors |
+| `lldp-observer` | Static, internal | LLDP ingestion and callback-drain handling |
+| `observation-model` | Static, internal | Source-agnostic model with filtering, classification, and candidate inference |
 
+These targets are linked into `network-observationd` through
+`network_observation_service`. They are not installed, exported, or supported
+as independent runtime libraries.
 ---
 
 ## 1. Raw Netlink Monitor

@@ -1,6 +1,6 @@
 # core
 
-`core/` owns the transport-neutral observation model. The build target remains `observation-model`, which correlates netlink and LLDP observations into publishable remote device candidates.
+`core/` owns the transport-neutral observation model. The internal static target `observation-model` correlates netlink and LLDP observations into publishable remote device candidates. It is linked into the daemon and is not installed or exported as an independent library.
 
 ## Responsibilities
 - track local interfaces, MACs, and IPs

@@ -1,6 +1,6 @@
 # netlink-monitor
 
-`netlink-monitor` provides low-level Linux network state monitoring over netlink.
+`netlink-monitor` is an internal static target providing low-level Linux network-state monitoring over netlink. It is linked into `network-observationd` and is not a separately installed runtime library.
 
 ## Responsibilities
 - subscribe to live netlink events
