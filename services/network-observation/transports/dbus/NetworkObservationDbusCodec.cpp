@@ -243,6 +243,15 @@ std::map<std::string, DBus::Variant> toVariantMap(const contract::RemoteCandidat
 
 std::map<std::string, std::map<std::string, DBus::Variant>> encodeIssues(const contract::ObservationIssues& issues)
 {
+    static constexpr std::string_view requiredFields[] = {
+            contract::ISSUE_SEVERITY,
+            contract::ISSUE_MESSAGE,
+            contract::ISSUE_COMPONENT,
+            contract::ISSUE_OPERATION,
+            contract::ISSUE_CATEGORY,
+            contract::ISSUE_IDENTITY,
+        };
+
     if (issues.size() > interop_contract::ingress::network_observation::kMaxIssues) {
         throw DecodeError(DecodeErrorCode::limit_exceeded, "issues map exceeds contract limit");
     }
@@ -250,6 +259,15 @@ std::map<std::string, std::map<std::string, DBus::Variant>> encodeIssues(const c
     std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
     for (const auto& [issueCode, fields] : issues) {
         validateKey(issueCode);
+        for (const auto field : requiredFields) {
+            if (!fields.contains(std::string(field))) {
+                throw DecodeError(
+                    DecodeErrorCode::missing_required_field,
+                    "issue '" + issueCode +
+                    "' is missing required field '" +
+                    std::string(field) + "'");
+            }
+        }
         if (fields.size() > interop_contract::ingress::network_observation::kMaxIssueFields) {
             throw DecodeError(DecodeErrorCode::limit_exceeded, "issue fields map exceeds contract limit");
         }
@@ -380,6 +398,30 @@ decodeIssues(const std::map<std::string, std::map<std::string, DBus::Variant>>& 
         decoded.emplace(issueCode, std::move(decodedFields));
     }
     return decoded;
+}
+
+VariantMap encodeLocalSnapshot( const interop_contract::network_observation::LocalNetworkSnapshot& snapshot)
+{
+    if (snapshot.interfaces.size() > interop_contract::ingress::network_observation::kMaxInterfaces) {
+        throw DecodeError(DecodeErrorCode::limit_exceeded, "local snapshot exceeds interface contract limit");
+    }
+
+    VariantMap encoded;
+    for (const auto& [name, interface] : snapshot.interfaces) {
+        validateString(name, "interface name");
+        encoded.emplace(name, DBus::Variant(toVariantMap(interface)));
+    }
+
+    return encoded;
+}
+
+std::vector<std::string> encodeCandidateMacs(const std::vector<std::string>& macs)
+{
+    if (macs.size() > interop_contract::ingress::network_observation::kMaxCandidates) {
+        throw DecodeError(DecodeErrorCode::limit_exceeded, "remote candidate MAC list exceeds contract limit");
+    }
+    for (const auto& mac : macs) validateString(mac, "remote candidate MAC");
+    return macs;
 }
 
 } // namespace RSCGroup::NetworkObservationDbusCodec

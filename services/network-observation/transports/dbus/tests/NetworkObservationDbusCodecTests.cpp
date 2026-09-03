@@ -10,6 +10,7 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace {
 
@@ -242,6 +243,82 @@ void testDecodeIssuesRejectsWrongFieldType()
     expect(threw, "decodeIssues should reject non-string issue field value");
 }
 
+template<typename Function>
+void expectLimitExceeded(Function&& function, const std::string& message)
+{
+    try {
+        std::forward<Function>(function)();
+    } catch (const interop_contract::DecodeError& error) {
+        expect(error.code() == interop_contract::DecodeErrorCode::limit_exceeded, message + ": unexpected error code");
+        return;
+    }
+
+    expect(false, message + ": expected limit-exceeded error");
+}
+
+void testEncodeLocalSnapshotAcceptsBoundedSnapshot()
+{
+    contract::LocalInterfaceState interface;
+    interface.ifindex = 7;
+    interface.ifname = "eth0";
+    interface.mac = "aa:bb:cc:dd:ee:ff";
+    interface.operstate = "UP";
+
+    contract::LocalNetworkSnapshot snapshot;
+    snapshot.interfaces.emplace(interface.ifname, interface);
+
+    const auto encoded = codec::encodeLocalSnapshot(snapshot);
+    expect(encoded.size() == 1, "bounded local snapshot should encode");
+    expect(encoded.contains("eth0"), "encoded local snapshot should contain eth0");
+}
+
+void testEncodeLocalSnapshotRejectsTooManyInterfaces()
+{
+    contract::LocalNetworkSnapshot snapshot;
+    for (std::size_t index = 0; index <= interop_contract::ingress::network_observation::kMaxInterfaces; ++index) {
+        contract::LocalInterfaceState interface;
+        interface.ifindex = static_cast<int>(index);
+        interface.ifname = "eth" + std::to_string(index);
+        interface.mac = "aa:bb:cc:dd:ee:ff";
+        interface.operstate = "UP";
+        snapshot.interfaces.emplace(interface.ifname, std::move(interface));
+    }
+
+    expectLimitExceeded([&] { (void)codec::encodeLocalSnapshot(snapshot); }, "oversized local snapshot must be rejected");
+}
+
+void testEncodeLocalSnapshotRejectsOversizedKey()
+{
+    contract::LocalInterfaceState interface;
+    interface.ifindex = 7;
+    interface.ifname = "eth0";
+    interface.mac = "aa:bb:cc:dd:ee:ff";
+    interface.operstate = "UP";
+
+    contract::LocalNetworkSnapshot snapshot;
+    snapshot.interfaces.emplace(std::string(interop_contract::ingress::kMaxStringLength + 1, 'x'), std::move(interface));
+
+    expectLimitExceeded([&] { (void)codec::encodeLocalSnapshot(snapshot); }, "oversized snapshot key must be rejected");
+}
+
+void testEncodeCandidateMacsAcceptsBoundedList()
+{
+    const std::vector<std::string> macs{"00:11:22:33:44:55", "66:77:88:99:aa:bb"};
+    expect(codec::encodeCandidateMacs(macs) == macs, "bounded candidate MAC list should encode unchanged");
+}
+
+void testEncodeCandidateMacsRejectsTooManyEntries()
+{
+    std::vector<std::string> macs(interop_contract::ingress::network_observation::kMaxCandidates + 1, "00:11:22:33:44:55");
+    expectLimitExceeded([&] { (void)codec::encodeCandidateMacs(macs); }, "oversized candidate MAC list must be rejected");
+}
+
+void testEncodeCandidateMacsRejectsOversizedEntry()
+{
+    const std::vector<std::string> macs{std::string(interop_contract::ingress::kMaxStringLength + 1, 'x')};
+    expectLimitExceeded([&] { (void)codec::encodeCandidateMacs(macs); }, "oversized candidate MAC must be rejected");
+}
+
 } // namespace
 
 int main()
@@ -255,6 +332,12 @@ int main()
     testDecodeIssuesRejectsOversizedInnerMap();
     testDecodeIssuesRejectsOversizedKey();
     testDecodeIssuesRejectsMissingRequiredField();
+    testEncodeLocalSnapshotAcceptsBoundedSnapshot();
+    testEncodeLocalSnapshotRejectsTooManyInterfaces();
+    testEncodeLocalSnapshotRejectsOversizedKey();
+    testEncodeCandidateMacsAcceptsBoundedList();
+    testEncodeCandidateMacsRejectsTooManyEntries();
+    testEncodeCandidateMacsRejectsOversizedEntry();
     testDecodeIssuesRejectsWrongFieldType();
     return EXIT_SUCCESS;
 }

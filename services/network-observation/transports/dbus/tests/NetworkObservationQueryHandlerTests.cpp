@@ -183,6 +183,17 @@ public:
         candidates_.push_back(std::move(candidate));
     }
 
+    void setCandidates(std::vector<RemoteCandidate> candidates)
+    {
+        candidates_ = std::move(candidates);
+    }
+
+    void setSnapshot(LocalNetworkSnapshot snapshot)
+    {
+        snapshot_ = std::move(snapshot);
+    }
+
+
     void setBlockSnapshot(bool value)
     {
         std::scoped_lock lock(snapshotMutex_);
@@ -503,6 +514,53 @@ void testBindAfterDetachReopensAdmission()
     binding.detach();
 }
 
+void testOversizedSnapshotReturnsFallback()
+{
+    ServiceBinding<IObservationQueryService> binding;
+    FakeObservationQueryService service;
+    NetworkObservationQueryHandler handler(binding);
+
+    LocalNetworkSnapshot snapshot;
+    for (std::size_t index = 0; index <= interop_contract::ingress::network_observation::kMaxInterfaces; ++index) {
+        LocalInterfaceState interface;
+        interface.ifindex = static_cast<int>(index);
+        interface.ifname = "eth" + std::to_string(index);
+        interface.mac = "aa:bb:cc:dd:ee:ff";
+        interface.operstate = "UP";
+        snapshot.interfaces.emplace(interface.ifname, std::move(interface));
+    }
+
+    service.setSnapshot(std::move(snapshot));
+    binding.bind(&service);
+
+    expect(handler.getLocalSnapshot().empty(), "oversized snapshot should return the handler fallback");
+
+    binding.detach();
+}
+
+void testOversizedCandidateListReturnsFallback()
+{
+    ServiceBinding<IObservationQueryService> binding;
+    FakeObservationQueryService service;
+    NetworkObservationQueryHandler handler(binding);
+
+    std::vector<RemoteCandidate> candidates;
+    candidates.reserve(interop_contract::ingress::network_observation::kMaxCandidates + 1);
+
+    for (std::size_t index = 0; index <= interop_contract::ingress::network_observation::kMaxCandidates; ++index) {
+        RemoteCandidate candidate;
+        candidate.mac = "00:11:22:33:44:55";
+        candidates.push_back(std::move(candidate));
+    }
+
+    service.setCandidates(std::move(candidates));
+    binding.bind(&service);
+
+    expect(handler.getRemoteCandidateMacs().empty(), "oversized candidate list should return the handler fallback");
+
+    binding.detach();
+}
+
 } // namespace
 
 int main()
@@ -514,6 +572,8 @@ int main()
     testNonStandardExceptionsAreContained();
     testEncodingExceptionsAreContained();
     testDetachWaitsForAdmittedQueryAndRejectsNewQueries();
+    testOversizedSnapshotReturnsFallback();
+    testOversizedCandidateListReturnsFallback();
     testBindAfterDetachReopensAdmission();
 
     return EXIT_SUCCESS;

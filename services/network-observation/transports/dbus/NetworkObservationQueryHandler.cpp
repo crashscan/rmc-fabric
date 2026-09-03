@@ -24,6 +24,13 @@ namespace {
 
 namespace contract = interop_contract::network_observation;
 
+[[nodiscard]] contract::LocalNetworkSnapshot toWireSnapshot(const LocalNetworkSnapshot& snapshot)
+{
+    contract::LocalNetworkSnapshot wire;
+    wire.interfaces = snapshot.interfaces;
+    return wire;
+}
+
 /**
  * Convert the model's extended candidate type to its wire representation.
  *
@@ -88,30 +95,12 @@ NetworkObservationQueryHandler::NetworkObservationQueryHandler(
 {
 }
 
-std::map<std::string, DBus::Variant>
-NetworkObservationQueryHandler::getLocalSnapshot()
+std::map<std::string, DBus::Variant> NetworkObservationQueryHandler::getLocalSnapshot()
 {
     using Result = std::map<std::string, DBus::Variant>;
-
-    return invokeQuery(
-        binding_,
-        "GetLocalSnapshot",
-        Result{},
-        [](IObservationQueryService& service) {
-            Result result;
-            const auto snapshot = service.localSnapshot();
-
-            for (const auto& [name, interface] :
-                 snapshot.interfaces) {
-                result.emplace(
-                    name,
-                    DBus::Variant{
-                        NetworkObservationDbusCodec::toVariantMap(
-                            interface)});
-            }
-
-            return result;
-        });
+    return invokeQuery(binding_, "GetLocalSnapshot", Result{}, [](IObservationQueryService& service) {
+        return NetworkObservationDbusCodec::encodeLocalSnapshot(toWireSnapshot(service.localSnapshot()));
+    });
 }
 
 std::map<std::string, DBus::Variant>
@@ -134,27 +123,16 @@ NetworkObservationQueryHandler::getInterface(std::string ifname)
         });
 }
 
-std::vector<std::string>
-NetworkObservationQueryHandler::getRemoteCandidateMacs()
+std::vector<std::string> NetworkObservationQueryHandler::getRemoteCandidateMacs()
 {
     using Result = std::vector<std::string>;
-
-    return invokeQuery(
-        binding_,
-        "GetRemoteCandidateMacs",
-        Result{},
-        [](IObservationQueryService& service) {
-            const auto candidates = service.remoteCandidates();
-
-            Result result;
-            result.reserve(candidates.size());
-
-            for (const auto& candidate : candidates) {
-                result.push_back(candidate.mac);
-            }
-
-            return result;
-        });
+    return invokeQuery(binding_, "GetRemoteCandidateMacs", Result{}, [](IObservationQueryService& service) {
+        const auto candidates = service.remoteCandidates();
+        Result macs;
+        macs.reserve(candidates.size());
+        for (const auto& candidate : candidates) macs.push_back(candidate.mac);
+        return NetworkObservationDbusCodec::encodeCandidateMacs(macs);
+    });
 }
 
 std::map<std::string, DBus::Variant>

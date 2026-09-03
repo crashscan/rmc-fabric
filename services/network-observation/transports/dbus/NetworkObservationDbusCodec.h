@@ -5,6 +5,7 @@
 
 #include <map>
 #include <string>
+#include <vector>
 
 namespace DBus {
 class Variant;
@@ -12,25 +13,17 @@ class Variant;
 
 namespace RSCGroup::NetworkObservationDbusCodec {
 
-[[nodiscard]] std::map<std::string, DBus::Variant>
-toVariantMap(const interop_contract::network_observation::LocalInterfaceState& iface);
+using VariantMap = std::map<std::string, DBus::Variant>;
+using NestedVariantMap = std::map<std::string, VariantMap>;
 
-[[nodiscard]] std::map<std::string, DBus::Variant>
-toVariantMap(const interop_contract::network_observation::RemoteCandidate& c);
-
-[[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant>>
-encodeIssues(const interop_contract::network_observation::ObservationIssues& issues);
-
-[[nodiscard]] interop_contract::network_observation::LocalNetworkSnapshot
-fromVariantMapLocalSnapshot(const std::map<std::string, DBus::Variant>& m);
-
-[[nodiscard]] interop_contract::network_observation::LocalInterfaceState
-fromVariantMapIface(const std::map<std::string, DBus::Variant>& m);
-
-[[nodiscard]] interop_contract::network_observation::RemoteCandidate
-fromVariantMapCandidate(const std::map<std::string, DBus::Variant>& m);
-
-[[nodiscard]] interop_contract::network_observation::ObservationIssues
-decodeIssues(const std::map<std::string, std::map<std::string, DBus::Variant>>& issues);
+[[nodiscard]] VariantMap toVariantMap(const interop_contract::network_observation::LocalInterfaceState& iface);
+[[nodiscard]] VariantMap toVariantMap(const interop_contract::network_observation::RemoteCandidate& c);
+[[nodiscard]] NestedVariantMap encodeIssues(const interop_contract::network_observation::ObservationIssues& issues);
+[[nodiscard]] interop_contract::network_observation::LocalNetworkSnapshot fromVariantMapLocalSnapshot(const VariantMap& m);
+[[nodiscard]] interop_contract::network_observation::LocalInterfaceState fromVariantMapIface(const VariantMap& m);
+[[nodiscard]] interop_contract::network_observation::RemoteCandidate fromVariantMapCandidate(const VariantMap& m);
+[[nodiscard]] interop_contract::network_observation::ObservationIssues decodeIssues(const NestedVariantMap& issues);
+[[nodiscard]] VariantMap encodeLocalSnapshot(const interop_contract::network_observation::LocalNetworkSnapshot& snapshot);
+[[nodiscard]] std::vector<std::string> encodeCandidateMacs(const std::vector<std::string>& candidates);
 
 } // namespace RSCGroup::NetworkObservationDbusCodec
