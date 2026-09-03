@@ -298,11 +298,16 @@ fromVariantMapLocalSnapshot(const std::map<std::string, DBus::Variant>& m)
 
     contract::LocalNetworkSnapshot snapshot;
     for (const auto& [name, value] : m) {
-        validateString(name, "interface name");
+        validateKey(name);
         auto ifaceMap = value;
         try {
-            snapshot.interfaces[name] = fromVariantMapIface(
-                ifaceMap.to_map<std::string, DBus::Variant>());
+            auto interface = fromVariantMapIface(ifaceMap.to_map<std::string, DBus::Variant>());
+            if (name != interface.ifname) {
+                throw DecodeError(
+                    DecodeErrorCode::invalid_value,
+                    "local snapshot key does not match interface ifname");
+            }
+            snapshot.interfaces.emplace(name, std::move(interface));
         } catch (const DecodeError&) {
             throw;
         } catch (const std::exception& e) {
@@ -396,7 +401,7 @@ VariantMap encodeLocalSnapshot( const interop_contract::network_observation::Loc
 
     VariantMap encoded;
     for (const auto& [name, interface] : snapshot.interfaces) {
-        validateString(name, "interface name");
+        validateKey(name);
         if (name != interface.ifname) {
             throw DecodeError(
                 DecodeErrorCode::invalid_value,

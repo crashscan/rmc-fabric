@@ -296,7 +296,7 @@ void testEncodeLocalSnapshotRejectsOversizedKey()
     interface.operstate = "UP";
 
     contract::LocalNetworkSnapshot snapshot;
-    snapshot.interfaces.emplace(std::string(interop_contract::ingress::kMaxStringLength + 1, 'x'), std::move(interface));
+    snapshot.interfaces.emplace(std::string(interop_contract::ingress::kMaxKeyLength + 1, 'x'), std::move(interface));
 
     expectLimitExceeded([&] { (void)codec::encodeLocalSnapshot(snapshot); }, "oversized snapshot key must be rejected");
 }
@@ -343,6 +343,27 @@ void testEncodeIssuesRejectsMissingRequiredField()
     expect(threw, "encodeIssues should reject a missing required field");
 }
 
+void testEncodeLocalSnapshotRejectsMismatchedInterfaceName()
+{
+    contract::LocalInterfaceState interface;
+    interface.ifindex = 7;
+    interface.ifname = "eth1";
+    interface.mac = "aa:bb:cc:dd:ee:ff";
+    interface.operstate = "UP";
+
+    contract::LocalNetworkSnapshot snapshot;
+    snapshot.interfaces.emplace("eth0", std::move(interface));
+
+    bool threw = false;
+    try {
+        (void)codec::encodeLocalSnapshot(snapshot);
+    } catch (const interop_contract::DecodeError& error) {
+        threw = error.code() == interop_contract::DecodeErrorCode::invalid_value;
+    }
+
+    expect(threw, "encodeLocalSnapshot should reject a key/ifname mismatch");
+}
+
 } // namespace
 
 int main()
@@ -364,5 +385,6 @@ int main()
     testEncodeCandidateMacsRejectsOversizedEntry();
     testDecodeIssuesRejectsWrongFieldType();
     testEncodeIssuesRejectsMissingRequiredField();
+    testEncodeLocalSnapshotRejectsMismatchedInterfaceName();
     return EXIT_SUCCESS;
 }
