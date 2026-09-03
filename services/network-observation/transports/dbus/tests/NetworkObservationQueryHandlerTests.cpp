@@ -6,7 +6,7 @@
 
 #include <IObservationQueryService.h>
 #include <ServiceBinding.h>
-
+#include <IngressLimits.hpp>
 #include <network_observation/NetworkObservationContracts.hpp>
 
 #include <atomic>
@@ -192,13 +192,10 @@ public:
         snapshotReleased_ = !value;
     }
 
-    void waitUntilSnapshotEntered() const
+    [[nodiscard]] bool waitUntilSnapshotEntered(std::chrono::milliseconds timeout = 500ms) const
     {
         std::unique_lock lock(snapshotMutex_);
-
-        snapshotEnteredCv_.wait(lock, [this] {
-            return snapshotEntered_;
-        });
+        return snapshotEnteredCv_.wait_for(lock, timeout, [this] { return snapshotEntered_; });
     }
 
     void releaseSnapshot() const
@@ -406,6 +403,23 @@ void testNonStandardExceptionsAreContained()
 
     binding.detach();
 }
+void testEncodingExceptionsAreContained()
+{
+    ServiceBinding<IObservationQueryService> binding;
+    FakeObservationQueryService service;
+    NetworkObservationQueryHandler handler(binding);
+
+    LocalInterfaceState interface;
+    interface.ifname = std::string(interop_contract::ingress::kMaxStringLength + 1, 'x');
+    interface.mac = "aa:bb:cc:dd:ee:ff";
+    interface.operstate = "UP";
+    service.setInterface(interface);
+    binding.bind(&service);
+
+    expectContained([&] { expect(handler.getInterface(interface.ifname).empty(), "encoding failure should return the interface fallback"); }, "interface encoding exception must be contained");
+
+    binding.detach();
+}
 
 void testDetachWaitsForAdmittedQueryAndRejectsNewQueries()
 {
@@ -416,53 +430,34 @@ void testDetachWaitsForAdmittedQueryAndRejectsNewQueries()
     service.setBlockSnapshot(true);
     binding.bind(&service);
 
-    auto activeQuery = std::async(
-        std::launch::async,
-        [&handler] {
-            return handler.getLocalSnapshot();
-        });
+    auto activeQuery = std::async(std::launch::async, [&handler] { return handler.getLocalSnapshot(); });
+    const bool queryEntered = service.waitUntilSnapshotEntered();
 
-    service.waitUntilSnapshotEntered();
+    if (!queryEntered) {
+        service.releaseSnapshot();
+        activeQuery.wait();
+        expect(false, "snapshot query did not enter before timeout");
+    }
 
-    auto detachFuture = std::async(
-        std::launch::async,
-        [&binding] {
-            binding.detach();
-        });
+    auto detachFuture = std::async(std::launch::async, [&binding] { binding.detach(); });
 
-    /*
-     * GetPhase normally returns "live". Observing "stopped" proves that
-     * detach() closed admission while it was still waiting for the active
-     * snapshot query to release its lease.
-     */
-    expect(
-        waitFor([&] {
-            return handler.getPhase() ==
-                   contract::PHASE_STOPPED;
-        }),
-        "detach must close admission before waiting for active queries");
-
-    expect(
-        detachFuture.wait_for(25ms) ==
-            std::future_status::timeout,
-        "detach must wait while an admitted query remains active");
-
-    expect(
-        activeQuery.wait_for(25ms) ==
-            std::future_status::timeout,
-        "the admitted snapshot query should remain blocked");
+    const bool admissionClosed = waitFor([&] { return handler.getPhase() == contract::PHASE_STOPPED; });
+    const bool detachWaited = detachFuture.wait_for(25ms) == std::future_status::timeout;
+    const bool queryRemainedBlocked = activeQuery.wait_for(25ms) == std::future_status::timeout;
 
     service.releaseSnapshot();
 
     activeQuery.get();
+    const bool detachCompleted = detachFuture.wait_for(500ms) == std::future_status::ready;
 
-    expect(
-        detachFuture.wait_for(500ms) ==
-            std::future_status::ready,
-        "detach should finish after the active query releases its lease");
+    if (detachCompleted) {
+        detachFuture.get();
+    }
 
-    detachFuture.get();
-
+    expect(admissionClosed, "detach must close admission before waiting for active queries");
+    expect(detachWaited, "detach must wait while an admitted query remains active");
+    expect(queryRemainedBlocked, "the admitted snapshot query should remain blocked");
+    expect(detachCompleted, "detach should finish after the active query releases its lease");
     expectFallbacks(handler, "after completed detach");
 }
 
@@ -517,6 +512,7 @@ int main()
     testFallbacksAfterDetach();
     testStandardExceptionsAreContained();
     testNonStandardExceptionsAreContained();
+    testEncodingExceptionsAreContained();
     testDetachWaitsForAdmittedQueryAndRejectsNewQueries();
     testBindAfterDetachReopensAdmission();
 

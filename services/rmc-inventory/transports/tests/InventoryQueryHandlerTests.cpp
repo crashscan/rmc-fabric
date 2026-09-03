@@ -6,6 +6,7 @@
 
 #include <IInventoryQueryService.h>
 #include <ServiceBinding.h>
+#include <inventory/InventoryContracts.hpp>
 
 #include <dbus-cxx/variant.h>
 #include <atomic>
@@ -78,7 +79,11 @@ public:
     {
         ++identityCalls_;
         maybeThrow();
-        return {};
+        InventorySnapshot snapshot;
+        if (invalidIdentityEncoding_.load(std::memory_order_acquire)) {
+            snapshot.fields.emplace(std::string(FIELD_VERSION), std::uint64_t{1});
+            }
+        return snapshot;
     }
 
     InventoryFields getField(const std::string&) const override
@@ -145,6 +150,11 @@ public:
         failure_.store(failure, std::memory_order_release);
     }
 
+    void setInvalidIdentityEncoding(bool value) noexcept
+    {
+            invalidIdentityEncoding_.store(value, std::memory_order_release);
+    }
+
     void setReadyValue(bool value)
     {
         std::scoped_lock lock(readyMutex_);
@@ -159,12 +169,10 @@ public:
         readyReleased_ = !value;
     }
 
-    void waitUntilReadyEntered() const
+    [[nodiscard]] bool waitUntilReadyEntered(std::chrono::milliseconds timeout = 500ms)
     {
         std::unique_lock lock(readyMutex_);
-        readyEnteredCv_.wait(lock, [this] {
-            return readyEntered_;
-        });
+        return readyEnteredCv_.wait_for(lock, timeout, [this] { return readyEntered_; });
     }
 
     void releaseReady() const
@@ -179,6 +187,11 @@ public:
     [[nodiscard]] int refreshCalls() const
     {
         return refreshCalls_.load(std::memory_order_acquire);
+    }
+
+    [[nodiscard]] int identityCalls() const
+    {
+        return identityCalls_.load(std::memory_order_acquire);
     }
 
 private:
@@ -197,6 +210,7 @@ private:
     }
 
     mutable std::atomic<Failure> failure_{Failure::none};
+    mutable std::atomic<bool> invalidIdentityEncoding_{false};
 
     mutable std::atomic<int> identityCalls_{0};
     mutable std::atomic<int> fieldCalls_{0};
@@ -335,6 +349,21 @@ void testNonStandardExceptionsAreContained()
     binding.detach();
 }
 
+void testEncodingExceptionsAreContained()
+{
+    ServiceBinding<IInventoryQueryService> binding;
+    FakeInventoryQueryService service;
+    InventoryQueryHandler handler(binding);
+
+    service.setInvalidIdentityEncoding(true);
+    binding.bind(&service);
+
+    expectContained([&] { expect(handler.getIdentity().empty(), "encoding failure should return the identity fallback"); }, "identity encoding exception must be contained");
+    expect(service.identityCalls() == 1, "encoding-failure test must reach the service");
+
+    binding.detach();
+}
+
 void testDetachWaitsForAdmittedQueryAndRejectsNewQueries()
 {
     ServiceBinding<IInventoryQueryService> binding;
@@ -345,47 +374,36 @@ void testDetachWaitsForAdmittedQueryAndRejectsNewQueries()
     service.setBlockReady(true);
     binding.bind(&service);
 
-    auto activeQuery = std::async(std::launch::async, [&handler] {
-        return handler.getReady();
-    });
+    auto activeQuery = std::async(std::launch::async, [&handler] { return handler.getReady(); });
+    const bool queryEntered = service.waitUntilReadyEntered();
 
-    service.waitUntilReadyEntered();
+    if (!queryEntered) {
+        service.releaseReady();
+        activeQuery.wait();
+        expect(false, "ready query did not enter before timeout");
+    }
 
-    auto detach = std::async(std::launch::async, [&binding] {
-        binding.detach();
-    });
+    auto detachFuture = std::async(std::launch::async, [&binding] { binding.detach(); });
 
-    // getPhase() normally returns "live". Seeing "unknown" proves detach()
-    // closed admission while still waiting for the active getReady() lease.
-    expect(
-        waitFor([&] {
-            return handler.getPhase() == "unknown";
-        }),
-        "detach must close admission before waiting for active queries");
-
-    expect(
-        detach.wait_for(25ms) == std::future_status::timeout,
-        "detach must wait while an admitted query is active");
-
-    expect(
-        activeQuery.wait_for(25ms) == std::future_status::timeout,
-        "blocked admitted query should remain active before release");
+    const bool admissionClosed = waitFor([&] { return handler.getPhase() == "unknown"; });
+    const bool detachWaited = detachFuture.wait_for(25ms) == std::future_status::timeout;
+    const bool queryRemainedBlocked = activeQuery.wait_for(25ms) == std::future_status::timeout;
 
     service.releaseReady();
 
-    expect(
-        activeQuery.get(),
-        "the admitted query should complete with the service result");
+    const bool admittedResult = activeQuery.get();
+    const bool detachCompleted = detachFuture.wait_for(500ms) == std::future_status::ready;
 
-    expect(
-        detach.wait_for(500ms) == std::future_status::ready,
-        "detach should complete after the active query releases its lease");
+    if (detachCompleted) {
+        detachFuture.get();
+    }
 
-    detach.get();
-
-    expect(
-        !handler.getReady(),
-        "queries after completed detach must receive fallback values");
+    expect(admissionClosed, "detach must close admission before waiting for active queries");
+    expect(detachWaited, "detach must wait while an admitted query is active");
+    expect(queryRemainedBlocked, "blocked admitted query should remain active before release");
+    expect(admittedResult, "the admitted query should complete with the service result");
+    expect(detachCompleted, "detach should complete after the active query releases its lease");
+    expect(!handler.getReady(), "queries after completed detach must receive fallback values");
 }
 
 void testBindAfterDetachReopensAdmission()
@@ -424,6 +442,7 @@ int main()
     testFallbacksAfterDetach();
     testStandardExceptionsAreContained();
     testNonStandardExceptionsAreContained();
+    testEncodingExceptionsAreContained();
     testDetachWaitsForAdmittedQueryAndRejectsNewQueries();
     testBindAfterDetachReopensAdmission();
 

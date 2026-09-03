@@ -48,8 +48,15 @@ void validateString(const std::string& value, const char* fieldName)
     }
 }
 
-[[nodiscard]] std::string requireString(const std::map<std::string, DBus::Variant>& m,
-                                        std::string_view key)
+void validateStringSet(const std::set<std::string>& values, const char* fieldName)
+{
+    if (values.size() > interop_contract::ingress::network_observation::kMaxStringSetEntries) {
+        throw DecodeError(DecodeErrorCode::limit_exceeded, std::string(fieldName) + " exceeds collection limit");
+    }
+    for (const auto& value : values) validateString(value, fieldName);
+}
+
+[[nodiscard]] std::string requireString(const std::map<std::string, DBus::Variant>& m, std::string_view key)
 {
     validateKey(std::string(key));
     const auto& field = requireField(m, key);
@@ -162,9 +169,15 @@ void validateMapLimit(const std::map<std::string, DBus::Variant>& m,
 
 } // namespace
 
-std::map<std::string, DBus::Variant>
-toVariantMap(const contract::LocalInterfaceState& iface)
+std::map<std::string, DBus::Variant> toVariantMap(const contract::LocalInterfaceState& iface)
 {
+    validateString(iface.ifname, "ifname");
+    validateString(iface.mac, "mac");
+    validateString(iface.operstate, "operstate");
+    if (iface.masterIfname) validateString(*iface.masterIfname, "master");
+    validateStringSet(iface.ipv4, "ipv4");
+    validateStringSet(iface.ipv6, "ipv6");
+
     std::map<std::string, DBus::Variant> d;
     d[std::string(contract::K_IFINDEX)]   = DBus::Variant(static_cast<int32_t>(iface.ifindex));
     d[std::string(contract::K_IFNAME)]    = DBus::Variant(iface.ifname);
@@ -186,9 +199,17 @@ toVariantMap(const contract::LocalInterfaceState& iface)
     return d;
 }
 
-std::map<std::string, DBus::Variant>
-toVariantMap(const contract::RemoteCandidate& c)
+std::map<std::string, DBus::Variant> toVariantMap(const contract::RemoteCandidate& c)
 {
+    validateString(c.mac, "mac");
+    if (c.bridgePort) validateString(*c.bridgePort, "bridgePort");
+    if (c.remoteChassisId) validateString(*c.remoteChassisId, "remoteChassisId");
+    if (c.remotePortId) validateString(*c.remotePortId, "remotePortId");
+    if (c.remoteSystemName) validateString(*c.remoteSystemName, "remoteSystemName");
+    validateStringSet(c.neighborIfaces, "neighborIfaces");
+    validateStringSet(c.ipv4, "ipv4");
+    validateStringSet(c.ipv6, "ipv6");
+
     std::map<std::string, DBus::Variant> cand;
     cand[std::string(contract::K_MAC)]            = DBus::Variant(c.mac);
     cand[std::string(contract::K_CLASSIFICATION)] = DBus::Variant(contract::classificationToString(c.classification));
@@ -220,13 +241,23 @@ toVariantMap(const contract::RemoteCandidate& c)
     return cand;
 }
 
-std::map<std::string, std::map<std::string, DBus::Variant>>
-encodeIssues(const contract::ObservationIssues& issues)
+std::map<std::string, std::map<std::string, DBus::Variant>> encodeIssues(const contract::ObservationIssues& issues)
 {
+    if (issues.size() > interop_contract::ingress::network_observation::kMaxIssues) {
+        throw DecodeError(DecodeErrorCode::limit_exceeded, "issues map exceeds contract limit");
+    }
+
     std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
     for (const auto& [issueCode, fields] : issues) {
+        validateKey(issueCode);
+        if (fields.size() > interop_contract::ingress::network_observation::kMaxIssueFields) {
+            throw DecodeError(DecodeErrorCode::limit_exceeded, "issue fields map exceeds contract limit");
+        }
+
         std::map<std::string, DBus::Variant> encodedFields;
         for (const auto& [name, value] : fields) {
+            validateKey(name);
+            validateString(value, name.c_str());
             encodedFields.emplace(name, DBus::Variant(value));
         }
         encoded.emplace(issueCode, std::move(encodedFields));

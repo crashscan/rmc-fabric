@@ -101,6 +101,7 @@ if(BUILD_TESTING)
         network_observation_query_handler_tests
         PRIVATE
             network_observation_dbus_transport
+            DBusCxx::DBusCxx
             pthread
     )
 
