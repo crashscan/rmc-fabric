@@ -22,6 +22,27 @@ namespace {
 using interop_contract::DecodeError;
 using interop_contract::DecodeErrorCode;
 
+constexpr std::string_view kRequiredIssueFields[] = {
+    contract::ISSUE_SEVERITY,
+    contract::ISSUE_MESSAGE,
+    contract::ISSUE_COMPONENT,
+    contract::ISSUE_OPERATION,
+    contract::ISSUE_CATEGORY,
+    contract::ISSUE_IDENTITY,
+};
+
+void validateRequiredIssueFields(const contract::ObservationIssueFields& fields,const std::string& issueCode)
+{
+    for (const auto field : kRequiredIssueFields) {
+        if (!fields.contains(std::string(field))) {
+            throw DecodeError(
+                DecodeErrorCode::missing_required_field,
+                "issue '" + issueCode + "' is missing required field '" +
+                    std::string(field) + "'");
+        }
+    }
+}
+
 [[nodiscard]] const DBus::Variant& requireField(const std::map<std::string, DBus::Variant>& m,
                                                 std::string_view key)
 {
@@ -243,14 +264,6 @@ std::map<std::string, DBus::Variant> toVariantMap(const contract::RemoteCandidat
 
 std::map<std::string, std::map<std::string, DBus::Variant>> encodeIssues(const contract::ObservationIssues& issues)
 {
-    static constexpr std::string_view requiredFields[] = {
-            contract::ISSUE_SEVERITY,
-            contract::ISSUE_MESSAGE,
-            contract::ISSUE_COMPONENT,
-            contract::ISSUE_OPERATION,
-            contract::ISSUE_CATEGORY,
-            contract::ISSUE_IDENTITY,
-        };
 
     if (issues.size() > interop_contract::ingress::network_observation::kMaxIssues) {
         throw DecodeError(DecodeErrorCode::limit_exceeded, "issues map exceeds contract limit");
@@ -259,15 +272,7 @@ std::map<std::string, std::map<std::string, DBus::Variant>> encodeIssues(const c
     std::map<std::string, std::map<std::string, DBus::Variant>> encoded;
     for (const auto& [issueCode, fields] : issues) {
         validateKey(issueCode);
-        for (const auto field : requiredFields) {
-            if (!fields.contains(std::string(field))) {
-                throw DecodeError(
-                    DecodeErrorCode::missing_required_field,
-                    "issue '" + issueCode +
-                    "' is missing required field '" +
-                    std::string(field) + "'");
-            }
-        }
+        validateRequiredIssueFields(fields,issueCode);
         if (fields.size() > interop_contract::ingress::network_observation::kMaxIssueFields) {
             throw DecodeError(DecodeErrorCode::limit_exceeded, "issue fields map exceeds contract limit");
         }
@@ -377,24 +382,7 @@ decodeIssues(const std::map<std::string, std::map<std::string, DBus::Variant>>& 
             validateString(stringValue, name.c_str());
             decodedFields.emplace(name, std::move(stringValue));
         }
-
-        // Validate required fields are present.
-        static constexpr std::string_view kRequired[] = {
-            contract::ISSUE_SEVERITY,
-            contract::ISSUE_MESSAGE,
-            contract::ISSUE_COMPONENT,
-            contract::ISSUE_OPERATION,
-            contract::ISSUE_CATEGORY,
-            contract::ISSUE_IDENTITY,
-        };
-        for (const auto& req : kRequired) {
-            if (decodedFields.find(std::string(req)) == decodedFields.end()) {
-                throw DecodeError(DecodeErrorCode::missing_required_field,
-                                  "issue '" + issueCode + "' is missing required field '" +
-                                      std::string(req) + "'");
-            }
-        }
-
+        validateRequiredIssueFields(decodedFields,issueCode);
         decoded.emplace(issueCode, std::move(decodedFields));
     }
     return decoded;
@@ -409,6 +397,11 @@ VariantMap encodeLocalSnapshot( const interop_contract::network_observation::Loc
     VariantMap encoded;
     for (const auto& [name, interface] : snapshot.interfaces) {
         validateString(name, "interface name");
+        if (name != interface.ifname) {
+            throw DecodeError(
+                DecodeErrorCode::invalid_value,
+                "local snapshot key does not match interface ifname");
+        }
         encoded.emplace(name, DBus::Variant(toVariantMap(interface)));
     }
 

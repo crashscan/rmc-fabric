@@ -319,6 +319,30 @@ void testEncodeCandidateMacsRejectsOversizedEntry()
     expectLimitExceeded([&] { (void)codec::encodeCandidateMacs(macs); }, "oversized candidate MAC must be rejected");
 }
 
+void testEncodeIssuesRejectsMissingRequiredField()
+{
+    contract::ObservationIssueFields fields{
+            {std::string(contract::ISSUE_MESSAGE), "failure"},
+            {std::string(contract::ISSUE_COMPONENT), "transport.dbus"},
+            {std::string(contract::ISSUE_OPERATION), "publish"},
+            {std::string(contract::ISSUE_CATEGORY), "transport_publish_failed"},
+            {std::string(contract::ISSUE_IDENTITY), "dbus"},
+        };
+
+    contract::ObservationIssues issues;
+    issues.emplace("observation.transport.failure", std::move(fields));
+
+    bool threw = false;
+    try {
+        (void)codec::encodeIssues(issues);
+    } catch (const interop_contract::DecodeError& error) {
+        threw = error.code() ==
+            interop_contract::DecodeErrorCode::missing_required_field;
+    }
+
+    expect(threw, "encodeIssues should reject a missing required field");
+}
+
 } // namespace
 
 int main()
@@ -339,5 +363,6 @@ int main()
     testEncodeCandidateMacsRejectsTooManyEntries();
     testEncodeCandidateMacsRejectsOversizedEntry();
     testDecodeIssuesRejectsWrongFieldType();
+    testEncodeIssuesRejectsMissingRequiredField();
     return EXIT_SUCCESS;
 }
