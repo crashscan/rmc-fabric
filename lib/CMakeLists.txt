@@ -1,7 +1,6 @@
 add_subdirectory(interop_contract)
 add_subdirectory(linux_support)
 add_subdirectory(dbus_transport_base)
-add_subdirectory(dbus_client_support)
 add_subdirectory(file_watcher)
 add_subdirectory(lifecycle_runner)
 add_subdirectory(daemon_support)

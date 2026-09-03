@@ -2,8 +2,8 @@
 // Created by vvass on 20-Jul-26.
 //
 #pragma once
-#include "ICandidateClassifier.h"
-#include "ClassifierFactory.h"
+#include <ICandidateClassifier.h>
+#include <ClassifierConfig.h>
 
 namespace RSCGroup {
 
@@ -11,7 +11,7 @@ class ScoringClassifier : public ICandidateClassifier {
 public:
     explicit ScoringClassifier(int probable = 25, int confirmed = 50, int topology = 80);
 
-    /// Construct with full weights and thresholds from ClassifierFactoryConfig
+    /// Construct with full weights and thresholds from ClassifierConfig
     explicit ScoringClassifier(const ScoringWeights& weights, const ScoringThresholds& thresholds);
 
     CandidateClassification classify(const RemoteCandidate& candidate) override;

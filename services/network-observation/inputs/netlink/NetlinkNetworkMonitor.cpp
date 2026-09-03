@@ -5,7 +5,7 @@
  * @file NetlinkNetworkMonitor.cpp
  * @brief Impl of NetlinkNetworkMonitor: socket management, event loop, and dump orchestration.
  */
-#include "NetlinkNetworkMonitor.h"
+#include "public/NetlinkNetworkMonitor.h"
 #include "NetlinkParser.h"
 #include "NetlinkState.h"
 #include <EventFdSignal.h>
@@ -83,7 +83,7 @@ public:
 
         worker_ = std::jthread([this](const std::stop_token& st) {
             {
-                std::scoped_lock lock(lifecycleMutex_);
+                std::scoped_lock localLock(lifecycleMutex_);
                 workerThreadId_ = std::this_thread::get_id();
             }
             runLoop(st);

@@ -5,7 +5,7 @@ add_executable(inventory-agentd
 target_include_directories(inventory-agentd
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<INSTALL_INTERFACE:${LIBPATH}/file_watcher>
+        #$<INSTALL_INTERFACE:${LIBPATH}/file_watcher>
         $<INSTALL_INTERFACE:include/rmc-inventory/service>
 )
 

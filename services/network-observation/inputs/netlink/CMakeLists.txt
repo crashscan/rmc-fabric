@@ -6,10 +6,10 @@ add_library(netlink-monitor SHARED
 )
 target_compile_features(netlink-monitor PUBLIC cxx_std_20)
 target_include_directories(netlink-monitor PUBLIC
-        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/public>
 )
 target_include_directories(netlink-monitor PRIVATE
-        types
+        public
         utils
         parser
         state

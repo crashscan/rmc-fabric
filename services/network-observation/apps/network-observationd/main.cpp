@@ -3,8 +3,8 @@
 //
 #include "ObservationService.h"
 #include "NetlinkLldpObservationRuntime.h"
-#include "TransportFactory.h"
 #include "ModelConfig.h"
+#include "TransportFactory.h"
 #include <GflagsConfig.h>
 #include <DaemonRunner.h>
 #include <gflags/gflags.h>

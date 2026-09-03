@@ -4,7 +4,7 @@
 #include <ContractVersion.hpp>
 #include <DecodeError.hpp>
 #include <IngressLimits.hpp>
-#include <../services/rmc-inventory/transports/dbus/InventoryDbusCodec.h>
+#include <InventoryDbusCodec.h>
 #include <NetworkObservationDbusCodec.h>
 #include <inventory.hpp>
 #include <network_observation/NetworkObservationContracts.hpp>

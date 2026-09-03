@@ -6,7 +6,7 @@
  * @brief Configuration for the network observation model.
  */
 #pragma once
-#include "ClassifierFactory.h"
+#include "ClassifierConfig.h"
 #include "IInterfacePolicy.h"
 #include <chrono>
 #include <memory>
@@ -29,7 +29,7 @@ struct ModelConfig {
     std::chrono::seconds candidateAgeout{60};
     std::chrono::seconds candidateExpire{300};
     std::unique_ptr<IInterfacePolicy> interfacePolicy;
-    ClassifierFactoryConfig classifierConfig;
+    ClassifierConfig classifierConfig;
 
     ModelConfig() = default;
     ModelConfig(ModelConfig&&) = default;

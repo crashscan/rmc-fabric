@@ -71,4 +71,37 @@ if find_sources "$root_dir/lib/interop_contract" | xargs grep -n -E '#include .*
     exit 1
 fi
 
+if find_sources \
+    "$root_dir/services/network-observation/apps" |
+   xargs grep -n -E \
+       '#include .*(core/(engine|classifier|policy)|inputs/netlink/(types|parser|state|utils))'
+then
+    echo \
+        "network-observation apps must not include model or input internals" \
+        >&2
+    exit 1
+fi
+
+if find_sources \
+    "$root_dir/services/network-observation/service" |
+   xargs grep -n -E \
+       '#include .*(core/(engine|classifier|policy)|inputs/netlink/(types|parser|state|utils))'
+then
+    echo \
+        "network-observation service must consume only public core/input headers" \
+        >&2
+    exit 1
+fi
+
+if grep -R -n -E \
+    'core/(engine|classifier|policy)|inputs/netlink/(types|parser|state|utils)' \
+    "$root_dir/services/network-observation/apps"/*/CMakeLists.txt \
+    "$root_dir/services/network-observation/service/CMakeLists.txt"
+then
+    echo \
+        "consumer targets must not add implementation include directories" \
+        >&2
+    exit 1
+fi
+
 exit 0

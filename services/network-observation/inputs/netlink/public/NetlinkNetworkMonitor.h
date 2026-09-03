@@ -26,7 +26,6 @@
  */
 #pragma once
 #include "NetlinkTypes.h"
-#include <functional>
 #include <memory>
 #include <set>
 #include <string>

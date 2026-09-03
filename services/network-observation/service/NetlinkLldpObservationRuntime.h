@@ -1,29 +1,30 @@
 #pragma once
 
-#include "CandidateTypes.h"
-#include "INetworkObservationModel.h"
-#include "IObservationRuntime.h"
-#include "ModelConfig.h"
-#include "LocalStateTypes.h"
+#pragma once
 
-#include <chrono>
+#include "IObservationRuntime.h"
+
 #include <memory>
-#include <optional>
-#include <string>
-#include <vector>
 
 namespace RSCGroup {
 
-class NetlinkNetworkMonitor;
+class INetworkObservationModel;
 class LldpObserver;
+class ModelConfig;
+class NetlinkNetworkMonitor;
 
+/**
+ * Production observation runtime backed by netlink and LLDP inputs.
+ *
+ * The runtime coordinates input producers and delegates model behavior through
+ * INetworkObservationModel. It does not expose engine, classifier, or policy
+ * implementations.
+ */
 class NetlinkLldpObservationRuntime final : public IObservationRuntime {
 public:
     explicit NetlinkLldpObservationRuntime(ModelConfig config);
     explicit NetlinkLldpObservationRuntime(std::unique_ptr<INetworkObservationModel> model);
-
     ~NetlinkLldpObservationRuntime() override;
-
     NetlinkLldpObservationRuntime(const NetlinkLldpObservationRuntime&) = delete;
     NetlinkLldpObservationRuntime& operator=(const NetlinkLldpObservationRuntime&) = delete;
 
@@ -39,6 +40,7 @@ public:
     [[nodiscard]] LocalNetworkSnapshot localSnapshot() const override;
     [[nodiscard]] std::vector<RemoteCandidate> remoteCandidates() const override;
     [[nodiscard]] std::optional<RemoteCandidate> findCandidateByMac(const std::string& mac) const override;
+
     void age(std::chrono::steady_clock::time_point now) override;
 
 private:

@@ -7,10 +7,10 @@
 
 namespace RSCGroup {
 
-std::unique_ptr<ICandidateClassifier> createClassifier(const ClassifierFactoryConfig& cfg) {
-    switch (cfg.kind) {
+std::unique_ptr<ICandidateClassifier> createClassifier(const ClassifierConfig& config) {
+    switch (config.kind) {
         case ClassifierKind::Scoring:
-            return std::make_unique<ScoringClassifier>(cfg.weights, cfg.thresholds);
+            return std::make_unique<ScoringClassifier>(config.weights, config.thresholds);
         case ClassifierKind::RuleBased:
         default:
             return std::make_unique<RuleBasedClassifier>();

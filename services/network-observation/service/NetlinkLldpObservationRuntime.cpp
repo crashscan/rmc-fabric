@@ -4,11 +4,12 @@
 #include "LldpdSource.h"
 #include "NetlinkNetworkMonitor.h"
 #include "NetlinkTypes.h"
-#include "ObservationModelEngine.h"
+#include "ICandidateClassifier.h"
+#include "INetworkObservationModel.h"
+#include "NetworkObservationModelFactory.h"
 
 #include <glog/logging.h>
 #include <linux/rtnetlink.h>
-
 #include <chrono>
 
 namespace RSCGroup {
@@ -47,7 +48,7 @@ static std::string makeCidr(const InterfaceIpEvent& e)
 }
 
 NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(ModelConfig config)
-    : model_(std::make_unique<ObservationModelEngine>(std::move(config)))
+    : model_(createNetworkObservationModel(std::move(config)))
 {
 }
 
