@@ -3,11 +3,13 @@
 //
 #pragma once
 
-#include <dbus-cxx.h>
-
 #include <cstdint>
 #include <map>
 #include <string>
+
+namespace DBus {
+    class Variant;
+}
 
 namespace RSCGroup {
 

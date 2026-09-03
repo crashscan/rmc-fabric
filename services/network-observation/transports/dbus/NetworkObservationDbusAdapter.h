@@ -14,7 +14,7 @@ template<typename...> class Signal;
 namespace RSCGroup {
 
 class IObservationQueryService;
-struct NetworkObservationHandler;
+class NetworkObservationQueryHandler;
 
 /**
  * @brief D-Bus adapter for the network-observation service.
@@ -33,7 +33,7 @@ struct NetworkObservationHandler;
 class NetworkObservationDbusAdapter : public DbusServiceAdapter {
 public:
     NetworkObservationDbusAdapter();
-    ~NetworkObservationDbusAdapter() override = default;
+    ~NetworkObservationDbusAdapter() override;
 
     NetworkObservationDbusAdapter(const NetworkObservationDbusAdapter&) = delete;
     NetworkObservationDbusAdapter& operator=(const NetworkObservationDbusAdapter&) = delete;
@@ -70,11 +70,11 @@ public:
     void publishReadyChanged(bool ready);
 
 private:
-    /// Synchronized binding: guards concurrent handler access vs shutdown.
-    /// @see ServiceBinding for the ownership/lifetime invariant.
+    // Must outlive handler_: the handler stores a reference to this binding.
+    // Members are destroyed in reverse declaration order.
     ServiceBinding<IObservationQueryService> binding_;
 
-    std::shared_ptr<NetworkObservationHandler> handler_;
+    std::shared_ptr<NetworkObservationQueryHandler> handler_;
 
     std::shared_ptr<DBus::Signal<void()>>           signalLocalStateChanged_;
     std::shared_ptr<DBus::Signal<void(std::string)>> signalInterfaceChanged_;

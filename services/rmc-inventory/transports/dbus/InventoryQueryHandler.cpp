@@ -9,6 +9,7 @@
 #include <IInventoryQueryService.h>
 #include <ServiceBinding.h>
 
+#include <dbus-cxx.h>
 #include <glog/logging.h>
 
 #include <exception>
@@ -38,10 +39,7 @@ template<typename Result, typename Function>
 }
 
 template<typename Function>
-void invokeCommand(
-    ServiceBinding<IInventoryQueryService>& binding,
-    const char* operation,
-    Function&& function)
+void invokeCommand(ServiceBinding<IInventoryQueryService>& binding,const char* operation,Function&& function)
 {
     auto guard = binding.acquire();
     if (!guard) {

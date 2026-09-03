@@ -17,6 +17,7 @@ target_link_libraries(network_observation_dbus_codec
 )
 
 add_library(network_observation_dbus_transport STATIC
+    dbus/NetworkObservationQueryHandler.cpp
     dbus/DbusTransport.cpp
     dbus/NetworkObservationDbusAdapter.cpp
 )
@@ -85,6 +86,35 @@ if(BUILD_TESTING)
     )
     add_test(NAME network_observation_dbus_codec_tests COMMAND network_observation_dbus_codec_tests)
     set_tests_properties(network_observation_dbus_codec_tests PROPERTIES TIMEOUT 10 LABELS "unit")
+
+
+    add_executable(network_observation_query_handler_tests
+        dbus/tests/NetworkObservationQueryHandlerTests.cpp
+    )
+
+    target_compile_features(
+        network_observation_query_handler_tests
+        PRIVATE cxx_std_20
+    )
+
+    target_link_libraries(
+        network_observation_query_handler_tests
+        PRIVATE
+            network_observation_dbus_transport
+            pthread
+    )
+
+    add_test(
+        NAME network_observation_query_handler_tests
+        COMMAND network_observation_query_handler_tests
+    )
+
+    set_tests_properties(
+        network_observation_query_handler_tests
+        PROPERTIES
+            TIMEOUT 10
+            LABELS "unit;resilience"
+    )
 endif()
 
 install(

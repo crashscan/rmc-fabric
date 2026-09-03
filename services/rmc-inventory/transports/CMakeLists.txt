@@ -69,6 +69,34 @@ if(BUILD_TESTING)
         COMMAND inventory_dbus_codec_characterization_tests
     )
     set_tests_properties(inventory_dbus_codec_characterization_tests PROPERTIES TIMEOUT 10 LABELS "unit")
+
+    add_executable(inventory_query_handler_tests
+        tests/InventoryQueryHandlerTests.cpp
+    )
+
+    target_compile_features(
+        inventory_query_handler_tests
+        PRIVATE cxx_std_20
+    )
+
+    target_link_libraries(inventory_query_handler_tests
+        PRIVATE
+            DBusCxx::DBusCxx
+            inventory_transport
+            pthread
+    )
+
+    add_test(
+        NAME inventory_query_handler_tests
+        COMMAND inventory_query_handler_tests
+    )
+
+    set_tests_properties(
+        inventory_query_handler_tests
+        PROPERTIES
+            TIMEOUT 10
+            LABELS "unit;resilience"
+    )
 endif()
 
 install(
