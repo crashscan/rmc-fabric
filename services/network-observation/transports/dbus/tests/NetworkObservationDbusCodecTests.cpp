@@ -364,6 +364,32 @@ void testEncodeLocalSnapshotRejectsMismatchedInterfaceName()
     expect(threw, "encodeLocalSnapshot should reject a key/ifname mismatch");
 }
 
+void testDecodeLocalSnapshotRejectsMismatchedInterfaceName()
+{
+    contract::LocalInterfaceState interface;
+    interface.ifindex = 7;
+    interface.ifname = "eth1";
+    interface.mac = "aa:bb:cc:dd:ee:ff";
+    interface.operstate = "UP";
+
+    codec::VariantMap encoded;
+    encoded.emplace(
+        "eth0",
+        DBus::Variant(codec::toVariantMap(interface)));
+
+    bool threw = false;
+    try {
+        (void)codec::fromVariantMapLocalSnapshot(encoded);
+    } catch (const interop_contract::DecodeError& error) {
+        threw = error.code() ==
+            interop_contract::DecodeErrorCode::invalid_value;
+    }
+
+    expect(
+        threw,
+        "fromVariantMapLocalSnapshot should reject a key/ifname mismatch");
+}
+
 } // namespace
 
 int main()
@@ -386,5 +412,6 @@ int main()
     testDecodeIssuesRejectsWrongFieldType();
     testEncodeIssuesRejectsMissingRequiredField();
     testEncodeLocalSnapshotRejectsMismatchedInterfaceName();
+    testDecodeLocalSnapshotRejectsMismatchedInterfaceName();
     return EXIT_SUCCESS;
 }
