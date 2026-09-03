@@ -4,24 +4,52 @@
 #pragma once
 
 #include <dbus-cxx.h>
-#include "IInventoryQueryService.h"
-#include "ServiceBinding.h"
+
+#include <cstdint>
+#include <map>
+#include <string>
 
 namespace RSCGroup {
 
-class InventoryQueryHandler {
+class IInventoryQueryService;
+
+template<typename T>
+class ServiceBinding;
+
+/**
+ * D-Bus query-method boundary for the inventory service.
+ *
+ * The handler does not own the service. Each method acquires a short-lived
+ * ServiceBinding lease covering the complete service call and result encoding.
+ * Query quiescence closes admission and waits for all such leases to drain.
+ *
+ * The binding is mandatory and must outlive this handler. InventoryDbusAdapter
+ * guarantees that lifetime by declaring binding_ before handler_, causing the
+ * handler to be destroyed first.
+ *
+ * Exceptions are contained at this boundary and never cross into dbus-cxx.
+ */
+class InventoryQueryHandler final {
 public:
-    /// Thread-safe service access: shared lock held during the call, exclusive
-    /// lock taken by onTransportStopping() to clear the binding.
-    ServiceBinding<IInventoryQueryService>* binding = nullptr;
-    std::map<std::string, DBus::Variant> GetIdentity();
-    std::map<std::string, DBus::Variant> GetField(std::string fieldName);
-    std::map<std::string, std::map<std::string, DBus::Variant>> GetSourceStates();
-    std::map<std::string, std::map<std::string, DBus::Variant>> GetIssues();
-    bool GetReady();
-    std::string GetPhase();
-    uint64_t GetVersion();
-    void Refresh();
+    explicit InventoryQueryHandler(ServiceBinding<IInventoryQueryService>& binding) noexcept;
+
+    InventoryQueryHandler(const InventoryQueryHandler&) = delete;
+    InventoryQueryHandler& operator=(const InventoryQueryHandler&) = delete;
+
+    [[nodiscard]] std::map<std::string, DBus::Variant> getIdentity();
+    [[nodiscard]] std::map<std::string, DBus::Variant> getField(std::string fieldName);
+
+    [[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant>> getSourceStates();
+    [[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant>> getIssues();
+
+    [[nodiscard]] bool getReady();
+    [[nodiscard]] std::string getPhase();
+    [[nodiscard]] std::uint64_t getVersion();
+
+    void refresh();
+
+private:
+    ServiceBinding<IInventoryQueryService>& binding_;
 };
 
 } // namespace RSCGroup

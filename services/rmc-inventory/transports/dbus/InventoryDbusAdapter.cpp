@@ -18,9 +18,7 @@
 namespace RSCGroup {
 
 InventoryDbusAdapter::InventoryDbusAdapter()
-    : handler_(std::make_shared<InventoryQueryHandler>())
-{
-    handler_->binding = &binding_;
+    : handler_(std::make_shared<InventoryQueryHandler>(binding_)) {
 }
 
 void InventoryDbusAdapter::quiesceQueries() noexcept
@@ -69,28 +67,28 @@ void InventoryDbusAdapter::bindMethods(const std::shared_ptr<DBus::Object>& obje
 
     object->create_method<std::map<std::string, DBus::Variant>()>(
         interfaceName, std::string(METHOD_GET_IDENTITY),
-        sigc::mem_fun(*handler_, &InventoryQueryHandler::GetIdentity));
+        sigc::mem_fun(*handler_, &InventoryQueryHandler::getIdentity));
     object->create_method<std::map<std::string, DBus::Variant>(std::string)>(
         interfaceName, std::string(METHOD_GET_FIELD),
-        sigc::mem_fun(*handler_, &InventoryQueryHandler::GetField));
+        sigc::mem_fun(*handler_, &InventoryQueryHandler::getField));
     object->create_method<std::map<std::string, std::map<std::string, DBus::Variant>>()>(
         interfaceName, std::string(METHOD_GET_SOURCE_STATES),
-        sigc::mem_fun(*handler_, &InventoryQueryHandler::GetSourceStates));
+        sigc::mem_fun(*handler_, &InventoryQueryHandler::getSourceStates));
     object->create_method<bool()>(
         interfaceName, std::string(METHOD_GET_READY),
-        sigc::mem_fun(*handler_, &InventoryQueryHandler::GetReady));
+        sigc::mem_fun(*handler_, &InventoryQueryHandler::getReady));
     object->create_method<std::string()>(
         interfaceName, std::string(METHOD_GET_PHASE),
-        sigc::mem_fun(*handler_, &InventoryQueryHandler::GetPhase));
+        sigc::mem_fun(*handler_, &InventoryQueryHandler::getPhase));
     object->create_method<uint64_t()>(
         interfaceName, std::string(METHOD_GET_VERSION),
-        sigc::mem_fun(*handler_, &InventoryQueryHandler::GetVersion));
+        sigc::mem_fun(*handler_, &InventoryQueryHandler::getVersion));
     object->create_method<void()>(
         interfaceName, std::string(METHOD_REFRESH),
-        sigc::mem_fun(*handler_, &InventoryQueryHandler::Refresh));
+        sigc::mem_fun(*handler_, &InventoryQueryHandler::refresh));
     object->create_method<std::map<std::string, std::map<std::string, DBus::Variant>>()>(
         interfaceName, std::string(METHOD_GET_ISSUES),
-        sigc::mem_fun(*handler_, &InventoryQueryHandler::GetIssues));
+        sigc::mem_fun(*handler_, &InventoryQueryHandler::getIssues));
 }
 
 void InventoryDbusAdapter::publishInventoryChanged(const std::string& fieldPath)

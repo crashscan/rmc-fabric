@@ -2,11 +2,9 @@
 
 #include <DbusServiceAdapter.h>
 #include <ServiceBinding.h>
-#include <InventoryQueryHandler.h>
 
 #include <memory>
 #include <string>
-#include <map>
 
 namespace DBus {
 class Object;
@@ -16,6 +14,7 @@ template<typename...> class Signal;
 namespace RSCGroup {
 
 class IInventoryQueryService;
+class InventoryQueryHandler;
 
 class InventoryDbusAdapter : public DbusServiceAdapter {
 public:
