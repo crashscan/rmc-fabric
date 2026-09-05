@@ -64,6 +64,12 @@ worker's natural poll/CV wake interval (up to inventory's reconcile interval or
 observation's aging interval). That containment is degradation tolerance, not
 free recovery.
 
+That bounded-delay tolerance is one of two approved wake-failure policies.
+A component whose worker has no other deterministic wake path may instead
+treat wake failure as fatal—the **abort-over-hang** policy used by the netlink
+monitor. Both are owner-level policies; `ManagedWorker` invokes the wake
+callback but does not select its underlying failure policy.
+
 ## Intentional two-level state
 
 Two lifecycle states exist on purpose and are **not** merged:

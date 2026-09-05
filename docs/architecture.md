@@ -148,6 +148,21 @@ through a `ManagedWorker` exit handler and then apply their own policy:
 - The exit handler must not call `start()`, `stop()`, or `join()` on its own worker.
 - `Wake` and `ExitHandler` must not throw and must not block; `std::function` cannot enforce
   `noexcept`, so violations are caught and logged.
+- Wake failure policy belongs to the owning component because the consequence
+  depends on whether the blocking operation has another bounded wake path:
+  - **Bounded-delay policy:** a component may log and tolerate a failed wake
+    when its worker has a finite timeout or another guaranteed wake source.
+    Inventory uses this policy because its reconciliation deadline bounds the
+    delay.
+  - **Abort-over-hang policy:** a component may fail fatally when its worker
+    can block indefinitely and wake failure would make the subsequent join
+    unbounded. The netlink monitor uses this policy because its event loop
+    polls indefinitely and the stop eventfd is its only deterministic wake
+    path.
+- These are approved component-level policies, not behavior selected by
+  `ManagedWorker`. The worker invokes the wake callback and contains callback
+  exceptions; the owner decides how the non-throwing callback handles an
+  underlying signaling failure.
 - `ExitReason::returned` versus `ExitReason::stop_requested` is **advisory only**: a worker return
   can race a stop request.  Services must not treat it as an authoritative synchronization fact.
 - Thread construction failure propagates from `ManagedWorker::start()` and leaves the object

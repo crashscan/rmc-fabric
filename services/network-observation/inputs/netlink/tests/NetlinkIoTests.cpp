@@ -340,15 +340,13 @@ void testInvalidDataDescriptorReportsFailure()
             -1,
             stopSignal);
 
-    /*
-     * poll ignores a negative descriptor, so it would otherwise wait forever
-     * on the stop descriptor. Use a signaled stop to make this deterministic.
-     *
-     * The production helper currently does not validate dataFd itself, so a
-     * negative descriptor is not a useful data_fd_failed test. POLLNVAL must
-     * instead be induced with a nonnegative closed descriptor.
-     */
-    (void)result;
+        expect(
+            result.status == NetlinkWaitStatus::data_fd_failed,
+            "negative descriptor should return data_fd_failed");
+
+        expect(
+            result.error == EBADF,
+            "negative descriptor should report EBADF");
 }
 
 void testClosedDataDescriptorReportsPollFailure()
@@ -527,6 +525,7 @@ int main()
     testWaitReturnsDataReady();
     testWaitReturnsStoppedAndDrainsSignal();
     testStopTakesPriorityOverData();
+    testInvalidDataDescriptorReportsFailure();
     testClosedDataDescriptorReportsPollFailure();
 
     testReceiveCompleteDatagram();

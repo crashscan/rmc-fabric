@@ -42,6 +42,14 @@ public:
 
     [[nodiscard]] bool start();
     void stop();
+
+    /**
+     * True when the lifecycle epoch is running and the live producer is
+     * healthy.
+     *
+     * Unexpected worker termination makes this false without ending the
+     * lifecycle epoch. An explicit stop() is required before restart.
+     */
     [[nodiscard]] bool isRunning() const;
     [[nodiscard]] std::vector<DeviceEvent> getDevicesSnapshot() const;
     [[nodiscard]] std::vector<LinkEvent> getLinksSnapshot() const;

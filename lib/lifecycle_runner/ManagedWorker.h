@@ -51,10 +51,23 @@ namespace RSCGroup {
  * --------------------------
  * Wake and exit-handler callbacks are *signaling* mechanisms, so their
  * exceptions are contained; containment is degradation tolerance, not free
- * recovery.  A swallowed or failed wake may delay stop until the worker's
- * natural poll/CV wake interval (up to the inventory reconcile interval or
- * the observation aging interval).  By contrast, query quiescence in
- * `ServiceBase`/`IServiceTransport` is a structural safety barrier and is
+ * recovery.
+ *
+ * The owner selects the policy for an underlying wake failure:
+ *
+ *  - A worker with a bounded timeout or another guaranteed wake source may
+ *    log the failure and tolerate delayed shutdown, potentially until its
+ *    natural poll/CV wake interval (for example, inventory's reconciliation
+ *    interval or observation's aging interval).
+ *  - A worker that may block indefinitely with no other deterministic wake
+ *    path may treat wake failure as fatal to avoid an unbounded join. The
+ *    netlink monitor uses this abort-over-hang policy.
+ *
+ * The wake callback remains non-blocking and non-throwing under either
+ * policy. ManagedWorker invokes the callback but deliberately does not
+ * prescribe the owner's underlying signaling-failure policy.
+ *
+ * By contrast, query quiescence insport` is a structural safety barrier and is
  * `noexcept` and local-only.
  *
  * Member destruction-order requirement

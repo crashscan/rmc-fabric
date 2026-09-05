@@ -49,6 +49,14 @@ or failed wake is latency: stop may be delayed until the worker's natural poll/c
 wake interval, potentially up to inventory's reconcile interval or observation's aging interval.
 That containment is degradation tolerance, not free recovery.
 
+This bounded-delay policy applies only to workers with another guaranteed
+wake path or a finite timeout. Inventory uses it because its reconciliation
+deadline bounds the delay. Components whose workers may block indefinitely
+with the stop signal as their only deterministic wake path use an approved
+**abort-over-hang** policy instead: a failed wake is fatal because a
+deterministic abort is preferable to an unbounded join. The netlink monitor
+uses abort-over-hang.
+
 ### Concurrent `stop()` now waits for completion
 
 **Behaviour change.**  Before the lifecycle-runner migration, a second concurrent `stop()` could
