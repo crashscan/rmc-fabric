@@ -1,7 +1,7 @@
 #pragma once
 
 #include <IFileWatcher.h>
-#include <ScopedFd.h>
+#include <UniqueFd.h>
 
 #include <cstdint>
 #include <sys/inotify.h>
@@ -40,7 +40,7 @@ private:
         IN_MOVED_TO | IN_MOVED_FROM |
         IN_MOVE_SELF | IN_DELETE_SELF;
 
-    ScopedFd inotifyFd_;
+    UniqueFd inotifyFd_;
     std::map<int, std::string> watchDescToDir_;
     std::map<std::string, int> dirToWatchDesc_;
     std::set<std::string> watchedPaths_;

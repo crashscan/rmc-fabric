@@ -2,8 +2,7 @@
 
 #include <chrono>
 
-namespace RSCGroup {
-namespace daemon_support {
+namespace RSCGroup::daemon_support {
 
 /**
  * @brief Install SIGINT and SIGTERM handlers that mark a shutdown request.
@@ -24,8 +23,7 @@ void installSignalHandlers();
  *
  * @param pollInterval  How often to check the stop flag (default: 500 ms).
  */
-void waitForShutdown(
-    std::chrono::milliseconds pollInterval = std::chrono::milliseconds(500));
+void waitForShutdown(std::chrono::milliseconds pollInterval = std::chrono::milliseconds(500));
 
-} // namespace daemon_support
-} // namespace RSCGroup
+} // namespace RSCGroup::daemon_support
+

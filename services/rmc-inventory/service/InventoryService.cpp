@@ -15,7 +15,6 @@
 #include <poll.h>
 #include <system_error>
 #include <stdexcept>
-#include <sys/eventfd.h>
 #include <utility>
 #include <vector>
 
@@ -34,26 +33,6 @@ namespace {
         return 0;
     }
     return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(ts - now).count());
-}
-
-void signalFd(int fd)
-{
-    if (fd < 0) {
-        return;
-    }
-    const std::uint64_t one = 1;
-    const ssize_t rc = ::write(fd, &one, sizeof(one));
-    (void)rc;
-}
-
-void drainFd(int fd)
-{
-    if (fd < 0) {
-        return;
-    }
-    std::uint64_t value;
-    const ssize_t rc = ::read(fd, &value, sizeof(value));
-    (void)rc;
 }
 
 [[nodiscard]] std::vector<std::shared_ptr<IInventoryTransport>> inventoryTransports(const ServiceBase& service)
@@ -89,7 +68,7 @@ InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
     , settings_(settings)
     , refreshWorker_("inventory-refresh",
                      [this](std::stop_token stopToken) { runLoop(std::move(stopToken)); },
-                     [this] { signalFd(refreshEventFd_.get()); },
+                     [this] { (void)refreshSignal_.signal(); },
                      [this](const ManagedWorker::Exit& exit) { onRefreshWorkerExit(exit); })
 {
     if (!manager_) {
@@ -149,10 +128,8 @@ void InventoryService::validateConfiguration()
 
 bool InventoryService::initializeComponents()
 {
-    if (!refreshEventFd_) {
-        const int fd = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
-        refreshEventFd_.reset(fd);
-        if (!refreshEventFd_) {
+    if (!refreshSignal_.valid()) {
+        if (!refreshSignal_.open()) {
             diagnostics::logError(name(), "worker.refresh", "create_eventfd", "worker_start_failed", "refresh-eventfd", "failed to create refresh eventfd");
             return false;
         }
@@ -183,7 +160,7 @@ bool InventoryService::start()
     }
 
     if (!ServiceBase::start()) {
-        refreshEventFd_.reset();
+        refreshSignal_.reset();
         transition.fail();
         return false;
     }
@@ -197,14 +174,14 @@ bool InventoryService::start()
         (void)refreshWorker_.start();
     } catch (const std::exception& e) {
         loopFailed_.store(false, std::memory_order_release);
-        refreshEventFd_.reset();
+        refreshSignal_.reset();
         ServiceBase::stop();
         diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", e.what());
         transition.fail();
         return false;
     } catch (...) {
         loopFailed_.store(false, std::memory_order_release);
-        refreshEventFd_.reset();
+        refreshSignal_.reset();
         ServiceBase::stop();
         diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", "unknown exception");
         transition.fail();
@@ -248,7 +225,7 @@ void InventoryService::stop()
     }
 
     // Step 4: Close the eventfd only after the worker has been fully joined.
-    refreshEventFd_.reset();
+    refreshSignal_.reset();
 
     // Step 5: Emit ReadyChanged(false) (terminal readiness transition) and
     // stop/unregister transports in reverse registration order.
@@ -321,7 +298,7 @@ void InventoryService::refresh()
         std::scoped_lock lock(refreshMutex_);
         refreshRequested_ = true;
     }
-    signalFd(refreshEventFd_.get());
+    (void)refreshSignal_.signal();
 }
 
 void InventoryService::runLoop(std::stop_token stopToken)
@@ -342,7 +319,7 @@ void InventoryService::runLoop(std::stop_token stopToken)
 
         std::vector<pollfd> fds;
         fds.reserve(2);
-        fds.push_back({refreshEventFd_.get(), POLLIN, 0});
+        fds.push_back({refreshSignal_.fd(), POLLIN, 0});
         fds.push_back({fileWatcher_->getPollFd(), POLLIN, 0});
 
         const int pr = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), msUntil(wakeTs));
@@ -357,7 +334,7 @@ void InventoryService::runLoop(std::stop_token stopToken)
 
         if (pr > 0) {
             if ((fds[0].revents & POLLIN) != 0) {
-                drainFd(refreshEventFd_.get());
+                (void)refreshSignal_.drain();
             }
 
             if ((fds[1].revents & POLLIN) != 0) {

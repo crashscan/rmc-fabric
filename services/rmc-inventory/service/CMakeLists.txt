@@ -17,7 +17,7 @@ target_link_libraries(inventory_service
     PUBLIC
         inventory_core
         inventory_service_ports
-        linux_support
+        rsc_util
         service_framework
     PRIVATE
         file_watcher

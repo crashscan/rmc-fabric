@@ -1,4 +1,3 @@
-
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
@@ -33,15 +32,6 @@ if command -v git >/dev/null 2>&1; then
     GIT_ROOT="$(
         git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null || true
     )"
-fi
-
-# Enable .gitignore filtering if the directory is inside a Git repository
-# containing at least one .gitignore file.
-USE_GITIGNORE=false
-
-if [[ -n "$GIT_ROOT" ]] && \
-   find "$GIT_ROOT" -type f -name ".gitignore" -print -quit 2>/dev/null | grep -q .; then
-    USE_GITIGNORE=true
 fi
 
 # Convert Unix/MSYS paths to Windows-style paths when possible.
@@ -175,41 +165,37 @@ append_file() {
 # Start with an empty output file.
 : > "$OUTPUT"
 
-if [[ "$USE_GITIGNORE" == true ]]; then
+if [[ -n "$GIT_ROOT" ]]; then
     # Git-aware scan.
     #
-    # The nested bash process receives the Git root and directory as
-    # positional arguments. It does not depend on shell functions being
-    # exported, avoiding:
+    # Ask Git itself for every file that is NOT ignored:
+    #   --cached            tracked files
+    #   --others            untracked files
+    #   --exclude-standard  honour .gitignore at every level,
+    #                       .git/info/exclude, and core.excludesFile
     #
-    #   is_ignored_directory: command not found
+    # Delegating the ignore rules to Git fixes the previous behaviour,
+    # where only ignored *directories* were pruned and ignored *files*
+    # (e.g. upload.txt, patch*.txt, plan*.txt) were still collected.
     #
-    find "$ROOT" \
-        -type d -name ".git" -prune -o \
-        -type d -exec bash -c '
-            git_root="$1"
-            directory="$2"
+    # When ROOT is a subdirectory of the repository, --show-prefix gives
+    # the pathspec that limits the listing to that subtree.
+    PREFIX="$(git -C "$ROOT" rev-parse --show-prefix)"
 
-            # Do not prune the repository/source root itself.
-            if [[ "$directory" == "$git_root" ]]; then
-                exit 1
-            fi
+    git -C "$GIT_ROOT" ls-files -z \
+        --cached --others --exclude-standard --full-name \
+        -- "${PREFIX:-.}" |
+    while IFS= read -r -d '' relpath; do
+        file="$GIT_ROOT/$relpath"
 
-            relative_path="${directory#"$git_root"/}"
+        # Skip non-regular files (e.g. submodule gitlinks, files deleted
+        # from the working tree but still tracked) and the output file.
+        [[ -f "$file" && "$file" != "$OUTPUT" ]] || continue
 
-            # Exit successfully when Git says this directory is ignored.
-            git -C "$git_root" check-ignore \
-                --quiet \
-                --no-index \
-                -- \
-                "${relative_path%/}/"
-        ' _ "$GIT_ROOT" {} \; -prune -o \
-        -type f ! -path "$OUTPUT" -print0 |
-    while IFS= read -r -d '' file; do
         append_file "$file"
     done
 else
-    # Basic scan when no .gitignore file is available.
+    # Basic scan when the directory is not inside a Git repository.
     find "$ROOT" \
         -type d -name ".git" -prune -o \
         -type f ! -path "$OUTPUT" -print0 |

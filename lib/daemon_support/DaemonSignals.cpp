@@ -4,8 +4,7 @@
 #include <csignal>
 #include <thread>
 
-namespace RSCGroup {
-namespace daemon_support {
+namespace RSCGroup::daemon_support {
 
 namespace {
 
@@ -35,5 +34,5 @@ void waitForShutdown(std::chrono::milliseconds pollInterval)
     }
 }
 
-} // namespace daemon_support
-} // namespace RSCGroup
+} // namespace RSCGroup::daemon_support
+

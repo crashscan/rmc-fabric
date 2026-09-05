@@ -3,7 +3,7 @@
 #include <LifecycleCoordinator.h>
 #include <ManagedWorker.h>
 #include <ServiceBase.h>
-#include <ScopedFd.h>
+#include <EventFdSignal.h>
 
 #include <IFileWatcher.h>
 #include <IInventoryManager.h>
@@ -90,7 +90,7 @@ private:
     std::chrono::steady_clock::time_point lastRefreshSteadyTs_{};
     std::chrono::steady_clock::time_point nextReconcileTs_{};
 
-    ScopedFd refreshEventFd_;
+    EventFdSignal refreshSignal_;
 
     /// Serializes complete service-epoch transitions only.
     LifecycleCoordinator lifecycle_;
@@ -101,7 +101,7 @@ private:
     // refreshWorker_ MUST be the last member: its work/wake/exit callbacks
     // capture `this` and access manager_, fileWatcher_, settings_,
     // loopFailed_, refreshMutex_, refreshRequested_, the reconcile
-    // timestamps, and refreshEventFd_.  Declaring it last means reverse
+    // timestamps, and refreshSignal_.  Declaring it last means reverse
     // member destruction destroys (and therefore stops and joins) the worker
     // before any state it touches goes away.
     ManagedWorker refreshWorker_;

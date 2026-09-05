@@ -8,7 +8,8 @@ target_include_directories(file_watcher
 )
 
 target_link_libraries(file_watcher
+    PUBLIC
+        rsc_util
     PRIVATE
-        linux_support
         glog
 )
