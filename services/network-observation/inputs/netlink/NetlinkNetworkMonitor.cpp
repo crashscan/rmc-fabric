@@ -8,26 +8,21 @@
 #include "public/NetlinkNetworkMonitor.h"
 #include "ErrnoString.h"
 #include "NetlinkInitialDump.h"
+#include "NetlinkEventLoop.h"
 #include "NetlinkParser.h"
 #include "NetlinkState.h"
 #include <EventFdSignal.h>
-#include <UniqueFd.h>
 #include <glog/logging.h>
-#include <linux/netlink.h>
-#include <sys/socket.h>
-#include <unistd.h>
 #include <cerrno>
 #include <condition_variable>
-#include <poll.h>
-#include <optional>
-#include <functional>
 #include <exception>
+#include <functional>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <thread>
-#include <vector>
-#include <linux/rtnetlink.h>
+#include <utility>
 
 namespace RSCGroup {
 
@@ -57,7 +52,26 @@ public:
         lifecycleState_ = State::Starting;
         startupThreadId_ = std::this_thread::get_id();
 
-        if (!openLiveSocket()) {
+        try {
+            stopSignal_.emplace();
+
+            // The live socket must be bound before the initial dump begins.
+            // Events arriving during the dump remain queued on this socket
+            // and are processed after the worker starts.
+            liveLoop_.emplace(
+                *stopSignal_,
+                [this](const nlmsghdr* message) {
+                    processSingleMessage(message);
+                });
+        } catch (const std::exception& error) {
+            LOG(ERROR) << "failed to initialize netlink monitoring: " << error.what();
+            closeResources();
+            startupThreadId_ = {};
+            lifecycleState_ = State::Stopped;
+            lifecycleCv_.notify_all();
+            return false;
+        } catch (...) {
+            LOG(ERROR) << "failed to initialize netlink monitoring: " << "unknown exception";
             closeResources();
             startupThreadId_ = {};
             lifecycleState_ = State::Stopped;
@@ -98,12 +112,23 @@ public:
 
         startupThreadId_ = {};
         try {
-            worker_ = std::jthread([this](const std::stop_token& st) {
+            worker_ = std::jthread([this](std::stop_token stopToken) {
                 {
                     std::scoped_lock localLock(lifecycleMutex_);
                     workerThreadId_ = std::this_thread::get_id();
                 }
-                runLoop(st);
+                if (!liveLoop_) {
+                    LOG(ERROR) << "netlink event loop is unavailable";
+                    return;
+                }
+
+                const auto result = liveLoop_->run(stopToken);
+                if (!result.stopped()) {
+                    LOG(ERROR)
+                        << "netlink event loop terminated: status="
+                        << NetlinkEventLoop::statusName(result.status)
+                        << ", error=" << result.error;
+                }
             });
         } catch (const std::exception& error) {
             LOG(ERROR) << "failed to start netlink monitor worker: " << error.what();
@@ -213,9 +238,17 @@ private:
     MonitorCallbacks callbacks_;
     std::set<std::string> watchedInterfaces_;
     State lifecycleState_ = State::Stopped;
-    UniqueFd netlinkFd_;
+
+
+    // Declared before liveLoop_: the loop borrows the stop signal and must
+    // therefore be destroyed first.
     std::optional<EventFdSignal> stopSignal_;
+    std::optional<NetlinkEventLoop> liveLoop_;
+
+    // Declared after liveLoop_: reverse destruction stops/joins the worker
+    // before destroying the loop and its socket.
     std::jthread worker_;
+
     std::thread::id startupThreadId_;
     std::thread::id workerThreadId_;
     NetlinkState netlinkState_;
@@ -239,45 +272,11 @@ private:
         LOG(INFO) << "NetlinkNetworkMonitor stopped";
     }
 
-    bool openLiveSocket()
-    {
-        netlinkFd_.reset(socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE));
-        if (!netlinkFd_.valid()) {
-            PLOG(ERROR) << "socket(AF_NETLINK) for live events failed";
-            return false;
-        }
-
-        int rcvbuf = 256 * 1024;
-        if (setsockopt(netlinkFd_.get(), SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf)) < 0) {
-            PLOG(WARNING) << "setsockopt(SO_RCVBUF) failed";
-        }
-
-        sockaddr_nl addr{};
-        addr.nl_family = AF_NETLINK;
-        addr.nl_groups = RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV6_IFADDR | RTMGRP_NEIGH;
-
-        if (bind(netlinkFd_.get(), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-            PLOG(ERROR) << "bind(netlink) for live events failed";
-            return false;
-        }
-
-        try {
-            stopSignal_.emplace();
-        } catch (const std::exception& error) {
-            LOG(ERROR) << "failed to create netlink stop eventfd: " << error.what();
-            return false;
-        } catch (...) {
-            LOG(ERROR) << "failed to create netlink stop eventfd: unknown exception";
-            return false;
-        }
-
-        return true;
-    }
-
     void closeResources()
     {
+        // liveLoop_ borrows stopSignal_.
+        liveLoop_.reset();
         stopSignal_.reset();
-        netlinkFd_.reset();
     }
 
     void signalStop()
@@ -303,76 +302,6 @@ private:
             LOG(FATAL) << "failed to signal netlink stop eventfd: " << errnoToString(error);
             return;
         }
-    }
-
-    void drainStopSignal()
-    {
-        if (!stopSignal_) {
-            LOG(ERROR) << "netlink stop eventfd is unavailable while draining";
-            return;
-        }
-
-        if (const int error = stopSignal_->drain(); error != 0) {
-            LOG(ERROR) << "failed to drain netlink stop eventfd: " << errnoToString(error);
-        }
-    }
-
-    void runLoop(const std::stop_token& stopToken)
-    {
-        std::vector<char> buffer(16384);
-        pollfd fds[2]{};
-        fds[0].fd = netlinkFd_.get();
-        fds[0].events = POLLIN;
-        fds[1].fd = stopSignal_->fd();
-        fds[1].events = POLLIN;
-
-        while (!stopToken.stop_requested()) {
-            fds[0].revents = 0;
-            fds[1].revents = 0;
-
-            if (poll(fds, 2, -1) < 0) {
-                if (errno == EINTR) continue;
-                PLOG(ERROR) << "poll failed";
-                break;
-            }
-
-            if ((fds[1].revents & POLLIN) != 0) {
-                drainStopSignal();
-                break;
-            }
-
-            if ((fds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-                LOG(ERROR) << "netlink poll error revents=" << fds[0].revents;
-                break;
-            }
-
-            if ((fds[0].revents & POLLIN) != 0) {
-                if (!recvAndProcess(buffer)) break;
-            }
-        }
-    }
-
-    bool recvAndProcess(std::vector<char>& buffer)
-    {
-        const ssize_t len = recv(netlinkFd_.get(), buffer.data(), buffer.size(), 0);
-        if (len < 0) {
-            if (errno == EINTR) return true;
-            PLOG(ERROR) << "recv failed";
-            return false;
-        }
-        if (len == 0) {
-            LOG(ERROR) << "recv returned 0 on netlink socket";
-            return false;
-        }
-
-        int remaining = static_cast<int>(len);
-        for (auto* nh = reinterpret_cast<nlmsghdr*>(buffer.data());
-             NLMSG_OK(nh, remaining);
-             nh = NLMSG_NEXT(nh, remaining)) {
-            if (nh->nlmsg_type == NLMSG_DONE) break;
-            processSingleMessage(nh);
-        }
-        return true;
     }
 
     void onLinkCallback(const LinkEvent& e)

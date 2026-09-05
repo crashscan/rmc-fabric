@@ -14,6 +14,24 @@ target_link_libraries(netlink-initial-dump
         rsc_util
 )
 
+add_library(netlink-event-loop STATIC
+    live/NetlinkEventLoop.cpp
+)
+
+target_compile_features(netlink-event-loop PUBLIC cxx_std_20)
+
+target_include_directories(netlink-event-loop
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/live>
+)
+
+target_link_libraries(netlink-event-loop
+    PUBLIC
+        rsc_util
+    PRIVATE
+        glog
+)
+
 add_library(netlink-monitor STATIC
         NetlinkNetworkMonitor.cpp
         parser/NetlinkParser.cpp
@@ -29,7 +47,6 @@ target_include_directories(netlink-monitor PRIVATE
         utils
         parser
         state
-        dump
 )
 if(RSC_UTIL_INCLUDE_DIR)
     target_include_directories(netlink-monitor PRIVATE
@@ -43,5 +60,6 @@ target_link_libraries(netlink-monitor
         pthread
         glog
         rsc_util
+        netlink-event-loop
         netlink-initial-dump
 )
