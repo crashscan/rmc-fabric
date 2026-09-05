@@ -334,7 +334,9 @@ NetlinkInitialDump::Result NetlinkInitialDump::readDumpResponses(
 
                 return { Status::kernel_error, positiveKernelError(netlinkError->error),};
             }
-
+            if (header->nlmsg_type == NLMSG_OVERRUN) {
+                return { Status::receive_failed, ENOBUFS,};
+            }
             messageHandler_(header);
         }
 

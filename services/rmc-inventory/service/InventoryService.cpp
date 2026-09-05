@@ -184,15 +184,17 @@ bool InventoryService::start()
         (void)refreshWorker_.start();
     } catch (const std::exception& e) {
         loopFailed_.store(false, std::memory_order_release);
-        refreshSignal_.reset();
+        quiesceQueriesOnTransports();
         ServiceBase::stop();
+        refreshSignal_.reset();
         diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", e.what());
         transition.fail();
         return false;
     } catch (...) {
         loopFailed_.store(false, std::memory_order_release);
-        refreshSignal_.reset();
+        quiesceQueriesOnTransports();
         ServiceBase::stop();
+        refreshSignal_.reset();
         diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", "unknown exception");
         transition.fail();
         return false;
