@@ -2,63 +2,74 @@
 
 #include <condition_variable>
 #include <mutex>
+#include <stop_token>
+#include <thread>
+#include <utility>
 
 namespace RSCGroup {
 
 /**
  * @brief Serializes complete service-epoch lifecycle transitions.
  *
- * `LifecycleCoordinator` owns **transition serialization only**: the
- * `stopped → starting → running → stopping → stopped` epoch machine,
- * coordination of concurrent lifecycle calls, and RAII completion of an
- * in-flight transition.  It knows nothing about transports, readiness,
+ * LifecycleCoordinator owns transition serialization only:
+ *
+ *     stopped -> starting -> running -> stopping -> stopped
+ *
+ * It coordinates concurrent lifecycle calls and provides RAII completion of
+ * in-flight transitions. It knows nothing about transports, readiness,
  * workers, or worker health.
  *
  * Responsibility split
  * --------------------
- *  - `ManagedWorker`  — worker-thread mechanics.
- *  - `LifecycleCoordinator` — service-epoch transition serialization.
- *  - `ServiceBase`    — transport registration/startup/rollback/reverse-order
- *                       close, query quiescence, ready state, terminal
- *                       `ReadyChanged(false)` fan-out.
- *  - Services         — domain work loops, dependencies, error/issue policy,
- *                       readiness meaning, and restart/crash policy.
- *
- * The coordinator never decides worker health.  For example, inventory's
- * "restart after crash requires stop() first" rule (Policy A) is evaluated by
- * the service after `beginStart()` reports that the epoch is already running.
+ *  - ManagedWorker          — worker-thread mechanics.
+ *  - LifecycleCoordinator   — lifecycle transition serialization.
+ *  - ServiceBase            — transport and readiness management.
+ *  - Services/components    — domain work, resources, health and restart
+ *                              policy.
  *
  * Locking rule
  * ------------
- * The coordinator mutex is **never** held while service, runtime, worker,
- * transport, or domain code runs.  `beginStart()`/`beginStop()` return once
- * the transition is claimed; the caller then performs the real work outside
- * any coordinator lock and finalizes through the returned guard.
+ * The coordinator mutex is never held while service, worker, transport,
+ * cancellation callback, or domain code runs.
+ *
+ * Cancellable startup
+ * -------------------
+ * beginCancellableStart() is an opt-in alternative to beginStart(). It gives
+ * the startup operation a stop token. A concurrent beginStop() requests that
+ * token before waiting for startup rollback to complete.
+ *
+ * A cancelled start must:
+ *
+ *  1. stop or roll back all resources created during startup;
+ *  2. call CancellableStart::fail();
+ *
+ * tryComplete() atomically arbitrates between successful startup and a stop
+ * request. If cancellation was claimed first, tryComplete() returns false
+ * and leaves the lifecycle in starting until rollback calls fail().
+ *
+ * Callback-originated stop
+ * ------------------------
+ * The default beginStop() waits for an active transition. Code executing
+ * synchronously inside startup must instead call:
+ *
+ *     beginStop(WaitPolicy::no_wait)
+ *
+ * Waiting from that thread would deadlock because the same thread must finish
+ * startup rollback and resolve the starting transition.
+ *
+ * isStartOwnerThread() may be used to select the wait policy when an owner
+ * requires a synchronous stop() API. It identifies the thread that originally
+ * claimed beginCancellableStart(). Cancellable startup execution should remain
+ * on that thread if this helper is used.
  *
  * Asymmetric abandoned transitions
  * --------------------------------
  * If a transition guard is destroyed without an explicit outcome:
- *  - an abandoned **start** resolves to `stopped`;
- *  - an abandoned **stop** resolves to `stopped`.
  *
- * An abandoned stop is never rolled back to `running`, and the state is never
- * left stuck in `stopping`.  This is deliberate: teardown is structurally
- * non-throwing (`noexcept` query quiescence, guarded self-stop, serialized
- * worker join, exception-isolated final cleanup), so a partially completed
- * teardown must not wedge the lifecycle.
+ *  - an abandoned start resolves to stopped;
+ *  - an abandoned stop resolves to stopped.
  *
- * Concurrent stop semantics
- * -------------------------
- * A concurrent second `stop()` waits for the active teardown and only returns
- * once `stopped` is visible.  Callback-originated synchronous owner stops
- * (worker, LLDP, netlink, runtime, or exit-handler callbacks calling their own
- * owner's `stop()`) must therefore be rejected or converted into an external
- * shutdown request, or they will wait on themselves.
- *
- * Intentional two-level state
- * ---------------------------
- * `LifecycleCoordinator::State` and `ServiceBase`'s running/readiness state
- * coexist intentionally; see `lib/service_framework/README.md`.
+ * Teardown is never rolled back to running.
  */
 class LifecycleCoordinator {
 public:
@@ -69,7 +80,25 @@ public:
         stopping,
     };
 
+    /**
+     * Controls whether beginStop() waits for an active start/stop transition.
+     *
+     * wait:
+     *   Preserves the original beginStop() semantics. A concurrent caller
+     *   returns only after the active transition has resolved.
+     *
+     * no_wait:
+     *   Requests cancellable-start cancellation if applicable, but returns
+     *   immediately without waiting for startup rollback or an already-active
+     *   stop transition.
+     */
+    enum class WaitPolicy {
+        wait,
+        no_wait,
+    };
+
     class Transition;
+    class CancellableStart;
 
     LifecycleCoordinator() = default;
     ~LifecycleCoordinator() = default;
@@ -78,23 +107,31 @@ public:
     LifecycleCoordinator& operator=(const LifecycleCoordinator&) = delete;
 
     /**
-     * @brief Move-only RAII guard for an in-flight transition.
+     * @brief Move-only RAII guard for an ordinary start or stop transition.
      *
-     * `owned()` is false when no transition was claimed (for example
-     * `beginStart()` on an already-running service).  Only an owning guard
-     * resolves the state on `complete()`/`fail()`/destruction.
+     * owned() is false when no transition was claimed. Only an owning guard
+     * changes coordinator state on complete(), fail(), or destruction.
      */
     class Transition {
     public:
         Transition() noexcept = default;
-        Transition(LifecycleCoordinator* owner, State target) noexcept
-            : owner_(owner), target_(target)
-        {}
 
-        ~Transition() { abandon(); }
+        Transition(
+            LifecycleCoordinator* owner,
+            State target) noexcept
+            : owner_(owner)
+            , target_(target)
+        {
+        }
+
+        ~Transition()
+        {
+            abandon();
+        }
 
         Transition(Transition&& other) noexcept
-            : owner_(other.owner_), target_(other.target_)
+            : owner_(other.owner_)
+            , target_(other.target_)
         {
             other.owner_ = nullptr;
         }
@@ -103,35 +140,55 @@ public:
         {
             if (this != &other) {
                 abandon();
+
                 owner_ = other.owner_;
                 target_ = other.target_;
                 other.owner_ = nullptr;
             }
+
             return *this;
         }
 
         Transition(const Transition&) = delete;
         Transition& operator=(const Transition&) = delete;
 
-        /// True when this guard owns an in-flight transition.
-        [[nodiscard]] bool owned() const noexcept { return owner_ != nullptr; }
-        explicit operator bool() const noexcept { return owned(); }
+        [[nodiscard]] bool owned() const noexcept
+        {
+            return owner_ != nullptr;
+        }
+
+        explicit operator bool() const noexcept
+        {
+            return owned();
+        }
 
         /**
-         * @brief Resolve successfully: `starting → running`, `stopping → stopped`.
-         */
-        void complete() noexcept { resolve(true); }
-
-        /**
-         * @brief Resolve unsuccessfully.
+         * Resolve successfully:
          *
-         * A failed start resolves to `stopped`.  A failed stop also resolves
-         * to `stopped` — teardown is never rolled back to `running`.
+         *  - starting -> running
+         *  - stopping -> stopped
          */
-        void fail() noexcept { resolve(false); }
+        void complete() noexcept
+        {
+            resolve(true);
+        }
+
+        /**
+         * Resolve unsuccessfully.
+         *
+         * Both failed startup and failed teardown resolve to stopped.
+         */
+        void fail() noexcept
+        {
+            resolve(false);
+        }
 
     private:
-        void abandon() noexcept { resolve(false); }
+        void abandon() noexcept
+        {
+            resolve(false);
+        }
+
         void resolve(bool success) noexcept;
 
         LifecycleCoordinator* owner_{nullptr};
@@ -139,26 +196,150 @@ public:
     };
 
     /**
-     * @brief Claim a start transition.
+     * @brief Move-only guard for an opt-in cancellable startup transition.
      *
-     * - `stopped` → claims `starting` and returns an owning transition.
-     * - `running` → returns an unowned transition; the caller applies its own
-     *   health/restart policy.
-     * - `starting`/`stopping` → waits for resolution and re-evaluates.
+     * A concurrent beginStop() requests the stop token. Successful startup
+     * must be published through tryComplete(), not complete().
+     */
+    class CancellableStart {
+    public:
+        CancellableStart() noexcept = default;
+
+        CancellableStart(
+            LifecycleCoordinator* owner,
+            std::stop_token stopToken) noexcept
+            : owner_(owner)
+            , stopToken_(std::move(stopToken))
+        {
+        }
+
+        ~CancellableStart()
+        {
+            fail();
+        }
+
+        CancellableStart(CancellableStart&& other) noexcept
+            : owner_(other.owner_)
+            , stopToken_(std::move(other.stopToken_))
+        {
+            other.owner_ = nullptr;
+        }
+
+        CancellableStart& operator=(
+            CancellableStart&& other) noexcept
+        {
+            if (this != &other) {
+                fail();
+
+                owner_ = other.owner_;
+                stopToken_ = std::move(other.stopToken_);
+                other.owner_ = nullptr;
+            }
+
+            return *this;
+        }
+
+        CancellableStart(const CancellableStart&) = delete;
+        CancellableStart& operator=(
+            const CancellableStart&) = delete;
+
+        [[nodiscard]] bool owned() const noexcept
+        {
+            return owner_ != nullptr;
+        }
+
+        explicit operator bool() const noexcept
+        {
+            return owned();
+        }
+
+        [[nodiscard]] std::stop_token stopToken() const noexcept
+        {
+            return stopToken_;
+        }
+
+        [[nodiscard]] bool stopRequested() const noexcept
+        {
+            return stopToken_.stop_requested();
+        }
+
+        /**
+         * Atomically attempts to publish starting -> running.
+         *
+         * @return true if startup won the race and running was published.
+         *         false if cancellation had already been requested or this
+         *         guard does not own an active cancellable start.
+         *
+         * On false, an owning guard retains ownership. The caller must finish
+         * startup rollback and then call fail().
+         */
+        [[nodiscard]] bool tryComplete() noexcept;
+
+        /**
+         * Resolve starting -> stopped after startup rollback is complete.
+         */
+        void fail() noexcept;
+
+    private:
+        LifecycleCoordinator* owner_{nullptr};
+        std::stop_token stopToken_;
+    };
+
+    /**
+     * Claim an ordinary, non-cancellable start transition.
+     *
+     * - stopped: claims starting and returns an owning transition.
+     * - running: returns an unowned transition.
+     * - starting/stopping: waits for resolution and re-evaluates.
      */
     [[nodiscard]] Transition beginStart();
 
     /**
-     * @brief Claim a stop transition.
+     * Claim a cancellable start transition.
      *
-     * - `running` → claims `stopping` and returns an owning transition.
-     * - `stopped` → returns an unowned transition.
-     * - `starting` → waits for startup resolution, then claims stop if the
-     *   startup succeeded.
-     * - `stopping` → waits for the active teardown to finish; returns an
-     *   unowned transition only once `stopped` is visible.
+     * - stopped: claims starting and returns an owning cancellable guard.
+     * - running: returns an unowned guard.
+     * - starting/stopping: waits for resolution and re-evaluates.
+     *
+     * A concurrent beginStop() requests the returned stop token.
      */
-    [[nodiscard]] Transition beginStop();
+    [[nodiscard]] CancellableStart beginCancellableStart();
+
+    /**
+     * Claim or request a stop transition.
+     *
+     * running:
+     *   Claims stopping and returns an owning transition.
+     *
+     * stopped:
+     *   Returns an unowned transition.
+     *
+     * cancellable starting:
+     *   Atomically publishes cancellation intent, requests the startup stop
+     *   token outside the coordinator mutex, and:
+     *
+     *   - wait: waits for startup rollback, then re-evaluates;
+     *   - no_wait: returns immediately with an unowned transition.
+     *
+     * ordinary starting:
+     *   - wait: waits for startup resolution, then re-evaluates;
+     *   - no_wait: returns immediately without cancelling startup.
+     *
+     * stopping:
+     *   - wait: waits until stopped;
+     *   - no_wait: returns immediately.
+     */
+    [[nodiscard]] Transition beginStop(
+        WaitPolicy waitPolicy = WaitPolicy::wait);
+
+    /**
+     * True when called by the thread that originally claimed the active
+     * cancellable startup transition.
+     *
+     * This is intended to help synchronous owner stop() methods choose
+     * WaitPolicy::no_wait and avoid waiting for their own startup operation.
+     */
+    [[nodiscard]] bool isStartOwnerThread() const noexcept;
 
     [[nodiscard]] State state() const noexcept;
     [[nodiscard]] bool isRunning() const noexcept;
@@ -167,9 +348,22 @@ public:
 private:
     void resolveTransition(State target, bool success) noexcept;
 
+    [[nodiscard]] bool tryCompleteCancellableStart() noexcept;
+    void failCancellableStart() noexcept;
+
+    /**
+     * Precondition: mutex_ is held.
+     */
+    void clearCancellableStartLocked() noexcept;
+
     mutable std::mutex mutex_;
     std::condition_variable cv_;
     State state_{State::stopped};
+
+    bool cancellableStartActive_{false};
+    bool startCancellationRequested_{false};
+    std::stop_source startStopSource_{std::nostopstate};
+    std::thread::id startOwnerThread_;
 };
 
 } // namespace RSCGroup
