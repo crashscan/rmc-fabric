@@ -3,291 +3,371 @@
 //
 /**
  * @file NetlinkNetworkMonitor.cpp
- * @brief Impl of NetlinkNetworkMonitor: socket management, event loop, and dump orchestration.
+ * @brief Lifecycle, state, and callback orchestration for netlink monitoring.
  */
+
 #include "public/NetlinkNetworkMonitor.h"
+
 #include "ErrnoString.h"
-#include "NetlinkInitialDump.h"
 #include "NetlinkEventLoop.h"
+#include "NetlinkInitialDump.h"
 #include "NetlinkParser.h"
 #include "NetlinkState.h"
+
 #include <EventFdSignal.h>
+#include <LifecycleCoordinator.h>
+#include <ManagedWorker.h>
+
 #include <glog/logging.h>
+
 #include <cerrno>
-#include <condition_variable>
 #include <exception>
 #include <functional>
-#include <mutex>
 #include <optional>
 #include <set>
+#include <stop_token>
 #include <string>
-#include <thread>
+#include <system_error>
 #include <utility>
+#include <vector>
 
 namespace RSCGroup {
 
 class NetlinkNetworkMonitor::Impl {
 public:
-    explicit Impl(MonitorCallbacks callbacks, std::set<std::string> watchedInterfaces)
+    explicit Impl(
+        MonitorCallbacks callbacks,
+        std::set<std::string> watchedInterfaces)
         : callbacks_(std::move(callbacks))
         , watchedInterfaces_(std::move(watchedInterfaces))
-        , onLinkHandler_([this](const LinkEvent& e)       { onLinkCallback(e); })
-        , onIpHandler_  ([this](const InterfaceIpEvent& e)  { onIpCallback(e); })
-        , onFdbHandler_ ([this](const FdbEvent& e)        { onFdbCallback(e); })
-        , onNeighHandler_([this](const NeighborEvent& e)   { onNeighCallback(e); })
-        , onDeviceHandler_([this](const DeviceEvent& de)  { if (callbacks_.onDeviceChanged) callbacks_.onDeviceChanged(de); })
-    {}
+        , onLinkHandler_([this](const LinkEvent& event) {
+            onLinkCallback(event);
+        })
+        , onIpHandler_([this](const InterfaceIpEvent& event) {
+            onIpCallback(event);
+        })
+        , onFdbHandler_([this](const FdbEvent& event) {
+            onFdbCallback(event);
+        })
+        , onNeighHandler_([this](const NeighborEvent& event) {
+            onNeighCallback(event);
+        })
+        , onDeviceHandler_([this](const DeviceEvent& event) {
+            if (callbacks_.onDeviceChanged) {
+                callbacks_.onDeviceChanged(event);
+            }
+        })
+        , worker_(
+              "netlink-monitor",
+              [this](std::stop_token stopToken) {
+                  runLiveLoop(std::move(stopToken));
+              },
+              [this] {
+                  signalStop();
+              },
+              [this](const ManagedWorker::Exit& exit) {
+                  onWorkerExit(exit);
+              })
+    {
+    }
 
-    ~Impl() { stop(); }
+    ~Impl()
+    {
+        stop();
+    }
 
     bool start()
     {
-        std::unique_lock lock(lifecycleMutex_);
+        auto transition = lifecycle_.beginCancellableStart();
 
-        if (lifecycleState_ != State::Stopped) {
-            LOG(WARNING) << "start() called while monitor is not stopped";
+        if (!transition) {
+            LOG(WARNING)
+                << "start() called while netlink monitor is already running";
             return false;
         }
-
-        lifecycleState_ = State::Starting;
-        startupThreadId_ = std::this_thread::get_id();
 
         try {
             stopSignal_.emplace();
 
-            // The live socket must be bound before the initial dump begins.
-            // Events arriving during the dump remain queued on this socket
-            // and are processed after the worker starts.
+            // Bind the subscribed live socket before starting the initial
+            // dump. Notifications arriving while the dump runs remain queued
+            // and will be processed when the worker starts.
             liveLoop_.emplace(
                 *stopSignal_,
                 [this](const nlmsghdr* message) {
                     processSingleMessage(message);
                 });
         } catch (const std::exception& error) {
-            LOG(ERROR) << "failed to initialize netlink monitoring: " << error.what();
+            LOG(ERROR)
+                << "failed to initialize netlink monitoring: "
+                << error.what();
+
             closeResources();
-            startupThreadId_ = {};
-            lifecycleState_ = State::Stopped;
-            lifecycleCv_.notify_all();
+            netlinkState_.clear();
+            transition.fail();
             return false;
         } catch (...) {
-            LOG(ERROR) << "failed to initialize netlink monitoring: " << "unknown exception";
+            LOG(ERROR)
+                << "failed to initialize netlink monitoring: "
+                   "unknown exception";
+
             closeResources();
-            startupThreadId_ = {};
-            lifecycleState_ = State::Stopped;
-            lifecycleCv_.notify_all();
+            netlinkState_.clear();
+            transition.fail();
             return false;
         }
-
-        lock.unlock();
 
         NetlinkInitialDump::Result dumpResult;
 
         try {
+            /*
+             * beginStop() requests transition.stopToken(). Registering this
+             * callback converts lifecycle cancellation into an eventfd wake
+             * for the dump's blocking poll().
+             *
+             * If cancellation was requested before registration, the callback
+             * executes synchronously during construction.
+             *
+             * The scope is deliberate: the stop callback is destroyed before
+             * any path calls closeResources(), so signalStop() cannot race
+             * destruction of stopSignal_.
+             */
+            std::stop_callback cancellationWake(
+                transition.stopToken(),
+                [this] {
+                    signalStop();
+                });
+
             NetlinkInitialDump dump(
                 *stopSignal_,
-                [this](const nlmsghdr* message) { processSingleMessage(message); }
-                );
+                [this](const nlmsghdr* message) {
+                    processSingleMessage(message);
+                });
+
             dumpResult = dump.run();
         } catch (const std::exception& error) {
-            LOG(ERROR) << "initial netlink dump threw: " << error.what();
-            lock.lock();
-            finishStop();
+            LOG(ERROR)
+                << "initial netlink dump threw: "
+                << error.what();
+
+            closeResources();
+            netlinkState_.clear();
+            transition.fail();
             return false;
         } catch (...) {
-            LOG(ERROR) << "initial netlink dump threw an unknown exception";
-            lock.lock();
-            finishStop();
+            LOG(ERROR)
+                << "initial netlink dump threw an unknown exception";
+
+            closeResources();
+            netlinkState_.clear();
+            transition.fail();
             return false;
         }
-        lock.lock();
 
-        if (!dumpResult.completed() || lifecycleState_ != State::Starting) {
-            if (!dumpResult.completed() && !dumpResult.interrupted()) {
-                LOG(ERROR) << "initial netlink dump failed: status=" << NetlinkInitialDump::statusName( dumpResult.status) << ", error=" << dumpResult.error;
+        if (!dumpResult.completed()) {
+            if (!dumpResult.interrupted()) {
+                LOG(ERROR)
+                    << "initial netlink dump failed: status="
+                    << NetlinkInitialDump::statusName(
+                           dumpResult.status)
+                    << ", error=" << dumpResult.error;
             }
-            finishStop();
+
+            closeResources();
+            netlinkState_.clear();
+            transition.fail();
             return false;
         }
 
-        startupThreadId_ = {};
-        try {
-            worker_ = std::jthread([this](std::stop_token stopToken) {
-                {
-                    std::scoped_lock localLock(lifecycleMutex_);
-                    workerThreadId_ = std::this_thread::get_id();
-                }
-                if (!liveLoop_) {
-                    LOG(ERROR) << "netlink event loop is unavailable";
-                    return;
-                }
+        /*
+         * The dump can return completed after a callback in the final
+         * datagram requested cancellation. In that case the stop token is
+         * authoritative even though NLMSG_DONE was also observed.
+         */
+        if (transition.stopRequested()) {
+            closeResources();
+            netlinkState_.clear();
+            transition.fail();
+            return false;
+        }
 
-                const auto result = liveLoop_->run(stopToken);
-                if (!result.stopped()) {
-                    LOG(ERROR)
-                        << "netlink event loop terminated: status="
-                        << NetlinkEventLoop::statusName(result.status)
-                        << ", error=" << result.error;
-                }
-            });
+        try {
+            if (!worker_.start()) {
+                /*
+                 * Lifecycle state says this is a fresh start, so an existing
+                 * live worker is a structural invariant violation. Stop it
+                 * before releasing resources.
+                 */
+                LOG(ERROR)
+                    << "netlink worker was already running during startup";
+
+                worker_.stop();
+                closeResources();
+                netlinkState_.clear();
+                transition.fail();
+                return false;
+            }
         } catch (const std::exception& error) {
-            LOG(ERROR) << "failed to start netlink monitor worker: " << error.what();
-            finishStop();
+            LOG(ERROR)
+                << "failed to start netlink monitor worker: "
+                << error.what();
+
+            closeResources();
+            netlinkState_.clear();
+            transition.fail();
             return false;
         } catch (...) {
-            LOG(ERROR) << "failed to start netlink monitor worker: " << "unknown exception";
-            finishStop();
+            LOG(ERROR)
+                << "failed to start netlink monitor worker: "
+                   "unknown exception";
+
+            closeResources();
+            netlinkState_.clear();
+            transition.fail();
             return false;
         }
-        lifecycleState_ = State::Running;
+
+        /*
+         * The worker must exist before running is published. Otherwise a
+         * concurrent stop() could claim the running -> stopping transition
+         * before there is a worker to stop.
+         *
+         * If cancellation won after worker startup, tryComplete() returns
+         * false and keeps the lifecycle in starting until rollback finishes.
+         */
+        if (!transition.tryComplete()) {
+            try {
+                worker_.stop();
+            } catch (const std::exception& error) {
+                LOG(FATAL)
+                    << "failed to stop netlink worker during startup "
+                       "rollback: "
+                    << error.what();
+            } catch (...) {
+                LOG(FATAL)
+                    << "failed to stop netlink worker during startup "
+                       "rollback: unknown exception";
+            }
+
+            closeResources();
+            netlinkState_.clear();
+            transition.fail();
+            return false;
+        }
+
         LOG(INFO) << "NetlinkNetworkMonitor started";
         return true;
     }
 
     void stop()
     {
-        std::unique_lock lock(lifecycleMutex_);
-
-        if (lifecycleState_ == State::Stopped) {
+        /*
+         * ManagedWorker::stop() cannot join itself. Reject callback-originated
+         * live-loop stop before claiming lifecycle teardown.
+         */
+        if (worker_.isCurrentThread()) {
+            LOG(ERROR)
+                << "stop() must not be called from a netlink monitor callback";
             return;
         }
 
-        // Reject self-stop from the monitor I/O thread (e.g. from a callback).
-        // A self-stop would leave the object in a partially-stopped state
-        // that cannot be restarted and holds resources indefinitely.
-        // Do not depend on worker_.joinable(). An external stop caller may
-        // already have moved worker_ into a local jthread while joining it.
-        const auto currentThreadId = std::this_thread::get_id();
-        if (currentThreadId == workerThreadId_) {
-            LOG(ERROR) << "stop() must not be called from a monitor callback";
+        /*
+         * An initial-dump callback runs synchronously on the startup owner
+         * thread. It may request cancellation but must not wait for itself to
+         * finish startup rollback.
+         */
+        const auto waitPolicy =
+            lifecycle_.isStartOwnerThread()
+                ? LifecycleCoordinator::WaitPolicy::no_wait
+                : LifecycleCoordinator::WaitPolicy::wait;
+
+        auto transition = lifecycle_.beginStop(waitPolicy);
+
+        if (!transition) {
+            /*
+             * Possible cases:
+             *
+             *  - already stopped;
+             *  - another stop owns teardown and this caller waited for it;
+             *  - cancellable startup owns cleanup;
+             *  - startup callback requested cancellation with no_wait.
+             */
             return;
         }
 
-        // Another caller already owns teardown. Wait until it has completed
-        // rather than manipulating the worker or descriptors concurrently.
-        if (lifecycleState_ == State::Stopping) {
-            // An initial-dump callback must return to the start() thread so
-            // that it can leave dump.run() and perform final cleanup.
-            if (currentThreadId == startupThreadId_) {
-                return;
-            }
-            lifecycleCv_.wait(lock, [this] { return lifecycleState_ == State::Stopped; });
-            return;
+        try {
+            /*
+             * ManagedWorker::stop():
+             *
+             *  1. requests its stop token;
+             *  2. invokes signalStop() through the wake callback;
+             *  3. serializes and joins the worker.
+             */
+            worker_.stop();
+        } catch (const std::exception& error) {
+            /*
+             * Self-stop was rejected above. Any remaining join failure is a
+             * structural ownership violation: resources cannot safely be
+             * destroyed while the worker may still access them.
+             */
+            LOG(FATAL)
+                << "failed to stop netlink monitor worker: "
+                << error.what();
+        } catch (...) {
+            LOG(FATAL)
+                << "failed to stop netlink monitor worker: "
+                   "unknown exception";
         }
 
-        // During Starting, the startup thread owns the local dump descriptor
-        // and may currently be polling stopSignal_. Signal it, but leave
-        // resource destruction to the startup thread.
-        if (lifecycleState_ == State::Starting) {
-            lifecycleState_ = State::Stopping;
-            signalStop();
+        closeResources();
+        netlinkState_.clear();
 
-            // Initial-dump callbacks execute synchronously on the start()
-            // thread. Waiting here from such a callback would deadlock:
-            // this same thread must leave performInitialDump() and perform
-            // the final cleanup.
-            if (currentThreadId == startupThreadId_) {
-                return;
-            }
+        transition.complete();
 
-            lifecycleCv_.wait(lock, [this] { return lifecycleState_ == State::Stopped; });
-            return;
-        }
-
-        lifecycleState_ = State::Stopping;
-
-        if (worker_.joinable()) {
-
-            worker_.request_stop();
-        }
-
-        signalStop();
-
-        std::jthread worker = std::move(worker_);
-        lock.unlock();
-
-        if (worker.joinable()) {
-            worker.join();
-        }
-
-        lock.lock();
-        finishStop();
+        LOG(INFO) << "NetlinkNetworkMonitor stopped";
     }
 
-    bool isRunning() const
+    [[nodiscard]] bool isRunning() const
     {
-        std::scoped_lock lock(lifecycleMutex_);
-        return lifecycleState_ == State::Running;
+        return lifecycle_.isRunning();
     }
 
-    std::vector<DeviceEvent> getDevicesSnapshot() const
+    [[nodiscard]] std::vector<DeviceEvent>
+    getDevicesSnapshot() const
     {
         return netlinkState_.getDevicesSnapshot();
     }
 
-    std::vector<LinkEvent> getLinksSnapshot() const
+    [[nodiscard]] std::vector<LinkEvent>
+    getLinksSnapshot() const
     {
         return netlinkState_.getLinksSnapshot();
     }
 
 private:
-    enum class State { Stopped, Starting, Running, Stopping };
-
-    mutable std::mutex lifecycleMutex_;
-    std::condition_variable lifecycleCv_;
-    MonitorCallbacks callbacks_;
-    std::set<std::string> watchedInterfaces_;
-    State lifecycleState_ = State::Stopped;
-
-
-    // Declared before liveLoop_: the loop borrows the stop signal and must
-    // therefore be destroyed first.
-    std::optional<EventFdSignal> stopSignal_;
-    std::optional<NetlinkEventLoop> liveLoop_;
-
-    // Declared after liveLoop_: reverse destruction stops/joins the worker
-    // before destroying the loop and its socket.
-    std::jthread worker_;
-
-    std::thread::id startupThreadId_;
-    std::thread::id workerThreadId_;
-    NetlinkState netlinkState_;
-
-    // Pre-bound handlers (created once, zero allocation per message)
-    std::function<void(const LinkEvent&)>       onLinkHandler_;
-    std::function<void(const InterfaceIpEvent&)> onIpHandler_;
-    std::function<void(const FdbEvent&)>        onFdbHandler_;
-    std::function<void(const NeighborEvent&)>   onNeighHandler_;
-    std::function<void(const DeviceEvent&)>     onDeviceHandler_;
-
-    // Precondition: lifecycleMutex_ is held
-    void finishStop()
-    {
-        closeResources();
-        netlinkState_.clear();
-        startupThreadId_ = {};
-        workerThreadId_ = {};
-        lifecycleState_ = State::Stopped;
-        lifecycleCv_.notify_all();
-        LOG(INFO) << "NetlinkNetworkMonitor stopped";
-    }
-
     void closeResources()
     {
-        // liveLoop_ borrows stopSignal_.
+        // NetlinkEventLoop borrows stopSignal_.
         liveLoop_.reset();
         stopSignal_.reset();
     }
 
-    void signalStop()
+    void signalStop() noexcept
     {
         if (!stopSignal_) {
-            LOG(FATAL) << "netlink stop eventfd is unavailable during teardown";
+            /*
+             * ManagedWorker invokes its wake callback only for a live stop
+             * source. A missing eventfd at that point means resource and worker
+             * lifetimes have diverged.
+             */
+            LOG(FATAL)
+                << "netlink stop eventfd is unavailable during teardown";
             return;
         }
 
         for (;;) {
             const int error = stopSignal_->signal();
+
             if (error == 0) {
                 return;
             }
@@ -295,59 +375,200 @@ private:
             if (error == EINTR) {
                 continue;
             }
-            // A failed wake would leave the worker blocked indefinitely in
-            // poll(), making the subsequent join unsafe. The descriptor is
-            // guaranteed to be live while Starting or Running, so any other
-            // error is a structural lifecycle violation.
-            LOG(FATAL) << "failed to signal netlink stop eventfd: " << errnoToString(error);
+
+            /*
+             * If this wake fails, the worker may remain blocked in poll() and
+             * ManagedWorker::stop() may wait forever in join().
+             */
+            LOG(FATAL)
+                << "failed to signal netlink stop eventfd: "
+                << errnoToString(error);
             return;
         }
     }
 
-    void onLinkCallback(const LinkEvent& e)
+    void runLiveLoop(std::stop_token stopToken)
     {
-        auto ev = netlinkState_.updateLink(e);
-        if (ev && callbacks_.onLinkChanged) callbacks_.onLinkChanged(*ev);
+        if (!liveLoop_) {
+            throw std::logic_error(
+                "NetlinkNetworkMonitor: live event loop is unavailable");
+        }
+
+        const NetlinkEventLoop::Result result =
+            liveLoop_->run(std::move(stopToken));
+
+        if (result.stopped()) {
+            return;
+        }
+
+        throw std::system_error(
+            result.error != 0 ? result.error : EIO,
+            std::generic_category(),
+            std::string("NetlinkEventLoop: ") +
+                NetlinkEventLoop::statusName(result.status));
     }
 
-    void onIpCallback(const InterfaceIpEvent& e)
+    void onWorkerExit(const ManagedWorker::Exit& exit) noexcept
     {
-        auto ev = netlinkState_.updateAddress(e);
-        if (ev && callbacks_.onInterfaceIpChanged) callbacks_.onInterfaceIpChanged(*ev);
+        /*
+         * This callback runs on the worker thread. It must not call start(),
+         * stop(), join(), closeResources(), or otherwise drive lifecycle.
+         */
+        if (exit.reason == ManagedWorker::ExitReason::exception) {
+            std::string detail{"unknown exception"};
+
+            try {
+                if (exit.exception) {
+                    std::rethrow_exception(exit.exception);
+                }
+            } catch (const std::exception& error) {
+                detail = error.what();
+            } catch (...) {
+            }
+
+            LOG(ERROR)
+                << "netlink monitor worker terminated with an exception: "
+                << detail;
+            return;
+        }
+
+        /*
+         * ExitReason is advisory, so consult lifecycle state before reporting
+         * an unexpected normal return. During an ordinary stop, lifecycle is
+         * already stopping.
+         */
+        if (exit.reason == ManagedWorker::ExitReason::returned &&
+            lifecycle_.isRunning()) {
+            LOG(ERROR)
+                << "netlink monitor worker returned while lifecycle "
+                   "remained running";
+        }
     }
 
-    void onFdbCallback(const FdbEvent& e)
+    void onLinkCallback(const LinkEvent& event)
     {
-        if (!watchedInterfaces_.empty() && !watchedInterfaces_.contains(e.ifname)) return;
-        auto ev = netlinkState_.updateFdb(e, onDeviceHandler_);
-        if (ev && callbacks_.onFdbChanged) callbacks_.onFdbChanged(*ev);
+        auto changed = netlinkState_.updateLink(event);
+
+        if (changed && callbacks_.onLinkChanged) {
+            callbacks_.onLinkChanged(*changed);
+        }
     }
 
-    void onNeighCallback(const NeighborEvent& e)
+    void onIpCallback(const InterfaceIpEvent& event)
     {
-        if (!watchedInterfaces_.empty() && !watchedInterfaces_.contains(e.ifname)) return;
-        auto ev = netlinkState_.updateNeighbor(e, onDeviceHandler_);
-        if (ev && callbacks_.onNeighborChanged) callbacks_.onNeighborChanged(*ev);
+        auto changed = netlinkState_.updateAddress(event);
+
+        if (changed && callbacks_.onInterfaceIpChanged) {
+            callbacks_.onInterfaceIpChanged(*changed);
+        }
     }
 
-    void processSingleMessage(const nlmsghdr* nh)
+    void onFdbCallback(const FdbEvent& event)
     {
-        processMessage(nh, onLinkHandler_, onIpHandler_, onFdbHandler_, onNeighHandler_);
+        if (!watchedInterfaces_.empty() &&
+            !watchedInterfaces_.contains(event.ifname)) {
+            return;
+        }
+
+        auto changed =
+            netlinkState_.updateFdb(event, onDeviceHandler_);
+
+        if (changed && callbacks_.onFdbChanged) {
+            callbacks_.onFdbChanged(*changed);
+        }
     }
+
+    void onNeighCallback(const NeighborEvent& event)
+    {
+        if (!watchedInterfaces_.empty() &&
+            !watchedInterfaces_.contains(event.ifname)) {
+            return;
+        }
+
+        auto changed =
+            netlinkState_.updateNeighbor(event, onDeviceHandler_);
+
+        if (changed && callbacks_.onNeighborChanged) {
+            callbacks_.onNeighborChanged(*changed);
+        }
+    }
+
+    void processSingleMessage(const nlmsghdr* message)
+    {
+        processMessage(
+            message,
+            onLinkHandler_,
+            onIpHandler_,
+            onFdbHandler_,
+            onNeighHandler_);
+    }
+
+    MonitorCallbacks callbacks_;
+    std::set<std::string> watchedInterfaces_;
+
+    /*
+     * Resource dependency order:
+     *
+     * liveLoop_ borrows stopSignal_, so liveLoop_ must be destroyed first.
+     */
+    std::optional<EventFdSignal> stopSignal_;
+    std::optional<NetlinkEventLoop> liveLoop_;
+
+    LifecycleCoordinator lifecycle_;
+    NetlinkState netlinkState_;
+
+    // Pre-bound handlers: constructed once, no per-message binding.
+    std::function<void(const LinkEvent&)> onLinkHandler_;
+    std::function<void(const InterfaceIpEvent&)> onIpHandler_;
+    std::function<void(const FdbEvent&)> onFdbHandler_;
+    std::function<void(const NeighborEvent&)> onNeighHandler_;
+    std::function<void(const DeviceEvent&)> onDeviceHandler_;
+
+    /*
+     * Must remain last. Its work, wake, and exit callbacks capture this and
+     * access every relevant member above. Reverse member destruction therefore
+     * stops and joins the worker before those members are destroyed.
+     */
+    ManagedWorker worker_;
 };
 
 NetlinkNetworkMonitor::NetlinkNetworkMonitor(
     MonitorCallbacks callbacks,
     std::set<std::string> watchedInterfaces)
-    : impl_(std::make_unique<Impl>(std::move(callbacks), std::move(watchedInterfaces)))
-{}
+    : impl_(
+          std::make_unique<Impl>(
+              std::move(callbacks),
+              std::move(watchedInterfaces)))
+{
+}
 
 NetlinkNetworkMonitor::~NetlinkNetworkMonitor() = default;
 
-bool NetlinkNetworkMonitor::start() { return impl_->start(); }
-void NetlinkNetworkMonitor::stop()  { impl_->stop(); }
-bool NetlinkNetworkMonitor::isRunning() const { return impl_->isRunning(); }
-std::vector<DeviceEvent> NetlinkNetworkMonitor::getDevicesSnapshot() const { return impl_->getDevicesSnapshot(); }
-std::vector<LinkEvent> NetlinkNetworkMonitor::getLinksSnapshot() const { return impl_->getLinksSnapshot(); }
+bool NetlinkNetworkMonitor::start()
+{
+    return impl_->start();
+}
+
+void NetlinkNetworkMonitor::stop()
+{
+    impl_->stop();
+}
+
+bool NetlinkNetworkMonitor::isRunning() const
+{
+    return impl_->isRunning();
+}
+
+std::vector<DeviceEvent>
+NetlinkNetworkMonitor::getDevicesSnapshot() const
+{
+    return impl_->getDevicesSnapshot();
+}
+
+std::vector<LinkEvent>
+NetlinkNetworkMonitor::getLinksSnapshot() const
+{
+    return impl_->getLinksSnapshot();
+}
 
 } // namespace RSCGroup

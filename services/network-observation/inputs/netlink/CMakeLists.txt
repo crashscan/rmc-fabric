@@ -59,6 +59,7 @@ target_link_libraries(netlink-monitor
     PRIVATE
         pthread
         glog
+        lifecycle_runner
         rsc_util
         netlink-event-loop
         netlink-initial-dump
