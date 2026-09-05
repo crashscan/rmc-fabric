@@ -4,12 +4,12 @@
 
 #pragma once
 
-#include <EventFdSignal.h>
-#include <UniqueFd.h>
+#include "NetlinkIo.h"
 
-#include <cstddef>
+#include <EventFdSignal.h>
+
 #include <functional>
-#include <optional>
+#include <span>
 #include <stop_token>
 
 struct nlmsghdr;
@@ -19,12 +19,11 @@ namespace RSCGroup {
 /**
  * Owns and runs the subscribed NETLINK_ROUTE live-event socket.
  *
- * The production constructor creates and owns the netlink socket. The
- * injection constructor borrows a caller-owned descriptor for tests.
+ * The production constructor creates and owns the socket. The injection
+ * constructor borrows a caller-owned descriptor for tests.
  *
- * This class is not thread-safe. run() must be called by at most one thread.
- * The message handler is invoked synchronously from run(). The nlmsghdr
- * pointer remains valid only for the duration of the callback.
+ * This class is not thread-safe. The message handler is invoked synchronously
+ * from run(), and each nlmsghdr pointer is valid only during the callback.
  */
 class NetlinkEventLoop {
 public:
@@ -40,11 +39,6 @@ public:
 
     struct Result {
         Status status{Status::stopped};
-
-        /**
-         * Positive errno value when the status represents an error.
-         * Zero is used for an ordinary stop.
-         */
         int error{0};
 
         [[nodiscard]] bool stopped() const noexcept
@@ -53,29 +47,18 @@ public:
         }
     };
 
-    using MessageHandler = std::function<void(const nlmsghdr*)>;
+    using MessageHandler =
+        std::function<void(const nlmsghdr*)>;
 
     /**
-     * Production constructor.
-     *
-     * Creates, binds, subscribes, and owns an AF_NETLINK/NETLINK_ROUTE socket.
-     *
-     * @throws std::system_error if socket creation or binding fails.
-     * @throws std::invalid_argument if messageHandler is empty.
+     * Creates, binds, subscribes, and owns a NETLINK_ROUTE socket.
      */
     NetlinkEventLoop(
         EventFdSignal& stopSignal,
         MessageHandler messageHandler);
 
     /**
-     * Test/injection constructor.
-     *
-     * Borrows liveFd. The caller retains ownership and must keep the
-     * descriptor open until run() returns. Destruction of this object does
-     * not close liveFd.
-     *
-     * @throws std::invalid_argument if liveFd is negative or messageHandler
-     *         is empty.
+     * Borrows liveFd. The caller must keep it open until run() returns.
      */
     NetlinkEventLoop(
         int liveFd,
@@ -84,54 +67,41 @@ public:
 
     ~NetlinkEventLoop() = default;
 
-    NetlinkEventLoop(const NetlinkEventLoop&) = delete;
-    NetlinkEventLoop& operator=(const NetlinkEventLoop&) = delete;
-    NetlinkEventLoop(NetlinkEventLoop&&) = delete;
-    NetlinkEventLoop& operator=(NetlinkEventLoop&&) = delete;
+    NetlinkEventLoop(
+        const NetlinkEventLoop&) = delete;
+
+    NetlinkEventLoop& operator=(
+        const NetlinkEventLoop&) = delete;
+
+    NetlinkEventLoop(
+        NetlinkEventLoop&&) = delete;
+
+    NetlinkEventLoop& operator=(
+        NetlinkEventLoop&&) = delete;
 
     /**
      * Runs until stop is requested or an I/O/protocol failure occurs.
      *
-     * The stop token is cooperative. The owner must also signal stopSignal
-     * when requesting stop so that a blocking poll() wakes promptly.
+     * Requesting the stop token must also signal stopSignal so a blocking
+     * poll can wake promptly.
      */
-    [[nodiscard]] Result run(std::stop_token stopToken);
+    [[nodiscard]] Result run(
+        std::stop_token stopToken);
 
-    [[nodiscard]] static const char* statusName(Status status) noexcept;
+    [[nodiscard]] static const char* statusName(
+        Status status) noexcept;
 
 private:
-    struct OwnedSocketTag {};
+    [[nodiscard]] Result mapWaitFailure(
+        const NetlinkWaitResult& result) const noexcept;
 
-    NetlinkEventLoop(
-        UniqueFd&& ownedLiveFd,
-        EventFdSignal& stopSignal,
-        MessageHandler messageHandler,
-        OwnedSocketTag);
+    [[nodiscard]] bool receiveAndDispatch(
+        std::span<char> buffer,
+        Result& terminalResult);
 
-    /**
-     * Creates and binds the production live socket.
-     *
-     * The socket is subscribed before the initial dump begins, ensuring that
-     * notifications arriving during the dump remain queued for the live loop.
-     */
-    [[nodiscard]] static UniqueFd openLiveSocket();
+    void validateHandler() const;
 
-    /**
-     * Receives and dispatches one datagram.
-     *
-     * Returns nullopt when processing should continue. Returns a Result when
-     * the event loop must terminate.
-     */
-    [[nodiscard]] std::optional<Result> receiveAndDispatch(
-        char* buffer,
-        std::size_t bufferSize);
-
-    // Engaged only when the production constructor is used.
-    UniqueFd ownedLiveFd_;
-
-    // Refers either to ownedLiveFd_ or to a caller-owned descriptor.
-    int liveFd_{-1};
-
+    NetlinkRouteSocket socket_;
     EventFdSignal& stopSignal_;
     MessageHandler messageHandler_;
 };

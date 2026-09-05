@@ -4,18 +4,14 @@
 
 #include "NetlinkEventLoop.h"
 
-#include <glog/logging.h>
-
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
-#include <poll.h>
-#include <sys/socket.h>
-#include <sys/uio.h>
 
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
+#include <span>
 #include <stdexcept>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -23,184 +19,88 @@ namespace RSCGroup {
 
 namespace {
 
-constexpr std::size_t receiveBufferSize = 64 * 1024;
+constexpr std::size_t liveReceiveBufferSize =
+    64 * 1024;
+
+constexpr int liveSocketReceiveBufferBytes =
+    256 * 1024;
+
+constexpr std::uint32_t liveGroups =
+    RTMGRP_LINK |
+    RTMGRP_IPV4_IFADDR |
+    RTMGRP_IPV6_IFADDR |
+    RTMGRP_NEIGH;
 
 } // namespace
 
 NetlinkEventLoop::NetlinkEventLoop(
     EventFdSignal& stopSignal,
     MessageHandler messageHandler)
-    : NetlinkEventLoop(
-          openLiveSocket(),
-          stopSignal,
-          std::move(messageHandler),
-          OwnedSocketTag{})
+    : socket_(
+          NetlinkRouteSocket::open({
+              .groups = liveGroups,
+              .receiveBufferBytes =
+                  liveSocketReceiveBufferBytes,
+          }))
+    , stopSignal_(stopSignal)
+    , messageHandler_(std::move(messageHandler))
 {
+    validateHandler();
 }
 
 NetlinkEventLoop::NetlinkEventLoop(
     int liveFd,
     EventFdSignal& stopSignal,
     MessageHandler messageHandler)
-    : liveFd_(liveFd)
+    : socket_(liveFd)
     , stopSignal_(stopSignal)
     , messageHandler_(std::move(messageHandler))
 {
-    if (liveFd_ < 0) {
-        throw std::invalid_argument(
-            "NetlinkEventLoop: invalid borrowed descriptor");
-    }
+    validateHandler();
+}
 
+void NetlinkEventLoop::validateHandler() const
+{
     if (!messageHandler_) {
         throw std::invalid_argument(
             "NetlinkEventLoop: message handler is empty");
     }
 }
 
-NetlinkEventLoop::NetlinkEventLoop(
-    UniqueFd&& ownedLiveFd,
-    EventFdSignal& stopSignal,
-    MessageHandler messageHandler,
-    OwnedSocketTag)
-    : ownedLiveFd_(std::move(ownedLiveFd))
-    , liveFd_(ownedLiveFd_.get())
-    , stopSignal_(stopSignal)
-    , messageHandler_(std::move(messageHandler))
-{
-    if (!ownedLiveFd_.valid()) {
-        throw std::invalid_argument(
-            "NetlinkEventLoop: invalid owned descriptor");
-    }
-
-    if (!messageHandler_) {
-        throw std::invalid_argument(
-            "NetlinkEventLoop: message handler is empty");
-    }
-}
-
-UniqueFd NetlinkEventLoop::openLiveSocket()
-{
-    UniqueFd fd(::socket(
-        AF_NETLINK,
-        SOCK_RAW | SOCK_CLOEXEC,
-        NETLINK_ROUTE));
-
-    if (!fd.valid()) {
-        const int error = errno;
-
-        throw std::system_error(
-            error,
-            std::generic_category(),
-            "NetlinkEventLoop: socket(AF_NETLINK) failed");
-    }
-
-    int receiveBufferSizeBytes = 256 * 1024;
-
-    if (::setsockopt(
-            fd.get(),
-            SOL_SOCKET,
-            SO_RCVBUF,
-            &receiveBufferSizeBytes,
-            sizeof(receiveBufferSizeBytes)) < 0) {
-        PLOG(WARNING)
-            << "NetlinkEventLoop: setsockopt(SO_RCVBUF) failed";
-    }
-
-    sockaddr_nl address{};
-    address.nl_family = AF_NETLINK;
-    address.nl_groups =
-        RTMGRP_LINK |
-        RTMGRP_IPV4_IFADDR |
-        RTMGRP_IPV6_IFADDR |
-        RTMGRP_NEIGH;
-
-    if (::bind(
-            fd.get(),
-            reinterpret_cast<sockaddr*>(&address),
-            sizeof(address)) < 0) {
-        const int error = errno;
-
-        throw std::system_error(
-            error,
-            std::generic_category(),
-            "NetlinkEventLoop: bind(AF_NETLINK) failed");
-    }
-
-    return fd;
-}
-
-NetlinkEventLoop::Result NetlinkEventLoop::run(
+NetlinkEventLoop::Result
+NetlinkEventLoop::run(
     std::stop_token stopToken)
 {
-    std::vector<char> buffer(receiveBufferSize);
-
-    pollfd descriptors[2]{};
-    descriptors[0].fd = liveFd_;
-    descriptors[0].events = POLLIN;
-    descriptors[1].fd = stopSignal_.fd();
-    descriptors[1].events = POLLIN;
+    std::vector<char> buffer(
+        liveReceiveBufferSize);
 
     while (!stopToken.stop_requested()) {
-        descriptors[0].revents = 0;
-        descriptors[1].revents = 0;
+        const NetlinkWaitResult waitResult =
+            waitForNetlinkDataOrStop(
+                socket_.fd(),
+                stopSignal_);
 
-        const int pollResult = ::poll(
-            descriptors,
-            2,
-            -1);
-
-        if (pollResult < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-
-            return {
-                Status::poll_failed,
-                errno,
-            };
-        }
-
-        // Prioritize shutdown if both descriptors become readable.
-        if ((descriptors[1].revents & POLLIN) != 0) {
-            const int drainError = stopSignal_.drain();
-
-            if (drainError != 0) {
-                return {
-                    Status::stop_drain_failed,
-                    drainError,
-                };
-            }
-
+        if (waitResult.status ==
+            NetlinkWaitStatus::stopped) {
             return {
                 Status::stopped,
                 0,
             };
         }
 
-        if ((descriptors[1].revents &
-             (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            return {
-                Status::poll_failed,
-                EIO,
-            };
+        if (!waitResult.dataReady()) {
+            return mapWaitFailure(waitResult);
         }
 
-        if ((descriptors[0].revents &
-             (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            return {
-                Status::poll_failed,
-                EIO,
-            };
-        }
+        Result terminalResult;
 
-        if ((descriptors[0].revents & POLLIN) == 0) {
-            continue;
-        }
-
-        if (auto result = receiveAndDispatch(
-                buffer.data(),
-                buffer.size())) {
-            return *result;
+        if (!receiveAndDispatch(
+                std::span<char>{
+                    buffer.data(),
+                    buffer.size(),
+                },
+                terminalResult)) {
+            return terminalResult;
         }
     }
 
@@ -210,82 +110,103 @@ NetlinkEventLoop::Result NetlinkEventLoop::run(
     };
 }
 
-std::optional<NetlinkEventLoop::Result>
-NetlinkEventLoop::receiveAndDispatch(
-    char* buffer,
-    std::size_t bufferSize)
+NetlinkEventLoop::Result
+NetlinkEventLoop::mapWaitFailure(
+    const NetlinkWaitResult& result) const noexcept
 {
-    iovec ioVector{};
-    ioVector.iov_base = buffer;
-    ioVector.iov_len = bufferSize;
+    switch (result.status) {
+        case NetlinkWaitStatus::stop_drain_failed:
+            return {
+                Status::stop_drain_failed,
+                result.error,
+            };
 
-    msghdr message{};
-    message.msg_iov = &ioVector;
-    message.msg_iovlen = 1;
+        case NetlinkWaitStatus::poll_failed:
+        case NetlinkWaitStatus::data_fd_failed:
+        case NetlinkWaitStatus::stop_fd_failed:
+            return {
+                Status::poll_failed,
+                result.error,
+            };
 
-    ssize_t received;
+        case NetlinkWaitStatus::stopped:
+            return {
+                Status::stopped,
+                0,
+            };
 
-    for (;;) {
-        received = ::recvmsg(
-            liveFd_,
-            &message,
-            0);
-
-        if (received >= 0) {
+        case NetlinkWaitStatus::data_ready:
             break;
-        }
-
-        if (errno == EINTR) {
-            continue;
-        }
-
-        return Result{
-            Status::receive_failed,
-            errno,
-        };
     }
 
-    if ((message.msg_flags & MSG_TRUNC) != 0) {
-        return Result{
-            Status::truncated_message,
-            EMSGSIZE,
-        };
+    return {
+        Status::poll_failed,
+        EIO,
+    };
+}
+
+bool NetlinkEventLoop::receiveAndDispatch(
+    std::span<char> buffer,
+    Result& terminalResult)
+{
+    const NetlinkReceiveResult receiveResult =
+        receiveNetlinkDatagram(
+            socket_.fd(),
+            buffer);
+
+    switch (receiveResult.status) {
+        case NetlinkReceiveStatus::received:
+            break;
+
+        case NetlinkReceiveStatus::truncated:
+            terminalResult = {
+                Status::truncated_message,
+                receiveResult.error,
+            };
+            return false;
+
+        case NetlinkReceiveStatus::failed:
+        case NetlinkReceiveStatus::closed:
+            terminalResult = {
+                Status::receive_failed,
+                receiveResult.error,
+            };
+            return false;
     }
 
-    if (received == 0) {
-        return Result{
-            Status::receive_failed,
-            ECONNRESET,
-        };
-    }
-
-    int remaining = static_cast<int>(received);
+    int remaining =
+        static_cast<int>(receiveResult.size);
 
     for (auto* header =
-             reinterpret_cast<nlmsghdr*>(buffer);
+             reinterpret_cast<nlmsghdr*>(
+                 buffer.data());
          NLMSG_OK(header, remaining);
          header = NLMSG_NEXT(header, remaining)) {
-        if (header->nlmsg_type == NLMSG_OVERRUN) {
-            return Result{
+        if (header->nlmsg_type ==
+            NLMSG_OVERRUN) {
+            terminalResult = {
                 Status::socket_overrun,
                 ENOBUFS,
             };
+            return false;
         }
 
         messageHandler_(header);
     }
 
     if (remaining != 0) {
-        return Result{
+        terminalResult = {
             Status::malformed_message,
             EPROTO,
         };
+        return false;
     }
 
-    return std::nullopt;
+    return true;
 }
 
-const char* NetlinkEventLoop::statusName(Status status) noexcept
+const char* NetlinkEventLoop::statusName(
+    Status status) noexcept
 {
     switch (status) {
         case Status::stopped:

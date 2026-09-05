@@ -6,35 +6,44 @@
 
 #include <linux/netlink.h>
 #include <linux/rtnetlink.h>
-#include <poll.h>
 #include <sys/socket.h>
 
 #include <cerrno>
 #include <cstdint>
+#include <span>
 #include <stdexcept>
-#include <system_error>
 #include <utility>
 #include <vector>
 
 namespace RSCGroup {
+
 namespace {
 
-void setFamily(ifinfomsg& message, std::uint8_t family) noexcept
+constexpr std::size_t dumpReceiveBufferSize = 16 * 1024;
+
+void setFamily(
+    ifinfomsg& message,
+    std::uint8_t family) noexcept
 {
     message.ifi_family = family;
 }
 
-void setFamily(ifaddrmsg& message, std::uint8_t family) noexcept
+void setFamily(
+    ifaddrmsg& message,
+    std::uint8_t family) noexcept
 {
     message.ifa_family = family;
 }
 
-void setFamily(ndmsg& message, std::uint8_t family) noexcept
+void setFamily(
+    ndmsg& message,
+    std::uint8_t family) noexcept
 {
     message.ndm_family = family;
 }
 
-[[nodiscard]] int positiveKernelError(int error) noexcept
+[[nodiscard]] int positiveKernelError(
+    int error) noexcept
 {
     return error < 0 ? -error : error;
 }
@@ -44,84 +53,34 @@ void setFamily(ndmsg& message, std::uint8_t family) noexcept
 NetlinkInitialDump::NetlinkInitialDump(
     EventFdSignal& stopSignal,
     MessageHandler messageHandler)
-    : NetlinkInitialDump(
-          openDumpSocket(),
-          stopSignal,
-          std::move(messageHandler),
-          OwnedSocketTag{})
+    : socket_(NetlinkRouteSocket::open())
+    , stopSignal_(stopSignal)
+    , messageHandler_(std::move(messageHandler))
 {
+    validateHandler();
 }
 
 NetlinkInitialDump::NetlinkInitialDump(
     int dumpFd,
     EventFdSignal& stopSignal,
     MessageHandler messageHandler)
-    : dumpFd_(dumpFd)
+    : socket_(dumpFd)
     , stopSignal_(stopSignal)
     , messageHandler_(std::move(messageHandler))
 {
-    if (dumpFd_ < 0) {
-        throw std::invalid_argument(
-            "NetlinkInitialDump: invalid borrowed descriptor");
-    }
+    validateHandler();
+}
 
+void NetlinkInitialDump::validateHandler() const
+{
     if (!messageHandler_) {
         throw std::invalid_argument(
             "NetlinkInitialDump: message handler is empty");
     }
 }
 
-NetlinkInitialDump::NetlinkInitialDump(UniqueFd&& ownedDumpFd,EventFdSignal& stopSignal,MessageHandler messageHandler,OwnedSocketTag)
-    : ownedDumpFd_(std::move(ownedDumpFd))
-    , dumpFd_(ownedDumpFd_.get())
-    , stopSignal_(stopSignal)
-    , messageHandler_(std::move(messageHandler))
-{
-    if (!ownedDumpFd_.valid()) {
-        throw std::invalid_argument(
-            "NetlinkInitialDump: invalid owned descriptor");
-    }
-
-    if (!messageHandler_) {
-        throw std::invalid_argument(
-            "NetlinkInitialDump: message handler is empty");
-    }
-}
-
-UniqueFd NetlinkInitialDump::openDumpSocket()
-{
-    UniqueFd fd(
-        ::socket(
-            AF_NETLINK,
-            SOCK_RAW | SOCK_CLOEXEC,
-            NETLINK_ROUTE));
-
-    if (!fd.valid()) {
-        const int error = errno;
-        throw std::system_error(
-            error,
-            std::generic_category(),
-            "NetlinkInitialDump: socket(AF_NETLINK) failed");
-    }
-
-    sockaddr_nl address{};
-    address.nl_family = AF_NETLINK;
-
-    if (::bind(
-            fd.get(),
-            reinterpret_cast<sockaddr*>(&address),
-            sizeof(address)) < 0) {
-        const int error = errno;
-        throw std::system_error(
-            error,
-            std::generic_category(),
-            "NetlinkInitialDump: bind(AF_NETLINK) failed");
-    }
-
-    return fd;
-}
-
-NetlinkInitialDump::Result NetlinkInitialDump::run()
+NetlinkInitialDump::Result
+NetlinkInitialDump::run()
 {
     auto result = requestDump<ifinfomsg>(
         RTM_GETLINK,
@@ -161,7 +120,8 @@ NetlinkInitialDump::Result NetlinkInitialDump::run()
 }
 
 template<typename Message>
-NetlinkInitialDump::Result NetlinkInitialDump::requestDump(
+NetlinkInitialDump::Result
+NetlinkInitialDump::requestDump(
     std::uint16_t type,
     std::uint8_t family)
 {
@@ -170,24 +130,29 @@ NetlinkInitialDump::Result NetlinkInitialDump::requestDump(
         Message message;
     };
 
-    const std::uint32_t sequence = nextSequence_++;
+    const std::uint32_t sequence =
+        nextSequence_++;
 
     Request request{};
-    request.header.nlmsg_len = NLMSG_LENGTH(sizeof(Message));
+    request.header.nlmsg_len =
+        NLMSG_LENGTH(sizeof(Message));
     request.header.nlmsg_type = type;
-    request.header.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
+    request.header.nlmsg_flags =
+        NLM_F_REQUEST | NLM_F_DUMP;
     request.header.nlmsg_seq = sequence;
 
     setFamily(request.message, family);
 
     for (;;) {
         const ssize_t sent = ::send(
-            dumpFd_,
+            socket_.fd(),
             &request,
             request.header.nlmsg_len,
             0);
 
-        if (sent == static_cast<ssize_t>(request.header.nlmsg_len)) {
+        if (sent ==
+            static_cast<ssize_t>(
+                request.header.nlmsg_len)) {
             break;
         }
 
@@ -202,7 +167,7 @@ NetlinkInitialDump::Result NetlinkInitialDump::requestDump(
             };
         }
 
-        // Netlink messages must be sent atomically.
+        // Netlink datagrams must be sent atomically.
         return {
             Status::send_failed,
             EIO,
@@ -212,143 +177,147 @@ NetlinkInitialDump::Result NetlinkInitialDump::requestDump(
     return readDumpResponses(sequence);
 }
 
-NetlinkInitialDump::Result NetlinkInitialDump::readDumpResponses(
+NetlinkInitialDump::Result
+NetlinkInitialDump::readDumpResponses(
     std::uint32_t sequence)
 {
-    std::vector<char> buffer(16384);
+    std::vector<char> buffer(
+        dumpReceiveBufferSize);
 
     for (;;) {
-        pollfd descriptors[2]{};
+        const NetlinkWaitResult waitResult =
+            waitForNetlinkDataOrStop(
+                socket_.fd(),
+                stopSignal_);
 
-        descriptors[0].fd = dumpFd_;
-        descriptors[0].events = POLLIN;
+        switch (waitResult.status) {
+            case NetlinkWaitStatus::data_ready:
+                break;
 
-        descriptors[1].fd = stopSignal_.fd();
-        descriptors[1].events = POLLIN;
+            case NetlinkWaitStatus::stopped:
+                return {
+                    Status::interrupted,
+                    0,
+                };
 
-        const int pollResult = ::poll(
-            descriptors,
-            2,
-            -1);
-
-        if (pollResult < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-
-            return {
-                Status::poll_failed,
-                errno,
-            };
-        }
-
-        if ((descriptors[1].revents & POLLIN) != 0) {
-            const int drainError = stopSignal_.drain();
-
-            if (drainError != 0) {
+            case NetlinkWaitStatus::stop_drain_failed:
                 return {
                     Status::stop_drain_failed,
-                    drainError,
+                    waitResult.error,
                 };
-            }
 
-            return {
-                Status::interrupted,
-                0,
-            };
+            case NetlinkWaitStatus::poll_failed:
+            case NetlinkWaitStatus::data_fd_failed:
+            case NetlinkWaitStatus::stop_fd_failed:
+                return {
+                    Status::poll_failed,
+                    waitResult.error,
+                };
         }
 
-        if ((descriptors[1].revents &
-             (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            return {
-                Status::poll_failed,
-                EIO,
-            };
+        const NetlinkReceiveResult receiveResult =
+            receiveNetlinkDatagram(
+                socket_.fd(),
+                std::span<char>{
+                    buffer.data(),
+                    buffer.size(),
+                });
+
+        switch (receiveResult.status) {
+            case NetlinkReceiveStatus::received:
+                break;
+
+            case NetlinkReceiveStatus::truncated:
+                return {
+                    Status::malformed_message,
+                    receiveResult.error,
+                };
+
+            case NetlinkReceiveStatus::failed:
+            case NetlinkReceiveStatus::closed:
+                return {
+                    Status::receive_failed,
+                    receiveResult.error,
+                };
         }
 
-        if ((descriptors[0].revents &
-             (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-            return {
-                Status::poll_failed,
-                EIO,
-            };
-        }
-
-        if ((descriptors[0].revents & POLLIN) == 0) {
-            continue;
-        }
-
-        const ssize_t received = ::recv(
-            dumpFd_,
-            buffer.data(),
-            buffer.size(),
-            0);
-
-        if (received < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-
-            return {
-                Status::receive_failed,
-                errno,
-            };
-        }
-
-        if (received == 0) {
-            return {
-                Status::receive_failed,
-                ECONNRESET,
-            };
-        }
-
-        int remaining = static_cast<int>(received);
+        int remaining =
+            static_cast<int>(receiveResult.size);
 
         for (auto* header =
-                 reinterpret_cast<nlmsghdr*>(buffer.data());
+                 reinterpret_cast<nlmsghdr*>(
+                     buffer.data());
              NLMSG_OK(header, remaining);
-             header = NLMSG_NEXT(header, remaining)) {
+             header =
+                 NLMSG_NEXT(header, remaining)) {
             if (header->nlmsg_seq != sequence) {
                 continue;
             }
 
             if (header->nlmsg_type == NLMSG_DONE) {
-                if ((header->nlmsg_flags & NLM_F_DUMP_INTR) != 0) {
-                    return {Status::dump_interrupted,EINTR,};
+                if ((header->nlmsg_flags &
+                     NLM_F_DUMP_INTR) != 0) {
+                    return {
+                        Status::dump_interrupted,
+                        EINTR,
+                    };
                 }
-                return {Status::completed,0,};
+
+                return {
+                    Status::completed,
+                    0,
+                };
             }
 
-            if (header->nlmsg_type == NLMSG_ERROR) {
+            if (header->nlmsg_type ==
+                NLMSG_ERROR) {
                 if (header->nlmsg_len <
                     NLMSG_LENGTH(sizeof(nlmsgerr))) {
-                    return {Status::malformed_message,EPROTO,};
+                    return {
+                        Status::malformed_message,
+                        EPROTO,
+                    };
                 }
 
-                const auto* netlinkError = reinterpret_cast<const nlmsgerr*>(NLMSG_DATA(header));
+                const auto* netlinkError =
+                    reinterpret_cast<
+                        const nlmsgerr*>(
+                        NLMSG_DATA(header));
 
-                // A zero-valued NLMSG_ERROR is a successful ACK.
+                // error == 0 is a successful ACK.
                 if (netlinkError->error == 0) {
                     continue;
                 }
 
-                return { Status::kernel_error, positiveKernelError(netlinkError->error),};
+                return {
+                    Status::kernel_error,
+                    positiveKernelError(
+                        netlinkError->error),
+                };
             }
-            if (header->nlmsg_type == NLMSG_OVERRUN) {
-                return { Status::receive_failed, ENOBUFS,};
+
+            if (header->nlmsg_type ==
+                NLMSG_OVERRUN) {
+                return {
+                    Status::receive_failed,
+                    ENOBUFS,
+                };
             }
+
             messageHandler_(header);
         }
 
-        // NLMSG_NEXT updates remaining. Nonzero trailing data means the
-        // datagram did not contain a complete sequence of netlink messages.
         if (remaining != 0) {
-            return {Status::malformed_message,EPROTO,};
+            return {
+                Status::malformed_message,
+                EPROTO,
+            };
         }
     }
 }
 
-const char* NetlinkInitialDump::statusName(const Status status) noexcept
+const char* NetlinkInitialDump::statusName(
+    Status status) noexcept
 {
     switch (status) {
         case Status::completed:
