@@ -6,29 +6,30 @@
  * @brief Impl of NetlinkNetworkMonitor: socket management, event loop, and dump orchestration.
  */
 #include "public/NetlinkNetworkMonitor.h"
+#include "ErrnoString.h"
+#include "NetlinkInitialDump.h"
 #include "NetlinkParser.h"
 #include "NetlinkState.h"
 #include <EventFdSignal.h>
 #include <UniqueFd.h>
 #include <glog/logging.h>
 #include <linux/netlink.h>
-#include <linux/rtnetlink.h>
 #include <sys/socket.h>
 #include <unistd.h>
 #include <cerrno>
-#include <cstdint>
-#include <cstring>
+#include <condition_variable>
 #include <poll.h>
+#include <optional>
 #include <functional>
+#include <exception>
 #include <mutex>
 #include <set>
 #include <string>
 #include <thread>
 #include <vector>
+#include <linux/rtnetlink.h>
 
 namespace RSCGroup {
-
-enum class DumpKind { Link, Addr, Neigh };
 
 class NetlinkNetworkMonitor::Impl {
 public:
@@ -54,40 +55,65 @@ public:
         }
 
         lifecycleState_ = State::Starting;
+        startupThreadId_ = std::this_thread::get_id();
 
         if (!openLiveSocket()) {
-            lifecycleState_ = State::Stopped;
-            return false;
-        }
-
-        UniqueFd dumpFd;
-        if (!openDumpSocket(dumpFd)) {
             closeResources();
+            startupThreadId_ = {};
             lifecycleState_ = State::Stopped;
+            lifecycleCv_.notify_all();
             return false;
         }
 
         lock.unlock();
 
-        bool dumpOk = performInitialDump(dumpFd.get());
-        dumpFd.reset();
+        NetlinkInitialDump::Result dumpResult;
 
+        try {
+            NetlinkInitialDump dump(
+                *stopSignal_,
+                [this](const nlmsghdr* message) { processSingleMessage(message); }
+                );
+            dumpResult = dump.run();
+        } catch (const std::exception& error) {
+            LOG(ERROR) << "initial netlink dump threw: " << error.what();
+            lock.lock();
+            finishStop();
+            return false;
+        } catch (...) {
+            LOG(ERROR) << "initial netlink dump threw an unknown exception";
+            lock.lock();
+            finishStop();
+            return false;
+        }
         lock.lock();
 
-        if (!dumpOk || lifecycleState_ != State::Starting) {
-            closeResources();
-            netlinkState_.clear();
-            lifecycleState_ = State::Stopped;
+        if (!dumpResult.completed() || lifecycleState_ != State::Starting) {
+            if (!dumpResult.completed() && !dumpResult.interrupted()) {
+                LOG(ERROR) << "initial netlink dump failed: status=" << NetlinkInitialDump::statusName( dumpResult.status) << ", error=" << dumpResult.error;
+            }
+            finishStop();
             return false;
         }
 
-        worker_ = std::jthread([this](const std::stop_token& st) {
-            {
-                std::scoped_lock localLock(lifecycleMutex_);
-                workerThreadId_ = std::this_thread::get_id();
-            }
-            runLoop(st);
-        });
+        startupThreadId_ = {};
+        try {
+            worker_ = std::jthread([this](const std::stop_token& st) {
+                {
+                    std::scoped_lock localLock(lifecycleMutex_);
+                    workerThreadId_ = std::this_thread::get_id();
+                }
+                runLoop(st);
+            });
+        } catch (const std::exception& error) {
+            LOG(ERROR) << "failed to start netlink monitor worker: " << error.what();
+            finishStop();
+            return false;
+        } catch (...) {
+            LOG(ERROR) << "failed to start netlink monitor worker: " << "unknown exception";
+            finishStop();
+            return false;
+        }
         lifecycleState_ = State::Running;
         LOG(INFO) << "NetlinkNetworkMonitor started";
         return true;
@@ -104,14 +130,49 @@ public:
         // Reject self-stop from the monitor I/O thread (e.g. from a callback).
         // A self-stop would leave the object in a partially-stopped state
         // that cannot be restarted and holds resources indefinitely.
-        if (worker_.joinable() && std::this_thread::get_id() == workerThreadId_) {
+        // Do not depend on worker_.joinable(). An external stop caller may
+        // already have moved worker_ into a local jthread while joining it.
+        const auto currentThreadId = std::this_thread::get_id();
+        if (currentThreadId == workerThreadId_) {
             LOG(ERROR) << "stop() must not be called from a monitor callback";
+            return;
+        }
+
+        // Another caller already owns teardown. Wait until it has completed
+        // rather than manipulating the worker or descriptors concurrently.
+        if (lifecycleState_ == State::Stopping) {
+            // An initial-dump callback must return to the start() thread so
+            // that it can leave dump.run() and perform final cleanup.
+            if (currentThreadId == startupThreadId_) {
+                return;
+            }
+            lifecycleCv_.wait(lock, [this] { return lifecycleState_ == State::Stopped; });
+            return;
+        }
+
+        // During Starting, the startup thread owns the local dump descriptor
+        // and may currently be polling stopSignal_. Signal it, but leave
+        // resource destruction to the startup thread.
+        if (lifecycleState_ == State::Starting) {
+            lifecycleState_ = State::Stopping;
+            signalStop();
+
+            // Initial-dump callbacks execute synchronously on the start()
+            // thread. Waiting here from such a callback would deadlock:
+            // this same thread must leave performInitialDump() and perform
+            // the final cleanup.
+            if (currentThreadId == startupThreadId_) {
+                return;
+            }
+
+            lifecycleCv_.wait(lock, [this] { return lifecycleState_ == State::Stopped; });
             return;
         }
 
         lifecycleState_ = State::Stopping;
 
         if (worker_.joinable()) {
+
             worker_.request_stop();
         }
 
@@ -148,14 +209,15 @@ private:
     enum class State { Stopped, Starting, Running, Stopping };
 
     mutable std::mutex lifecycleMutex_;
+    std::condition_variable lifecycleCv_;
     MonitorCallbacks callbacks_;
     std::set<std::string> watchedInterfaces_;
     State lifecycleState_ = State::Stopped;
     UniqueFd netlinkFd_;
-    EventFdSignal stopSignal_;
+    std::optional<EventFdSignal> stopSignal_;
     std::jthread worker_;
+    std::thread::id startupThreadId_;
     std::thread::id workerThreadId_;
-    std::uint32_t nextDumpSeq_ = 1;
     NetlinkState netlinkState_;
 
     // Pre-bound handlers (created once, zero allocation per message)
@@ -170,8 +232,10 @@ private:
     {
         closeResources();
         netlinkState_.clear();
+        startupThreadId_ = {};
         workerThreadId_ = {};
         lifecycleState_ = State::Stopped;
+        lifecycleCv_.notify_all();
         LOG(INFO) << "NetlinkNetworkMonitor stopped";
     }
 
@@ -197,30 +261,16 @@ private:
             return false;
         }
 
-        if (!stopSignal_.open()) {
-            PLOG(ERROR) << "eventfd failed";
+        try {
+            stopSignal_.emplace();
+        } catch (const std::exception& error) {
+            LOG(ERROR) << "failed to create netlink stop eventfd: " << error.what();
+            return false;
+        } catch (...) {
+            LOG(ERROR) << "failed to create netlink stop eventfd: unknown exception";
             return false;
         }
 
-        return true;
-    }
-
-    bool openDumpSocket(UniqueFd& fd)
-    {
-        fd.reset(socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE));
-        if (!fd.valid()) {
-            PLOG(ERROR) << "socket(AF_NETLINK) for dump failed";
-            return false;
-        }
-
-        sockaddr_nl addr{};
-        addr.nl_family = AF_NETLINK;
-
-        if (bind(fd.get(), reinterpret_cast<sockaddr*>(&addr), sizeof(addr)) < 0) {
-            PLOG(ERROR) << "bind(netlink) for dump failed";
-            fd.reset();
-            return false;
-        }
         return true;
     }
 
@@ -232,15 +282,38 @@ private:
 
     void signalStop()
     {
-        if (!stopSignal_.signal()) {
-            PLOG(WARNING) << "stopSignal_.signal() failed";
+        if (!stopSignal_) {
+            LOG(FATAL) << "netlink stop eventfd is unavailable during teardown";
+            return;
+        }
+
+        for (;;) {
+            const int error = stopSignal_->signal();
+            if (error == 0) {
+                return;
+            }
+
+            if (error == EINTR) {
+                continue;
+            }
+            // A failed wake would leave the worker blocked indefinitely in
+            // poll(), making the subsequent join unsafe. The descriptor is
+            // guaranteed to be live while Starting or Running, so any other
+            // error is a structural lifecycle violation.
+            LOG(FATAL) << "failed to signal netlink stop eventfd: " << errnoToString(error);
+            return;
         }
     }
 
     void drainStopSignal()
     {
-        if (!stopSignal_.drain()) {
-            PLOG(WARNING) << "stopSignal_.drain() failed";
+        if (!stopSignal_) {
+            LOG(ERROR) << "netlink stop eventfd is unavailable while draining";
+            return;
+        }
+
+        if (const int error = stopSignal_->drain(); error != 0) {
+            LOG(ERROR) << "failed to drain netlink stop eventfd: " << errnoToString(error);
         }
     }
 
@@ -250,7 +323,7 @@ private:
         pollfd fds[2]{};
         fds[0].fd = netlinkFd_.get();
         fds[0].events = POLLIN;
-        fds[1].fd = stopSignal_.fd();
+        fds[1].fd = stopSignal_->fd();
         fds[1].events = POLLIN;
 
         while (!stopToken.stop_requested()) {
@@ -331,108 +404,6 @@ private:
     void processSingleMessage(const nlmsghdr* nh)
     {
         processMessage(nh, onLinkHandler_, onIpHandler_, onFdbHandler_, onNeighHandler_);
-    }
-
-    template <typename Msg>
-    bool sendDumpRequest(int dumpFd, std::uint16_t type, std::uint8_t family)
-    {
-        struct Request { nlmsghdr nh; Msg msg; } req{};
-        req.nh.nlmsg_len = NLMSG_LENGTH(sizeof(Msg));
-        req.nh.nlmsg_type = type;
-        req.nh.nlmsg_flags = NLM_F_REQUEST | NLM_F_DUMP;
-        req.nh.nlmsg_seq = nextDumpSeq_;
-        req.msg = Msg{};
-        setFamily(req.msg, family);
-
-        if (send(dumpFd, &req, req.nh.nlmsg_len, 0) < 0) {
-            PLOG(ERROR) << "send dump request failed type=" << type
-                        << " family=" << static_cast<int>(family);
-            return false;
-        }
-        return true;
-    }
-
-    static void setFamily(ifinfomsg& msg, std::uint8_t family) { msg.ifi_family = family; }
-    static void setFamily(ifaddrmsg& msg, std::uint8_t family)  { msg.ifa_family = family; }
-    static void setFamily(ndmsg& msg, std::uint8_t family)      { msg.ndm_family = family; }
-
-    bool requestDump(int dumpFd, std::uint16_t type, std::uint8_t family, DumpKind kind)
-    {
-        switch (kind) {
-            case DumpKind::Link:  if (!sendDumpRequest<ifinfomsg>(dumpFd, type, family)) return false; break;
-            case DumpKind::Addr:  if (!sendDumpRequest<ifaddrmsg>(dumpFd, type, family)) return false; break;
-            case DumpKind::Neigh: if (!sendDumpRequest<ndmsg>(dumpFd, type, family))     return false; break;
-        }
-        return readDumpResponses(dumpFd, nextDumpSeq_++);
-    }
-
-    bool readDumpResponses(int dumpFd, std::uint32_t seq)
-    {
-        std::vector<char> buffer(16384);
-        while (true) {
-            pollfd pfds[2]{};
-            pfds[0].fd = dumpFd;             pfds[0].events = POLLIN;
-            pfds[1].fd = stopSignal_.fd();   pfds[1].events = POLLIN;
-
-            int pr = poll(pfds, 2, -1);
-            if (pr < 0) {
-                if (errno == EINTR) continue;
-                PLOG(ERROR) << "poll during dump failed";
-                return false;
-            }
-
-            if ((pfds[1].revents & POLLIN) != 0) {
-                drainStopSignal();
-                LOG(INFO) << "dump interrupted by stop signal";
-                return false;
-            }
-
-            if ((pfds[0].revents & (POLLERR | POLLHUP | POLLNVAL)) != 0) {
-                LOG(ERROR) << "dump socket error revents=" << pfds[0].revents;
-                return false;
-            }
-
-            if ((pfds[0].revents & POLLIN) == 0) continue;
-
-            ssize_t len = recv(dumpFd, buffer.data(), buffer.size(), 0);
-            if (len < 0) {
-                if (errno == EINTR) continue;
-                PLOG(ERROR) << "recv dump response failed";
-                return false;
-            }
-            if (len == 0) {
-                LOG(ERROR) << "recv returned 0 on dump socket";
-                return false;
-            }
-
-            int remaining = static_cast<int>(len);
-            for (auto* nh = reinterpret_cast<nlmsghdr*>(buffer.data());
-                 NLMSG_OK(nh, remaining);
-                 nh = NLMSG_NEXT(nh, remaining)) {
-                if (nh->nlmsg_seq != seq) continue;
-                if (nh->nlmsg_type == NLMSG_DONE) return true;
-                if (nh->nlmsg_type == NLMSG_ERROR) {
-                    if (nh->nlmsg_len < static_cast<int>(NLMSG_LENGTH(sizeof(nlmsgerr)))) {
-                        LOG(ERROR) << "netlink dump error too short, len=" << nh->nlmsg_len;
-                        return false;
-                    }
-                    const auto* err = reinterpret_cast<const nlmsgerr*>(NLMSG_DATA(nh));
-                    LOG(ERROR) << "netlink dump error=" << err->error;
-                    return false;
-                }
-                processSingleMessage(nh);
-            }
-        }
-    }
-
-    bool performInitialDump(int dumpFd)
-    {
-        VLOG(1) << "performing initial netlink dump";
-        return requestDump(dumpFd, RTM_GETLINK, AF_PACKET, DumpKind::Link)
-            && requestDump(dumpFd, RTM_GETADDR, AF_INET,     DumpKind::Addr)
-            && requestDump(dumpFd, RTM_GETADDR, AF_INET6,    DumpKind::Addr)
-            && requestDump(dumpFd, RTM_GETNEIGH, AF_UNSPEC,  DumpKind::Neigh)
-            && requestDump(dumpFd, RTM_GETNEIGH, AF_BRIDGE,  DumpKind::Neigh);
     }
 };
 

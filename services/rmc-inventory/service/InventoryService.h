@@ -11,6 +11,7 @@
 #include <IInventorySource.h>
 #include <IInventoryTransport.h>
 
+#include <optional>
 #include <atomic>
 #include <chrono>
 #include <functional>
@@ -90,7 +91,7 @@ private:
     std::chrono::steady_clock::time_point lastRefreshSteadyTs_{};
     std::chrono::steady_clock::time_point nextReconcileTs_{};
 
-    EventFdSignal refreshSignal_;
+    std::optional<EventFdSignal> refreshSignal_;
 
     /// Serializes complete service-epoch transitions only.
     LifecycleCoordinator lifecycle_;

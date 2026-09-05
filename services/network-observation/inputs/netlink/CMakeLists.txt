@@ -1,3 +1,19 @@
+add_library(netlink-initial-dump STATIC
+    dump/NetlinkInitialDump.cpp
+)
+
+target_compile_features(netlink-initial-dump PUBLIC cxx_std_20)
+
+target_include_directories(netlink-initial-dump
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dump>
+)
+
+target_link_libraries(netlink-initial-dump
+    PUBLIC
+        rsc_util
+)
+
 add_library(netlink-monitor STATIC
         NetlinkNetworkMonitor.cpp
         parser/NetlinkParser.cpp
@@ -13,6 +29,7 @@ target_include_directories(netlink-monitor PRIVATE
         utils
         parser
         state
+        dump
 )
 if(RSC_UTIL_INCLUDE_DIR)
     target_include_directories(netlink-monitor PRIVATE
@@ -26,4 +43,5 @@ target_link_libraries(netlink-monitor
         pthread
         glog
         rsc_util
+        netlink-initial-dump
 )

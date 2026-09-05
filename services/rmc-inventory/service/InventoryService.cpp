@@ -1,5 +1,6 @@
 #include "InventoryService.h"
 
+#include "ErrnoString.h"
 #include <InotifyFileWatcher.h>
 #include <OperationalDiagnostics.h>
 
@@ -68,7 +69,12 @@ InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
     , settings_(settings)
     , refreshWorker_("inventory-refresh",
                      [this](std::stop_token stopToken) { runLoop(std::move(stopToken)); },
-                     [this] { (void)refreshSignal_.signal(); },
+                     [this] {
+                         if (!refreshSignal_) { return; }
+                         if (const int error = refreshSignal_->signal(); error != 0) {
+                             diagnostics::logError(name(),"worker.refresh","signal","worker_wake_failed","refresh-eventfd",errnoToString(error));
+                         }
+                     },
                      [this](const ManagedWorker::Exit& exit) { onRefreshWorkerExit(exit); })
 {
     if (!manager_) {
@@ -128,13 +134,17 @@ void InventoryService::validateConfiguration()
 
 bool InventoryService::initializeComponents()
 {
-    if (!refreshSignal_.valid()) {
-        if (!refreshSignal_.open()) {
-            diagnostics::logError(name(), "worker.refresh", "create_eventfd", "worker_start_failed", "refresh-eventfd", "failed to create refresh eventfd");
+    if (!refreshSignal_) {
+        try {
+            refreshSignal_.emplace();
+        } catch (const std::exception& error) {
+            diagnostics::logError(name(),"worker.refresh","create_eventfd","worker_start_failed","refresh-eventfd",error.what());
+            return false;
+        } catch (...) {
+            diagnostics::logError(name(),"worker.refresh","create_eventfd","worker_start_failed","refresh-eventfd","unknown exception");
             return false;
         }
     }
-
     for (const auto& transport : inventoryTransports(*this)) {
         transport->bindQueryService(*this);
     }
@@ -298,7 +308,18 @@ void InventoryService::refresh()
         std::scoped_lock lock(refreshMutex_);
         refreshRequested_ = true;
     }
-    (void)refreshSignal_.signal();
+    if (!refreshSignal_) {
+        return;
+    }
+    if (const int error = refreshSignal_->signal();error != 0) {
+        diagnostics::logError(
+            name(),
+            "worker.refresh",
+            "signal",
+            "worker_wake_failed",
+            "refresh-eventfd",
+            errnoToString(error));
+    }
 }
 
 void InventoryService::runLoop(std::stop_token stopToken)
@@ -317,9 +338,13 @@ void InventoryService::runLoop(std::stop_token stopToken)
             }
         }
 
+        if (!refreshSignal_) {
+            throw std::logic_error("InventoryService: refresh eventfd is unavailable");
+        }
+
         std::vector<pollfd> fds;
         fds.reserve(2);
-        fds.push_back({refreshSignal_.fd(), POLLIN, 0});
+        fds.push_back({refreshSignal_->fd(), POLLIN, 0});
         fds.push_back({fileWatcher_->getPollFd(), POLLIN, 0});
 
         const int pr = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), msUntil(wakeTs));
@@ -334,7 +359,9 @@ void InventoryService::runLoop(std::stop_token stopToken)
 
         if (pr > 0) {
             if ((fds[0].revents & POLLIN) != 0) {
-                (void)refreshSignal_.drain();
+                if (const int error = refreshSignal_->drain(); error != 0) {
+                    throw std::system_error(error,std::generic_category(),"InventoryService: failed to drain refresh eventfd");
+                }
             }
 
             if ((fds[1].revents & POLLIN) != 0) {
