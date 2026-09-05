@@ -4,8 +4,6 @@
 
 #include "NetlinkIo.h"
 
-#include "NetlinkIo.h"
-
 #include <glog/logging.h>
 
 #include <linux/netlink.h>
@@ -113,10 +111,11 @@ NetlinkRouteSocket NetlinkRouteSocket::open(
     return NetlinkRouteSocket(std::move(fd));
 }
 
-NetlinkWaitResult waitForNetlinkDataOrStop(
-    int dataFd,
-    EventFdSignal& stopSignal)
+NetlinkWaitResult waitForNetlinkDataOrStop(int dataFd, EventFdSignal& stopSignal )
 {
+    if (dataFd < 0) {
+        return { NetlinkWaitStatus::data_fd_failed,EBADF,};
+    }
     pollfd descriptors[2]{};
 
     descriptors[0].fd = dataFd;

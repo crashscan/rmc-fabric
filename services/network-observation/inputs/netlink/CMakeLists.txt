@@ -84,3 +84,34 @@ target_link_libraries(netlink-monitor
         netlink-event-loop
         netlink-initial-dump
 )
+
+if(BUILD_TESTING)
+    add_executable(netlink_io_tests
+        tests/NetlinkIoTests.cpp
+    )
+
+    target_compile_features(
+        netlink_io_tests
+        PRIVATE
+            cxx_std_20
+    )
+
+    target_link_libraries(
+        netlink_io_tests
+        PRIVATE
+            netlink-io
+            pthread
+    )
+
+    add_test(
+        NAME netlink_io_tests
+        COMMAND netlink_io_tests
+    )
+
+    set_tests_properties(
+        netlink_io_tests
+        PROPERTIES
+            TIMEOUT 10
+            LABELS "unit;netlink"
+    )
+endif()
