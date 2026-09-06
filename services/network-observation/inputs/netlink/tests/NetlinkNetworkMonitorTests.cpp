@@ -4,6 +4,7 @@
 
 #include <sys/socket.h>
 
+#include <fcntl.h>
 #include <array>
 #include <atomic>
 #include <cerrno>
@@ -40,6 +41,13 @@ struct SocketPair {
     UniqueFd monitor;
     UniqueFd peer;
 };
+
+[[nodiscard]] bool descriptorIsOpen(int fd)
+{
+    errno = 0;
+    return ::fcntl(fd, F_GETFD) != -1 ||
+           errno != EBADF;
+}
 
 [[nodiscard]] SocketPair makeStreamSocketPair()
 {
@@ -149,7 +157,7 @@ void testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart()
         "explicit stop should clean up the first failed epoch");
 
     expect(
-        first.monitor.valid(),
+        descriptorIsOpen(first.monitor.get()),
         "monitor must not close the first borrowed descriptor");
 
     // Second epoch with a fresh descriptor.
@@ -184,7 +192,7 @@ void testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart()
         "monitor should be stopped after second cleanup");
 
     expect(
-        second.monitor.valid(),
+        descriptorIsOpen(first.monitor.get()),
         "monitor must not close the second borrowed descriptor");
 
     expect(

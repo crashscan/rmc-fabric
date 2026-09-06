@@ -40,8 +40,6 @@ namespace test_support {
 
 class NetlinkNetworkMonitor {
 public:
-    using LiveFdProvider = std::function<int()>;
-
     explicit NetlinkNetworkMonitor(MonitorCallbacks callbacks = {}, std::set<std::string> watchedInterfaces = {});
     ~NetlinkNetworkMonitor();
     NetlinkNetworkMonitor(const NetlinkNetworkMonitor&) = delete;
@@ -70,8 +68,8 @@ private:
      * corresponding stop() returns.
      * The provider may return a fresh descriptor for every restart.The initial
      * dump still uses a production NETLINK_ROUTE dump socket.
-     *
-     * @throws std::invalid_argument if liveFd is negative.
+     * A provider exception or negative returned descriptor causes start()
+     * to roll back and return false.
      */
     NetlinkNetworkMonitor(std::function<int()> liveFdProvider,MonitorCallbacks callbacks = {},std::set<std::string> watchedInterfaces = {});
     friend class test_support::NetlinkNetworkMonitorFactory;
