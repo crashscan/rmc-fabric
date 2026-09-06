@@ -2,6 +2,7 @@
 
 #include <exception>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <stop_token>
 #include <string>
@@ -12,76 +13,149 @@ namespace RSCGroup {
 /**
  * @brief Owns worker-thread mechanics for a service-owned background loop.
  *
- * `ManagedWorker` owns **mechanics only**: launch, cooperative stop request,
- * wake, serialized join, exit capture, and restart/reap behavior.  It has no
- * knowledge of service epochs, readiness, transports, issue codes, or restart
- * policy.  Those remain owned by the service (see `LifecycleCoordinator` for
- * service-epoch serialization and the services themselves for health policy).
+ * ManagedWorker owns mechanics only: worker launch, cooperative stop request,
+ * blocking-operation wakeup, serialized join, structured exit capture, and
+ * generation-aware restart/reap behavior.
  *
- * Threading model
- * ---------------
- * `start()`, `stop()` and `join()` are serialized on an internal operation
- * mutex, so two external threads may call `stop()`/`join()` concurrently
- * without double-joining the underlying `std::jthread`.  `requestStop()` is
- * safe from any thread, including the worker thread itself, and never joins.
+ * It has no knowledge of service epochs, readiness, transports, issue codes,
+ * or restart policy. Those policies remain with the owning component.
  *
- * `join()` and `stop()` called from the worker thread are rejected with a
- * deterministic `std::logic_error`.  **There is no `detach()` path**: a
- * detached thread that captures the owning object creates a use-after-free
- * window and breaks producer-drain guarantees.
- *
- * Callback contracts
- * ------------------
- *  - `Work` receives a `std::stop_token` and must return promptly once
- *    `stop_requested()` becomes true.  Exceptions are captured into `Exit`
- *    and never escape the thread entry point.
- *  - `Wake` must be non-blocking and must not throw.  It is invoked exactly
- *    once per real stop request issued through `requestStop()`/`stop()` while
- *    the worker is live, to interrupt a blocking poll/CV wait.
- *  - `ExitHandler` must not throw, runs **on the worker thread** after
- *    `running` has been cleared and `lastExit()` has been recorded, and must
- *    not synchronously drive its own worker's lifecycle: it must not call
- *    `start()`, `stop()` or `join()` on the owning `ManagedWorker`.
- *
- * `std::function` cannot express `noexcept`, so violations of the
- * non-throwing contracts are caught and logged rather than being allowed to
- * abort the process or wedge worker state.
- *
- * Violation-policy asymmetry
- * --------------------------
- * Wake and exit-handler callbacks are *signaling* mechanisms, so their
- * exceptions are contained; containment is degradation tolerance, not free
- * recovery.
- *
- * The owner selects the policy for an underlying wake failure:
- *
- *  - A worker with a bounded timeout or another guaranteed wake source may
- *    log the failure and tolerate delayed shutdown, potentially until its
- *    natural poll/CV wake interval (for example, inventory's reconciliation
- *    interval or observation's aging interval).
- *  - A worker that may block indefinitely with no other deterministic wake
- *    path may treat wake failure as fatal to avoid an unbounded join. The
- *    netlink monitor uses this abort-over-hang policy.
- *
- * The wake callback remains non-blocking and non-throwing under either
- * policy. ManagedWorker invokes the callback but deliberately does not
- * prescribe the owner's underlying signaling-failure policy.
- *
- * By contrast, query quiescence insport` is a structural safety barrier and is
- * `noexcept` and local-only.
- *
- * Member destruction-order requirement
- * ------------------------------------
- * > If worker callbacks capture the owning object, declare the
- * > `ManagedWorker` member **after** every sibling member those callbacks
- * > access, so the worker is destroyed first during reverse member
- * > destruction.
- *
- * Advisory exit reason
+ * Generation semantics
  * --------------------
- * `ExitReason::returned` versus `ExitReason::stop_requested` is **advisory**:
- * a worker returning on its own may race a concurrent stop request.  Services
- * must not treat the distinction as an authoritative synchronization fact.
+ * Each successful start() creates a distinct worker generation represented by
+ * an internal shared control object.
+ *
+ * stop() and join() operate on the generation visible when the call begins:
+ *
+ * - If generation N is visible, the operation never affects replacement
+ *   generation N+1.
+ * - If no generation is visible because a concurrent start() already owns
+ *   operation serialization but has not published its generation, stop() or
+ *   join() adopts that concurrently launched generation after acquiring the
+ *   operation mutex.
+ *
+ * A generation is not retired until:
+ *
+ * - its worker thread has been joined; and
+ * - any wake callback already running for that generation has completed.
+ *
+ * This ensures that a delayed stop or wake request for generation N cannot
+ * affect worker or wake resources belonging to generation N+1.
+ *
+ * Threading and lock model
+ * ------------------------
+ * start(), stop(), join(), and isJoinable() serialize ownership operations on
+ * an internal operation mutex.
+ *
+ * requestStop() is safe from any thread, including the worker thread. It
+ * requests cooperative cancellation and may invoke Wake, but never joins.
+ *
+ * The effective internal lock order is:
+ *
+ *     operation mutex -> generation wake mutex -> state mutex
+ *
+ * Not every path acquires every mutex. In particular:
+ *
+ * - state mutex is never held while requesting stop, joining, or invoking
+ *   owner callbacks;
+ * - request_stop() is never called while any ManagedWorker mutex is held;
+ * - the worker entry point, epilogue, and ExitHandler never acquire the
+ *   operation mutex;
+ * - joining never occurs while the state mutex or wake mutex is held.
+ *
+ * request_stop() executes registered stop callbacks synchronously. Calling it
+ * outside all ManagedWorker mutexes is therefore a required invariant.
+ *
+ * stop() and join() called from the worker thread are rejected with
+ * std::logic_error. There is no detach path.
+ *
+ * Work contract
+ * -------------
+ * Work:
+ *
+ * - receives the current generation's std::stop_token;
+ * - must tolerate receiving an already-stopped token;
+ * - must return promptly after stop is requested;
+ * - may throw; exceptions are captured into Exit;
+ * - may not execute at all if ManagedWorker observes a stop request before
+ *   invoking Work.
+ *
+ * A stop request can race the final pre-invocation token check. Work must
+ * therefore still inspect and honor its token even though ManagedWorker checks
+ * it before invocation.
+ *
+ * If Work is skipped because stop was already requested, the generation
+ * finalizes with ExitReason::stop_requested.
+ *
+ * Wake contract
+ * -------------
+ * Wake:
+ *
+ * - must be non-blocking and non-throwing;
+ * - may run even when Work never begins, because stopping a published
+ *   generation still performs its normal wake operation;
+ * - is delivered at most once per generation;
+ * - when delivered, runs synchronously on the thread whose request first
+ *   successfully changes that generation to stop-requested;
+ * - must not call start(), stop(), join(), requestStop(), or isJoinable() on
+ *   this ManagedWorker;
+ * - may call state-only queries such as isRunning(), isCurrentThread(), and
+ *   lastExit().
+ *
+ * Generation retirement waits for an in-flight Wake invocation. Calling an
+ * operation-mutex method from Wake could therefore deadlock.
+ *
+ * Owner resources used by Wake must be initialized before start() is called
+ * and must remain valid until the generation has been joined and retired.
+ *
+ * ExitHandler contract
+ * --------------------
+ * ExitHandler:
+ *
+ * - runs on the worker thread after running state has been cleared and
+ *   lastExit() has been recorded;
+ * - runs before the worker thread identity is cleared;
+ * - must be non-blocking and non-throwing;
+ * - must not call start(), stop(), join(), or isJoinable() on this worker;
+ * - may call isRunning(), isCurrentThread(), lastExit(), and requestStop().
+ *
+ * An external join may hold the operation mutex while waiting for ExitHandler
+ * to complete. ExitHandler must therefore never acquire the operation mutex.
+ *
+ * std::function cannot express noexcept. Exceptions from Wake and ExitHandler
+ * are caught and logged.
+ *
+ * Wake failure policy
+ * -------------------
+ * ManagedWorker invokes Wake but does not decide the owning component's policy
+ * for an underlying signaling failure.
+ *
+ * A component with another guaranteed wake path or finite timeout may log and
+ * tolerate delayed shutdown. A component whose worker may block indefinitely
+ * with Wake as its only deterministic interrupt path may instead use an
+ * abort-over-hang policy.
+ *
+ * Member destruction order
+ * ------------------------
+ * If Work, Wake, or ExitHandler captures the owning object, declare
+ * ManagedWorker after every sibling member those callbacks access. Reverse
+ * member destruction then stops and joins the worker before those resources
+ * are destroyed.
+ *
+ * Exit reason semantics
+ * ---------------------
+ * ExitReason::returned versus ExitReason::stop_requested is advisory.
+ *
+ * The reason reflects the generation token's state when the worker finalizes,
+ * not necessarily whether the stop request caused Work to return. A stop that
+ * arrives after Work returns but before final classification may therefore
+ * produce ExitReason::stop_requested.
+ *
+ * Object lifetime
+ * ---------------
+ * ManagedWorker serializes concurrent member calls, but it does not make
+ * concurrent destruction safe. The owner must remain alive for the complete
+ * duration of every concurrent call.
  */
 class ManagedWorker {
 public:
@@ -89,10 +163,10 @@ public:
     using Wake = std::function<void()>;
 
     enum class ExitReason {
-        not_started,     ///< Never launched, or reset before first launch.
-        stop_requested,  ///< Work returned with a stop request outstanding.
-        returned,        ///< Work returned without an outstanding stop request.
-        exception,       ///< Work terminated by throwing.
+        not_started,
+        stop_requested,
+        returned,
+        exception,
     };
 
     struct Exit {
@@ -103,24 +177,24 @@ public:
     using ExitHandler = std::function<void(const Exit&)>;
 
     /**
-     * @param name    Human-readable worker name used in log messages.
-     * @param work    Loop body; must return when `stop_requested()` is true.
-     * @param wake    Optional non-blocking, non-throwing wake signal.
-     * @param onExit  Optional non-throwing exit notification (worker thread).
+     * @param name Human-readable worker name used in diagnostics.
+     * @param work Worker body.
+     * @param wake Optional blocking-operation wake callback.
+     * @param onExit Optional worker-exit callback.
+     *
+     * @throws std::invalid_argument if work is empty.
      */
-    ManagedWorker(std::string name,
-                  Work work,
-                  Wake wake = {},
-                  ExitHandler onExit = {});
+    ManagedWorker(
+        std::string name,
+        Work work,
+        Wake wake = {},
+        ExitHandler onExit = {});
 
     /**
-     * @brief Requests stop and joins.  Never detaches.
+     * Requests stop and joins the current generation.
      *
-     * Destruction from the worker thread is an ownership/programming
-     * violation.  Joining oneself is impossible and detaching is forbidden,
-     * so the violation is reported fatally and the process aborts with an
-     * actionable diagnostic rather than terminating inside `~jthread` on a
-     * failed self-join.
+     * Destruction from the worker thread is an ownership violation and is
+     * reported fatally. ManagedWorker never detaches its worker.
      */
     ~ManagedWorker();
 
@@ -128,61 +202,140 @@ public:
     ManagedWorker& operator=(const ManagedWorker&) = delete;
 
     /**
-     * @brief Launch the worker thread.
+     * Launches a new worker generation.
      *
-     * Under the operation mutex all three prior states are defined:
-     *  - `running == true`             → return false (already running);
-     *  - `!running && thread joinable` → reap the finished worker, then launch;
-     *  - `!thread joinable`            → launch.
+     * If a previous generation finished but remains unjoined, it is joined and
+     * retired before the new generation is created.
      *
-     * The finished-but-unjoined worker is reaped by an explicit `join()`
-     * rather than by move-assigning a fresh `std::jthread` over it, because
-     * move-assignment implicitly requests stop and joins **without** invoking
-     * the configured wake callback.
+     * @return true if a generation was launched.
+     * @return false if Work is currently executing.
      *
-     * @return true if a new worker was launched; false if already running.
-     * @throws Any exception from `std::jthread` construction.  The object is
-     *         left restartable.
+     * @throws Exceptions from std::jthread construction.
      */
     [[nodiscard]] bool start();
 
     /**
-     * @brief Request cooperative stop and fire the wake callback.
+     * Requests cooperative stop for the generation current at invocation.
      *
-     * Safe from any thread, including the worker.  Does not join.  A stop
-     * request on an already-stopping/finished worker does not re-fire wake.
+     * Safe from any thread, including the worker thread. Does not join.
      */
     void requestStop() noexcept;
 
     /**
-     * @brief Join the worker thread.  Idempotent and internally serialized.
+     * Joins and retires the generation observed at call entry.
+     *
+     * If that generation is retired and replaced while this call waits for
+     * operation serialization, the replacement is not joined.
+     *
+     * If no generation is initially visible because a concurrent start()
+     * already owns operation serialization, this call adopts and joins that
+     * concurrently launched generation.
+     *
      * @throws std::logic_error if called from the worker thread.
      */
     void join();
 
     /**
-     * @brief `requestStop()` followed by `join()`.  Idempotent.
+     * Requests stop, wakes, joins, and retires the generation observed at call
+     * entry.
+     *
+     * A replacement generation is never affected by a stale stop call.
+     *
+     * If no generation is initially visible because a concurrent start()
+     * already owns operation serialization, this call adopts and stops that
+     * concurrently launched generation.
+     *
      * @throws std::logic_error if called from the worker thread.
      */
     void stop();
 
+    /**
+     * Returns true while the current generation's Work is executing or is
+     * about to execute.
+     *
+     * This becomes false before ExitHandler is invoked.
+     */
     [[nodiscard]] bool isRunning() const noexcept;
+
+    /**
+     * Returns whether ManagedWorker owns a joinable worker thread.
+     *
+     * Must not be called from Work, Wake, or ExitHandler.
+     */
     [[nodiscard]] bool isJoinable() const noexcept;
 
     /**
-     * @brief True when the calling thread is this worker's thread.
+     * Returns true when called from the current generation's worker thread.
      *
-     * Remains true for the complete duration of the exit handler, so
-     * self-operation detection works from inside the handler.
+     * Remains true for the complete ExitHandler invocation.
      */
     [[nodiscard]] bool isCurrentThread() const noexcept;
 
+    /**
+     * Returns the most recently recorded exit.
+     *
+     * A new generation resets this to ExitReason::not_started.
+     */
     [[nodiscard]] Exit lastExit() const;
 
-    [[nodiscard]] const std::string& workerName() const noexcept { return name_; }
+    [[nodiscard]] const std::string& workerName() const noexcept
+    {
+        return name_;
+    }
 
 private:
-    void joinLocked();
+    /**
+     * Per-generation stop and wake control.
+     *
+     * Shared ownership allows a delayed caller to retain the generation it
+     * observed even after that generation is no longer current. Shared-pointer
+     * identity is the generation identity.
+     */
+    struct GenerationControl {
+        /**
+         * Fresh, valid, non-requested stop state for this generation.
+         *
+         * It is created with the generation and is never replaced. Work
+         * receives this source's token rather than std::jthread's internal
+         * token.
+         */
+        std::stop_source stopSource;
+
+        /**
+         * Serializes Wake invocation with generation retirement.
+         */
+        std::mutex wakeMutex;
+        bool wakeEnabled{true};
+    };
+
+    using GenerationPtr = std::shared_ptr<GenerationControl>;
+
+    [[nodiscard]] GenerationPtr
+    currentGeneration() const noexcept;
+
+    [[nodiscard]] bool
+    isCurrentGeneration(
+        const GenerationPtr& generation) const noexcept;
+
+    void requestStopForGeneration(
+        const GenerationPtr& generation) noexcept;
+
+    /**
+     * Joins and retires generation.
+     *
+     * Precondition: opMutex_ is held.
+     */
+    void joinAndRetireLocked(
+        const GenerationPtr& generation);
+
+    /**
+     * Disables generation Wake and clears current-generation state.
+     *
+     * May wait for a Wake invocation already in progress.
+     */
+    void retireGeneration(
+        const GenerationPtr& generation) noexcept;
+
     void invokeWake() noexcept;
 
     std::string name_;
@@ -190,18 +343,24 @@ private:
     Wake wake_;
     ExitHandler onExit_;
 
-    /// Serializes start/stop/join so no two callers can join concurrently.
+    /**
+     * Serializes ownership operations on thread_.
+     */
     mutable std::mutex opMutex_;
-    /// Guards running_, lastExit_ and workerThreadId_.
+
+    /**
+     * Guards running_, lastExit_, workerThreadId_, and currentGeneration_.
+     */
     mutable std::mutex stateMutex_;
 
     bool running_{false};
     Exit lastExit_{};
     std::thread::id workerThreadId_{};
-    /// Copy of the live thread's stop source; lets requestStop() avoid opMutex_.
-    std::stop_source stopSource_{std::nostopstate};
+    GenerationPtr currentGeneration_;
 
-    /// Declared last: the thread must be reaped before the state it reads.
+    /**
+     * Declared last so it is destroyed before callback-accessed owner state.
+     */
     std::jthread thread_;
 };
 
