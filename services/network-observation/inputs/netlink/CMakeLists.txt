@@ -117,6 +117,13 @@ if(BUILD_TESTING)
 
     add_executable(netlink_monitor_tests
             tests/NetlinkNetworkMonitorTests.cpp
+            tests/support/NetlinkNetworkMonitorFactory.cpp
+    )
+
+    target_include_directories(
+            netlink_monitor_tests
+            PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/tests/support
     )
 
     target_compile_features(

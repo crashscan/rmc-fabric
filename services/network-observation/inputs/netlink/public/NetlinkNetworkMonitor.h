@@ -30,11 +30,18 @@
 #include <set>
 #include <string>
 #include <vector>
+#include <functional>
 
 namespace RSCGroup {
 
+namespace test_support {
+    class NetlinkNetworkMonitorFactory;
+}
+
 class NetlinkNetworkMonitor {
 public:
+    using LiveFdProvider = std::function<int()>;
+
     explicit NetlinkNetworkMonitor(MonitorCallbacks callbacks = {}, std::set<std::string> watchedInterfaces = {});
     ~NetlinkNetworkMonitor();
     NetlinkNetworkMonitor(const NetlinkNetworkMonitor&) = delete;
@@ -54,16 +61,21 @@ public:
     [[nodiscard]] std::vector<DeviceEvent> getDevicesSnapshot() const;
     [[nodiscard]] std::vector<LinkEvent> getLinksSnapshot() const;
 
+private:
     /**
      * Test/injection constructor.
-     * Borrows liveFd for the live-event loop. The caller retains ownership
-     * and must keep the descriptor open until stop() returns. The initial
+     * Invokes liveFdProvider once for every startup epoch and borrows the
+     * returned descriptor for the live-event loop. The caller retains
+     * ownership and must keep each returned descriptor open until the
+     * corresponding stop() returns.
+     * The provider may return a fresh descriptor for every restart.The initial
      * dump still uses a production NETLINK_ROUTE dump socket.
      *
-     *  @throws std::invalid_argument if liveFd is negative.
+     * @throws std::invalid_argument if liveFd is negative.
      */
-    NetlinkNetworkMonitor(int liveFd,MonitorCallbacks callbacks = {},std::set<std::string> watchedInterfaces = {});
-private:
+    NetlinkNetworkMonitor(std::function<int()> liveFdProvider,MonitorCallbacks callbacks = {},std::set<std::string> watchedInterfaces = {});
+    friend class test_support::NetlinkNetworkMonitorFactory;
+
     class Impl;
     std::unique_ptr<Impl> impl_;
 };

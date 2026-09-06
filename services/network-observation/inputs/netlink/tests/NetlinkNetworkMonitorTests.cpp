@@ -1,23 +1,25 @@
-//
-// Created by vvass on 06-Sep-26.
-//
-#include "NetlinkNetworkMonitor.h"
+#include "NetlinkNetworkMonitorFactory.h"
 
 #include <UniqueFd.h>
 
 #include <sys/socket.h>
 
+#include <array>
+#include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iostream>
+#include <stdexcept>
 #include <string>
 #include <thread>
 
 namespace {
 
 using namespace RSCGroup;
+using RSCGroup::test_support::NetlinkNetworkMonitorFactory;
 
 constexpr auto testTimeout = std::chrono::seconds(5);
 constexpr auto pollInterval = std::chrono::milliseconds(5);
@@ -80,76 +82,180 @@ struct SocketPair {
     return predicate();
 }
 
-void testWorkerDeathMakesMonitorUnhealthy()
+void testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart()
 {
-    SocketPair sockets = makeStreamSocketPair();
+    SocketPair first = makeStreamSocketPair();
+    SocketPair second = makeStreamSocketPair();
 
-    NetlinkNetworkMonitor monitor(
-        sockets.monitor.get());
+    const std::array<int, 2> liveDescriptors{
+        first.monitor.get(),
+        second.monitor.get(),
+    };
+
+    std::atomic<std::size_t> providerCalls{0};
+
+    auto monitor = NetlinkNetworkMonitorFactory::create(
+        [&]() -> int {
+            const std::size_t index =
+                providerCalls.fetch_add(
+                    1,
+                    std::memory_order_relaxed);
+
+            if (index >= liveDescriptors.size()) {
+                throw std::runtime_error(
+                    "unexpected additional live-FD request");
+            }
+
+            return liveDescriptors[index];
+        });
+
+    // First epoch.
+    expect(
+        monitor->start(),
+        "monitor should start with the first injected descriptor");
 
     expect(
-        monitor.start(),
-        "monitor should start with an injected live descriptor");
+        providerCalls.load(std::memory_order_relaxed) == 1,
+        "first startup should request exactly one descriptor");
 
     expect(
-        monitor.isRunning(),
-        "monitor should initially report running");
+        monitor->isRunning(),
+        "first monitor epoch should initially be healthy");
 
-    /*
-     * NetlinkEventLoop polls sockets.monitor. Closing the connected peer
-     * produces POLLHUP, causing the live loop to return a failure. The worker
-     * converts that result into an exception and records workerFailed_ in its
-     * exit handler.
-     */
-    sockets.peer.reset();
+    first.peer.reset();
 
     expect(
         waitFor([&monitor] {
-            return !monitor.isRunning();
+            return !monitor->isRunning();
         }),
-        "unexpected worker termination should make isRunning() false");
+        "first worker death should make the monitor unhealthy");
 
     /*
-     * Worker failure does not end the lifecycle epoch. Explicit stop is still
-     * required to reap the failed worker, release resources, and permit a
-     * future epoch.
+     * Worker failure changes health, not lifecycle state. Restart remains
+     * rejected until explicit stop reaps the failed epoch.
      */
-    monitor.stop();
+    expect(
+        !monitor->start(),
+        "restart before explicit stop should be rejected");
 
     expect(
-        !monitor.isRunning(),
-        "monitor should remain stopped after explicit cleanup");
+        providerCalls.load(std::memory_order_relaxed) == 1,
+        "rejected restart must not request another descriptor");
+
+    monitor->stop();
+
+    expect(
+        !monitor->isRunning(),
+        "explicit stop should clean up the first failed epoch");
+
+    expect(
+        first.monitor.valid(),
+        "monitor must not close the first borrowed descriptor");
+
+    // Second epoch with a fresh descriptor.
+    expect(
+        monitor->start(),
+        "monitor should restart with the second injected descriptor");
+
+    expect(
+        providerCalls.load(std::memory_order_relaxed) == 2,
+        "restart should request exactly one fresh descriptor");
+
+    expect(
+        monitor->isRunning(),
+        "second monitor epoch should initially be healthy");
 
     /*
-     * The injected descriptor is borrowed. Monitor destruction/stop must not
-     * close it.
+     * Fail the second descriptor as well. This proves the restarted worker is
+     * polling the descriptor returned for the second epoch.
      */
+    second.peer.reset();
+
     expect(
-        sockets.monitor.valid(),
-        "monitor must not take ownership of the injected descriptor");
+        waitFor([&monitor] {
+            return !monitor->isRunning();
+        }),
+        "second worker death should make the restarted monitor unhealthy");
+
+    monitor->stop();
+
+    expect(
+        !monitor->isRunning(),
+        "monitor should be stopped after second cleanup");
+
+    expect(
+        second.monitor.valid(),
+        "monitor must not close the second borrowed descriptor");
+
+    expect(
+        providerCalls.load(std::memory_order_relaxed) == 2,
+        "two claimed startup epochs should request two descriptors");
 }
 
-void testInvalidInjectedDescriptorFailsStartup()
+void testInvalidProvidedDescriptorFailsStartup()
 {
-    NetlinkNetworkMonitor monitor(-1);
+    std::atomic<int> providerCalls{0};
+
+    auto monitor = NetlinkNetworkMonitorFactory::create(
+        [&] {
+            providerCalls.fetch_add(
+                1,
+                std::memory_order_relaxed);
+
+            return -1;
+        });
 
     expect(
-        !monitor.start(),
-        "negative injected descriptor should fail startup");
+        !monitor->start(),
+        "negative provided descriptor should fail startup");
 
     expect(
-        !monitor.isRunning(),
-        "failed injected startup should leave monitor stopped");
+        !monitor->isRunning(),
+        "failed injected startup should leave the monitor stopped");
 
-    monitor.stop();
+    expect(
+        providerCalls.load(std::memory_order_relaxed) == 1,
+        "failed startup should invoke the provider exactly once");
+
+    monitor->stop();
+}
+
+void testProviderExceptionRollsBackStartup()
+{
+    std::atomic<int> providerCalls{0};
+
+    auto monitor = NetlinkNetworkMonitorFactory::create(
+        [&]() -> int {
+            providerCalls.fetch_add(
+                1,
+                std::memory_order_relaxed);
+
+            throw std::runtime_error(
+                "injected descriptor provider failed");
+        });
+
+    expect(
+        !monitor->start(),
+        "provider exception should fail startup");
+
+    expect(
+        !monitor->isRunning(),
+        "provider exception should leave the monitor stopped");
+
+    expect(
+        providerCalls.load(std::memory_order_relaxed) == 1,
+        "provider should be invoked exactly once");
+
+    monitor->stop();
 }
 
 } // namespace
 
 int main()
 {
-    testWorkerDeathMakesMonitorUnhealthy();
-    testInvalidInjectedDescriptorFailsStartup();
+    testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart();
+    testInvalidProvidedDescriptorFailsStartup();
+    testProviderExceptionRollsBackStartup();
 
     return EXIT_SUCCESS;
 }

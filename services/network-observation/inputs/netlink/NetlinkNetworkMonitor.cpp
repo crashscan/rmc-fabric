@@ -40,10 +40,10 @@ public:
     explicit Impl(
         MonitorCallbacks callbacks,
         std::set<std::string> watchedInterfaces,
-        std::optional<int> injectedLiveFd = std::nullopt)
+         std::function<int()> liveFdProvider = {})
         : callbacks_(std::move(callbacks))
         , watchedInterfaces_(std::move(watchedInterfaces))
-        , injectedLiveFd_(injectedLiveFd)
+        , liveFdProvider_(std::move(liveFdProvider))
         , onLinkHandler_([this](const LinkEvent& event) {
             onLinkCallback(event);
         })
@@ -98,8 +98,9 @@ public:
              * and will be processed when the worker starts.
              */
             NetlinkEventLoop::MessageHandler messageHandler = [this](const nlmsghdr* message) {processSingleMessage(message);};
-            if (injectedLiveFd_) {
-                liveLoop_.emplace(*injectedLiveFd_,*stopSignal_, std::move(messageHandler));
+            if (liveFdProvider_) {
+                const int liveFd = liveFdProvider_();
+                liveLoop_.emplace(liveFd,*stopSignal_, std::move(messageHandler));
             } else {
                 liveLoop_.emplace(*stopSignal_,std::move(messageHandler));
             }
@@ -451,9 +452,11 @@ private:
 
     MonitorCallbacks callbacks_;
     std::set<std::string> watchedInterfaces_;
-    // Set only by the test/injection constructor. The caller retains
-    // ownership and must keep the descriptor open through stop().
-    std::optional<int> injectedLiveFd_;
+    /*
+     * Set only through the private test-support constructor. Called once per
+     * newly claimed startup epoch. Each returned descriptor is borrowed.
+     */
+    std::function<int()> liveFdProvider_;
 
     /*
      * Resource dependency order:
@@ -494,10 +497,14 @@ NetlinkNetworkMonitor::NetlinkNetworkMonitor(
 }
 
 NetlinkNetworkMonitor::NetlinkNetworkMonitor(
-    int liveFd,
+    std::function<int()> liveFdProvider,
     MonitorCallbacks callbacks,
     std::set<std::string> watchedInterfaces)
-    : impl_(std::make_unique<Impl>(std::move(callbacks),std::move(watchedInterfaces),liveFd))
+    : impl_(
+          std::make_unique<Impl>(
+              std::move(callbacks),
+              std::move(watchedInterfaces),
+              std::move(liveFdProvider)))
 {
 }
 
