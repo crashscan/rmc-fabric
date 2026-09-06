@@ -66,6 +66,11 @@ namespace RSCGroup {
  * request_stop() executes registered stop callbacks synchronously. Calling it
  * outside all ManagedWorker mutexes is therefore a required invariant.
  *
+ * Code registering callbacks on Work's stop token must not call start(),
+ * stop(), join(), requestStop(), or isJoinable() on this ManagedWorker.
+ * Such callbacks run synchronously before the winning stop requester invokes
+ * Wake; waiting for worker completion from one could therefore deadlock.
+ *
  * stop() and join() called from the worker thread are rejected with
  * std::logic_error. There is no detach path.
  *
