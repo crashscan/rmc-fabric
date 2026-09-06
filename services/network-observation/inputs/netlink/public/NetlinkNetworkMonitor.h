@@ -54,6 +54,15 @@ public:
     [[nodiscard]] std::vector<DeviceEvent> getDevicesSnapshot() const;
     [[nodiscard]] std::vector<LinkEvent> getLinksSnapshot() const;
 
+    /**
+     * Test/injection constructor.
+     * Borrows liveFd for the live-event loop. The caller retains ownership
+     * and must keep the descriptor open until stop() returns. The initial
+     * dump still uses a production NETLINK_ROUTE dump socket.
+     *
+     *  @throws std::invalid_argument if liveFd is negative.
+     */
+    NetlinkNetworkMonitor(int liveFd,MonitorCallbacks callbacks = {},std::set<std::string> watchedInterfaces = {});
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;

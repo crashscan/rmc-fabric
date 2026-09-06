@@ -39,9 +39,11 @@ class NetlinkNetworkMonitor::Impl {
 public:
     explicit Impl(
         MonitorCallbacks callbacks,
-        std::set<std::string> watchedInterfaces)
+        std::set<std::string> watchedInterfaces,
+        std::optional<int> injectedLiveFd = std::nullopt)
         : callbacks_(std::move(callbacks))
         , watchedInterfaces_(std::move(watchedInterfaces))
+        , injectedLiveFd_(injectedLiveFd)
         , onLinkHandler_([this](const LinkEvent& event) {
             onLinkCallback(event);
         })
@@ -95,11 +97,12 @@ public:
              * dump. Notifications arriving while the dump runs remain queued
              * and will be processed when the worker starts.
              */
-            liveLoop_.emplace(
-                *stopSignal_,
-                [this](const nlmsghdr* message) {
-                    processSingleMessage(message);
-                });
+            NetlinkEventLoop::MessageHandler messageHandler = [this](const nlmsghdr* message) {processSingleMessage(message);};
+            if (injectedLiveFd_) {
+                liveLoop_.emplace(*injectedLiveFd_,*stopSignal_, std::move(messageHandler));
+            } else {
+                liveLoop_.emplace(*stopSignal_,std::move(messageHandler));
+            }
         } catch (const std::exception& error) {
             LOG(ERROR) << "failed to initialize netlink monitoring: " << error.what();
             return rollbackStartup(transition);
@@ -264,7 +267,6 @@ public:
 
         closeResources();
         netlinkState_.clear();
-
         transition.complete();
 
         LOG(INFO) << "NetlinkNetworkMonitor stopped";
@@ -449,6 +451,9 @@ private:
 
     MonitorCallbacks callbacks_;
     std::set<std::string> watchedInterfaces_;
+    // Set only by the test/injection constructor. The caller retains
+    // ownership and must keep the descriptor open through stop().
+    std::optional<int> injectedLiveFd_;
 
     /*
      * Resource dependency order:
@@ -484,10 +489,15 @@ private:
 NetlinkNetworkMonitor::NetlinkNetworkMonitor(
     MonitorCallbacks callbacks,
     std::set<std::string> watchedInterfaces)
-    : impl_(
-          std::make_unique<Impl>(
-              std::move(callbacks),
-              std::move(watchedInterfaces)))
+    : impl_(std::make_unique<Impl>(std::move(callbacks),std::move(watchedInterfaces)))
+{
+}
+
+NetlinkNetworkMonitor::NetlinkNetworkMonitor(
+    int liveFd,
+    MonitorCallbacks callbacks,
+    std::set<std::string> watchedInterfaces)
+    : impl_(std::make_unique<Impl>(std::move(callbacks),std::move(watchedInterfaces),liveFd))
 {
 }
 

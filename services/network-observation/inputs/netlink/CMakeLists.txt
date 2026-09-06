@@ -114,4 +114,34 @@ if(BUILD_TESTING)
             TIMEOUT 10
             LABELS "unit;netlink"
     )
+
+    add_executable(netlink_monitor_tests
+            tests/NetlinkNetworkMonitorTests.cpp
+    )
+
+    target_compile_features(
+            netlink_monitor_tests
+            PRIVATE
+            cxx_std_20
+    )
+
+    target_link_libraries(
+            netlink_monitor_tests
+            PRIVATE
+            netlink-monitor
+            pthread
+    )
+
+    add_test(
+            NAME netlink_monitor_tests
+            COMMAND netlink_monitor_tests
+    )
+
+    set_tests_properties(
+            netlink_monitor_tests
+            PROPERTIES
+            TIMEOUT 15
+            LABELS "unit;netlink;resilience"
+    )
+
 endif()
