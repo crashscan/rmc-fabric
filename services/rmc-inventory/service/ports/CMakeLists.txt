@@ -6,4 +6,10 @@ target_include_directories(inventory_service_ports
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-target_link_libraries(inventory_service_ports INTERFACE interop_contract inventory_core service_framework)
+target_link_libraries(
+    inventory_service_ports
+    INTERFACE
+        interop_contract
+        inventory_core
+        rsc_util::service_runtime
+)

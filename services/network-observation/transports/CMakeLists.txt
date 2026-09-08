@@ -33,9 +33,9 @@ target_link_libraries(network_observation_dbus_transport
     PUBLIC
         network_observation_service_ports
         network_observation_dbus_codec
-        dbus_transport_base
+        rsc_util::service_dbus
     PRIVATE
-        service_framework
+        rsc_util::service_dbus
         DBusCxx::DBusCxx
         SigCxx::SigCxx
         glog

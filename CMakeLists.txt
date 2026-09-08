@@ -81,7 +81,7 @@ if(RSC_UTIL_INCLUDE_DIR)
     )
 endif()
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
+list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
 # ---------------------------------------------------------------------------
 # Install helpers — included early so CMAKE_INSTALL_INCLUDEDIR etc. are
@@ -89,6 +89,32 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 # ---------------------------------------------------------------------------
 include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
+
+find_package(
+    rsc_util 2.1
+    CONFIG
+    REQUIRED
+    COMPONENTS
+        client_contract
+        service_runtime
+        service_dbus
+)
+
+option(
+        RMC_FABRIC_USE_EXTERNAL_CLIENT_CONTRACT
+        "Use ClientResult and DecodeError from rsc_util"
+        ON
+)
+
+if(RMC_FABRIC_USE_EXTERNAL_CLIENT_CONTRACT)
+    find_package(
+            rsc_util 2.1
+            CONFIG
+            REQUIRED
+            COMPONENTS
+            client_contract
+    )
+endif()
 
 # ---------------------------------------------------------------------------
 # Testing — BUILD_TESTING is the CMake standard option; include(CTest) honours it.
@@ -165,12 +191,6 @@ configure_file(
     COPYONLY
 )
 
-configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindDBusCxx.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/FindDBusCxx.cmake"
-    COPYONLY
-)
-
 export(
     EXPORT rmc_fabricTargets
     FILE "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricTargets.cmake"
@@ -188,7 +208,6 @@ install(
         "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfigVersion.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindSigCxx.cmake"
-        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindDBusCxx.cmake"
     DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
     COMPONENT   dev
 )

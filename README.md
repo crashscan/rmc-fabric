@@ -206,7 +206,7 @@ concurrently.
 synchronization is insufficient because the check and dereference are not
 atomic with respect to the racing write.
 
-**Implementation:** `ServiceBinding<T>` (`lib/dbus_transport_base/ServiceBinding.h`)
+**Implementation:** `ServiceBinding<T>` from `rsc_util::service_dbus`
 uses a `std::shared_mutex`:
 - `acquire()` takes a *shared* lock for the duration of one handler call.
 - `detach()` takes a *unique* lock, blocking until all in-flight shared holders
@@ -216,4 +216,4 @@ uses a `std::shared_mutex`:
 
 ### Service framework
 
-See `lib/service_framework/README.md` for the supported framework surface and lifecycle ownership rules.
+See the `rsc_util::service_runtime` documentation for the supported framework surface and lifecycle ownership rules.

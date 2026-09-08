@@ -6,4 +6,10 @@ target_include_directories(network_observation_service_ports
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
-target_link_libraries(network_observation_service_ports INTERFACE interop_contract observation-model service_framework)
+target_link_libraries(
+    network_observation_service_ports
+    INTERFACE
+        interop_contract
+        observation-model
+        rsc_util::service_runtime
+)

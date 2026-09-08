@@ -2,18 +2,65 @@
 set -Eeuo pipefail
 
 # Usage:
-#   ./collect.sh [source_directory] [output_file]
+#   ./collect.sh [-o output_file] [source_directory ...]
 #
 # Examples:
-#   ./collect.sh .
-#   ./collect.sh "/path/to/project" collected-source.txt
-#   ./collect.sh "D:/linux/automation/__new/rmc-fabric" collected-source.txt
+#   ./collect.sh
+#   ./collect.sh src include tests
+#   ./collect.sh -o collected-source.txt "/path/to/project" "/path/to/other"
+#   ./collect.sh -o collected-source.txt "D:/linux/automation/__new/rmc-fabric" ../shared
+#
+# Notes:
+#   - Options must come before source directories.
+#   - If no source directory is given, the current directory is used.
+#   - Each source is scanned with its own Git context: sources may live
+#     in different repositories, or in no repository at all.
+#   - Overlapping or repeated sources are de-duplicated: every file is
+#     collected at most once.
 
-ROOT="${1:-.}"
-OUTPUT="${2:-collected-source.txt}"
+OUTPUT="collected-source.txt"
 
-# Resolve the source directory.
-ROOT="$(cd "$ROOT" && pwd)"
+usage() {
+    cat <<'EOF'
+Usage:
+  collect.sh [-o output_file] [source_directory ...]
+
+Options (must come before source directories):
+  -o FILE   Write output to FILE (default: collected-source.txt)
+  -h        Show this help
+
+If no source directory is given, the current directory is used.
+EOF
+}
+
+while getopts ":o:h" opt; do
+    case "$opt" in
+        o)
+            OUTPUT="$OPTARG"
+            ;;
+        h)
+            usage
+            exit 0
+            ;;
+        :)
+            echo "Error: option -$OPTARG requires an argument." >&2
+            usage >&2
+            exit 2
+            ;;
+        \?)
+            echo "Error: unknown option -$OPTARG." >&2
+            usage >&2
+            exit 2
+            ;;
+    esac
+done
+shift $((OPTIND - 1))
+
+SOURCES=("$@")
+
+if ((${#SOURCES[@]} == 0)); then
+    SOURCES=(".")
+fi
 
 # Resolve the output path without requiring that the file already exists.
 if command -v realpath >/dev/null 2>&1; then
@@ -25,14 +72,15 @@ else
     OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
 fi
 
-# Find the Git repository containing ROOT, if one exists.
-GIT_ROOT=""
+# Start with an empty output file BEFORE scanning any source, so the
+# output file itself is never collected.
+: > "$OUTPUT"
 
-if command -v git >/dev/null 2>&1; then
-    GIT_ROOT="$(
-        git -C "$ROOT" rev-parse --show-toplevel 2>/dev/null || true
-    )"
-fi
+# De-duplication state and file counter. The scan loops below run in the
+# current shell (process substitution, not pipelines) precisely so that
+# updates to these persist across sources.
+declare -A SEEN=()
+COLLECTED_COUNT=0
 
 # Convert Unix/MSYS paths to Windows-style paths when possible.
 display_path() {
@@ -147,6 +195,12 @@ append_file() {
     local formatted_path
     local language
 
+    # Skip duplicates produced by overlapping or repeated sources.
+    if [[ -n "${SEEN[$file]:-}" ]]; then
+        return 0
+    fi
+    SEEN["$file"]=1
+
     if ! is_text_file "$file"; then
         return 0
     fi
@@ -160,48 +214,12 @@ append_file() {
         cat "$file"
         printf '\n```\n\n'
     } >> "$OUTPUT"
+
+    ((++COLLECTED_COUNT))
 }
 
-# Start with an empty output file.
-: > "$OUTPUT"
-
-if [[ -n "$GIT_ROOT" ]]; then
-    # Git-aware scan.
-    #
-    # Ask Git itself for every file that is NOT ignored:
-    #   --cached            tracked files
-    #   --others            untracked files
-    #   --exclude-standard  honour .gitignore at every level,
-    #                       .git/info/exclude, and core.excludesFile
-    #
-    # Delegating the ignore rules to Git fixes the previous behaviour,
-    # where only ignored *directories* were pruned and ignored *files*
-    # (e.g. upload.txt, patch*.txt, plan*.txt) were still collected.
-    #
-    # When ROOT is a subdirectory of the repository, --show-prefix gives
-    # the pathspec that limits the listing to that subtree.
-    PREFIX="$(git -C "$ROOT" rev-parse --show-prefix)"
-
-    git -C "$GIT_ROOT" ls-files -z \
-        --cached --others --exclude-standard --full-name \
-        -- "${PREFIX:-.}" |
-    while IFS= read -r -d '' relpath; do
-        file="$GIT_ROOT/$relpath"
-
-        # Skip non-regular files (e.g. submodule gitlinks, files deleted
-        # from the working tree but still tracked) and the output file.
-        [[ -f "$file" && "$file" != "$OUTPUT" ]] || continue
-
-        append_file "$file"
-    done
-else
-    # Basic scan when the directory is not inside a Git repository.
-    find "$ROOT" \
-        -type d -name ".git" -prune -o \
-        -type f ! -path "$OUTPUT" -print0 |
-    while IFS= read -r -d '' file; do
-        append_file "$file"
-    done
-fi
-
-echo "Collected files into: $OUTPUT"
+# Scan one resolved source directory.
+collect_from_source() {
+    local root="$1"
+    local git_root=""
+    local prefix

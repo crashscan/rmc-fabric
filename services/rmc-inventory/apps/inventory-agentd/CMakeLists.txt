@@ -10,13 +10,17 @@ target_include_directories(inventory-agentd
 )
 
 target_link_libraries(inventory-agentd
-        PRIVATE DBusCxx::DBusCxx SigCxx::SigCxx
-        pthread glog gflags jsoncpp
+    PRIVATE
+        DBusCxx::DBusCxx SigCxx::SigCxx
+        pthread
+        glog
+        gflags
+        jsoncpp
         inventory_service
         inventory_core
         inventory_file_inputs
         inventory_transport
-        daemon_support
+        rsc_util::service_runtime
 )
 
 install(

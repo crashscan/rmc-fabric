@@ -1,24 +1,35 @@
 add_subdirectory(ports)
 
-add_library(network_observation_service STATIC
-    ObservationService.cpp
-    NetlinkLldpObservationRuntime.cpp
+add_library(
+        network_observation_service
+        STATIC
+        ObservationService.cpp
+        NetlinkLldpObservationRuntime.cpp
 )
 
-target_compile_features(network_observation_service PUBLIC cxx_std_20)
+target_compile_features(
+        network_observation_service
+        PUBLIC
+        cxx_std_20
+)
 
-target_include_directories(network_observation_service
-    PUBLIC
+target_include_directories(
+        network_observation_service
+        PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/ports>
         $<INSTALL_INTERFACE:include/network-observation/service>
 )
 
-target_link_libraries(network_observation_service
-    PUBLIC
+target_link_libraries(
+        network_observation_service
+        PUBLIC
         network_observation_service_ports
-        service_framework
-    PRIVATE
+
+        # ObservationService.h publicly derives ServiceBase and contains
+        # LifecycleCoordinator and ManagedWorker.
+        rsc_util::service_runtime
+        PRIVATE
         observation-model
         lldp-observer
         netlink-monitor
@@ -26,15 +37,33 @@ target_link_libraries(network_observation_service
 )
 
 if(BUILD_TESTING)
-    add_executable(network_observation_service_tests
-        tests/ObservationServiceTests.cpp
+    add_executable(
+            network_observation_service_tests
+            tests/ObservationServiceTests.cpp
     )
-    target_compile_features(network_observation_service_tests PRIVATE cxx_std_20)
-    target_link_libraries(network_observation_service_tests
-        PRIVATE
+
+    target_compile_features(
+            network_observation_service_tests
+            PRIVATE
+            cxx_std_20
+    )
+
+    target_link_libraries(
+            network_observation_service_tests
+            PRIVATE
             network_observation_service
             pthread
     )
-    add_test(NAME network_observation_service_tests COMMAND network_observation_service_tests)
-    set_tests_properties(network_observation_service_tests PROPERTIES TIMEOUT 15 LABELS "unit;resilience")
+
+    add_test(
+            NAME network_observation_service_tests
+            COMMAND network_observation_service_tests
+    )
+
+    set_tests_properties(
+            network_observation_service_tests
+            PROPERTIES
+            TIMEOUT 15
+            LABELS "unit;resilience"
+    )
 endif()

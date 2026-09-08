@@ -67,19 +67,11 @@ target_include_directories(netlink-monitor
         state
 )
 
-if(RSC_UTIL_INCLUDE_DIR)
-    target_include_directories(netlink-monitor
-            PRIVATE
-            ${RSC_UTIL_INCLUDE_DIR}
-            ${RSC_UTIL_INCLUDE_DIR}/rsc_util
-    )
-endif()
-
 target_link_libraries(netlink-monitor
-        PRIVATE
+    PRIVATE
         pthread
         glog
-        lifecycle_runner
+        rsc_util::service_runtime
         rsc_util
         netlink-event-loop
         netlink-initial-dump

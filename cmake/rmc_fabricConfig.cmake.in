@@ -1,10 +1,30 @@
 @PACKAGE_INIT@
 
-list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_LIST_DIR}")
 include(CMakeFindDependencyMacro)
-find_dependency(SigCxx REQUIRED MODULE)
-find_dependency(DBusCxx REQUIRED MODULE)
 
-include("${CMAKE_CURRENT_LIST_DIR}/rmc_fabricTargets.cmake")
+list(
+    PREPEND
+    CMAKE_MODULE_PATH
+    "${CMAKE_CURRENT_LIST_DIR}"
+)
+
+find_dependency(
+    rsc_util 2.1
+    CONFIG
+    COMPONENTS
+        client_contract
+        service_runtime
+        service_dbus
+)
+
+find_dependency(
+    SigCxx
+    REQUIRED
+    MODULE
+)
+
+include(
+    "${CMAKE_CURRENT_LIST_DIR}/rmc_fabricTargets.cmake"
+)
 
 check_required_components(rmc_fabric)

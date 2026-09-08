@@ -33,10 +33,10 @@ target_include_directories(inventory_dbus_codec
 
 target_link_libraries(inventory_transport
     PUBLIC
-        dbus_transport_base
+        rsc_util::service_dbus
+        rsc_util::service_runtime
         interop_contract
         inventory_service_ports
-        service_framework
     PRIVATE
         inventory_dbus_codec
         DBusCxx::DBusCxx
