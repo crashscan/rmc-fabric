@@ -11,10 +11,12 @@ list(
 find_dependency(
     rsc_util 2.1
     CONFIG
+    REQUIRED
     COMPONENTS
         client_contract
         service_runtime
         service_dbus
+        filewatch
 )
 
 find_dependency(

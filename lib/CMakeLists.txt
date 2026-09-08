@@ -1,2 +1,1 @@
 add_subdirectory(interop_contract)
-add_subdirectory(file_watcher)

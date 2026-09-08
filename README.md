@@ -53,7 +53,6 @@ lib/
   service_framework/        — adopted lifecycle surface (`ServiceBase`, `IServiceTransport`, `DaemonRunner`)
   lifecycle_runner/         — shared lifecycle primitives (`ManagedWorker`, `LifecycleCoordinator`, `Startable`)
   daemon_support/           — signal handling for daemon processes
-  file_watcher/             — inotify file watcher
 ```
 
 ## Design Principles

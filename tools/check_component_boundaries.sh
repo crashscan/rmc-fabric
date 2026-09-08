@@ -4,6 +4,22 @@ set -eu
 root_dir="${1:-.}"
 source_glob='.*\.(h|hh|hpp|hxx|c|cc|cpp|cxx)$'
 
+if [ -d "$root_dir/lib/file_watcher" ]; then
+    echo "file_watcher must come from rsc_util::filewatch; remove lib/file_watcher" >&2
+    exit 1
+fi
+
+if grep -R -n -E \
+    '(^|[[:space:]])file_watcher([[:space:]]|$)|lib/file_watcher' \
+    "$root_dir/CMakeLists.txt" \
+    "$root_dir/lib" \
+    "$root_dir/services" \
+    --include='CMakeLists.txt'
+then
+    echo "Fabric must link rsc_util::filewatch instead of the removed local file_watcher target" >&2
+    exit 1
+fi
+
 find_sources() {
     find "$1" -type f | grep -E "$source_glob" || true
 }

@@ -16,7 +16,6 @@ target_include_directories(
         inventory_service
         PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
-        $<BUILD_INTERFACE:${BASEPATH}/lib/file_watcher>
         $<INSTALL_INTERFACE:include/rmc-inventory/service>
 )
 
@@ -30,10 +29,14 @@ target_link_libraries(
         # LifecycleCoordinator and ManagedWorker members.
         rsc_util::service_runtime
 
-        # Existing base utility library, for EventFdSignal and related types.
+        # InventoryService.h exposes IFileWatcher through FileWatcherFactory,
+        # while InventoryService.cpp constructs InotifyFileWatcher.
+        rsc_util::filewatch
+
+        # Existing base utility library, used by EventFdSignal,
+        # ErrnoString, and related utility types.
         rsc_util
         PRIVATE
-        file_watcher
         glog
 )
 
@@ -54,7 +57,6 @@ if(BUILD_TESTING)
             PRIVATE
             inventory_service
             inventory_core
-            file_watcher
             pthread
     )
 

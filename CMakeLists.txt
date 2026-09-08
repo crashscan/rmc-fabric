@@ -98,6 +98,7 @@ find_package(
         client_contract
         service_runtime
         service_dbus
+        filewatch
 )
 
 option(
