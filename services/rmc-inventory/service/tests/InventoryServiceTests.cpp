@@ -92,6 +92,7 @@ public:
     [[nodiscard]] bool isReady() const override { return ready_; }
     [[nodiscard]] std::string getPhase() const override { return snapshot_.phase; }
     [[nodiscard]] uint64_t getVersion() const override { return snapshot_.version; }
+    [[nodiscard]] int refreshCalls() const noexcept { return refreshCalls_.load(); }
     void setRefreshDiff(InventoryDiff diff) { refreshDiff_ = std::move(diff); }
     void setThrowOnRefresh(bool value) { throwOnRefresh_ = value; }
     void setOnRefresh(std::function<void()> hook) { onRefresh_ = std::move(hook); }
@@ -107,7 +108,7 @@ private:
     bool readyAfterRefresh_{true};
     bool throwOnRefresh_{false};
     bool ready_{false};
-    int refreshCalls_{0};
+    std::atomic<int> refreshCalls_{0};
 };
 
 class FakeFileWatcher final : public IFileWatcher {
@@ -149,10 +150,29 @@ public:
 
     [[nodiscard]] std::vector<std::string> consumeChangedPaths() override
     {
-        return {};
+        eventfd_t value = 0;
+        while (::eventfd_read(fd_, &value) == 0) {
+        }
+        std::scoped_lock lock(mutex_);
+        std::vector<std::string> changed;
+        changed.swap(changedPaths_);
+        return changed;
     }
 
     [[nodiscard]] size_t watchedCount() const { return watchedPaths_.size(); }
+
+    void signalChanged(std::string path) {
+        {
+            std::scoped_lock lock(mutex_);
+            changedPaths_.push_back(std::move(path));
+        }
+
+        const eventfd_t value = 1;
+
+        if (::eventfd_write(fd_, value) != 0) {
+            throw std::system_error(errno,std::generic_category(),"FakeFileWatcher: eventfd_write failed");
+        }
+    }
 
     void waitUntilMaintainEntered()
     {
@@ -171,6 +191,8 @@ private:
     int fd_{-1};
     bool blockMaintain_{false};
     std::vector<std::string> watchedPaths_;
+    std::mutex changedMutex_;
+    std::vector<std::string> changedPaths_;
     mutable std::mutex mutex_;
     std::condition_variable enteredCv_;
     std::condition_variable releaseCv_;
@@ -540,12 +562,47 @@ void testLoopFailurePublishesInventoryLoopIssue()
     service.stop();
 }
 
+void testFileWatcherReadinessTriggersRefresh()
+{
+    auto manager = std::make_shared<FakeInventoryManager>();
+    auto transport = std::make_shared<FakeInventoryTransport>();
+
+    FakeFileWatcher* watcher = nullptr;
+
+    InventoryService::Settings settings;
+    settings.reconcileInterval = std::chrono::seconds(30);
+    settings.minRefreshInterval = std::chrono::milliseconds(1);
+
+    InventoryService service(manager,settings,[&watcher] {
+            auto implementation = std::make_unique<FakeFileWatcher>();
+            watcher = implementation.get();
+            return implementation;
+        });
+
+    service.addTransport(transport);
+
+    expect(service.start(),"service should start");
+
+    expect(waitFor([&] { return manager->refreshCalls() >= 1; }),"initial refresh did not run");
+
+    const int initialRefreshCount = manager->refreshCalls();
+    watcher->signalChanged("/tmp/rmc-inventory-tests");
+
+    expect(waitFor([&] {
+            return manager->refreshCalls() > initialRefreshCount;
+        }),
+        "file-watcher readiness did not trigger refresh");
+
+    service.stop();
+}
+
 } // namespace
 
 int main()
 {
     testStartStopBindsTransportAndPublishesReadinessExactlyOnce();
     testAddWatchableSourceRegistersWatchPath();
+    testFileWatcherReadinessTriggersRefresh();
     testTransportStartFailureRollsBackWithoutRunningLoop();
     testStopWaitsForWorkerBeforeStoppingTransports();
     testPublishFailureDoesNotBlockLaterTransports();

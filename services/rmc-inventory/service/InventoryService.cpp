@@ -1,8 +1,10 @@
 #include "InventoryService.h"
 
 #include "ErrnoString.h"
+
 #include <InotifyFileWatcher.h>
 #include <OperationalDiagnostics.h>
+#include <PollOnce.h>
 
 #include <InventoryIssueUtil.h>
 #include <IWatchableInventorySource.h>
@@ -14,8 +16,8 @@
 #include <chrono>
 #include <cstdint>
 #include <poll.h>
-#include <system_error>
 #include <stdexcept>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -324,8 +326,7 @@ void InventoryService::refresh()
     }
 }
 
-void InventoryService::runLoop(std::stop_token stopToken)
-{
+void InventoryService::runLoop(std::stop_token stopToken) {
     doRefreshCycle(true);
 
     while (!stopToken.stop_requested()) {
@@ -336,7 +337,7 @@ void InventoryService::runLoop(std::stop_token stopToken)
         {
             std::scoped_lock lock(refreshMutex_);
             if (refreshRequested_) {
-                wakeTs = std::min(wakeTs, lastRefreshSteadyTs_ + settings_.minRefreshInterval);
+                wakeTs = std::min(wakeTs,lastRefreshSteadyTs_ + settings_.minRefreshInterval);
             }
         }
 
@@ -344,40 +345,74 @@ void InventoryService::runLoop(std::stop_token stopToken)
             throw std::logic_error("InventoryService: refresh eventfd is unavailable");
         }
 
-        std::vector<pollfd> fds;
-        fds.reserve(2);
-        fds.push_back({refreshSignal_->fd(), POLLIN, 0});
-        fds.push_back({fileWatcher_->getPollFd(), POLLIN, 0});
+        pollfd fds[] = {
+            {
+                .fd = refreshSignal_->fd(),
+                .events = POLLIN,
+                .revents = 0,
+            },
+            {
+                .fd = fileWatcher_->getPollFd(),
+                .events = POLLIN,
+                .revents = 0,
+            },
+        };
 
-        const int pr = ::poll(fds.data(), static_cast<nfds_t>(fds.size()), msUntil(wakeTs));
-        if (pr < 0) {
-            if (errno == EINTR) {
-                continue;
-            }
-            throw std::system_error(errno, std::generic_category(), "InventoryService: poll failed");
+        const PollUtils::PollResult pollResult = PollUtils::pollOnce(fds,msUntil(wakeTs),stopToken);
+
+        switch (pollResult.kind) {
+            case PollUtils::PollResult::Kind::StopRequested:
+                return;
+            case PollUtils::PollResult::Kind::SyscallFailure:
+                throw std::system_error(pollResult.errNo,std::generic_category(),"InventoryService: poll failed");
+            case PollUtils::PollResult::Kind::Timeout:
+            case PollUtils::PollResult::Kind::Ready:
+                break;
         }
 
         bool sourceTriggered = false;
+        if (pollResult.kind == PollUtils::PollResult::Kind::Ready) {
+            constexpr short terminalEvents = POLLERR | POLLHUP | POLLNVAL;
+            if ((fds[0].revents & terminalEvents) != 0) {
+                throw std::runtime_error(
+                    "InventoryService: refresh eventfd reported "
+                    "terminal poll events, revents=" +
+                    std::to_string(fds[0].revents));
+            }
 
-        if (pr > 0) {
+            if ((fds[1].revents & terminalEvents) != 0) {
+                throw std::runtime_error(
+                    "InventoryService: file watcher fd reported "
+                    "terminal poll events, revents=" +
+                    std::to_string(fds[1].revents));
+            }
+
             if ((fds[0].revents & POLLIN) != 0) {
                 if (const int error = refreshSignal_->drain(); error != 0) {
-                    throw std::system_error(error,std::generic_category(),"InventoryService: failed to drain refresh eventfd");
+                    throw std::system_error(
+                        error,
+                        std::generic_category(),
+                        "InventoryService: failed to drain "
+                        "refresh eventfd");
                 }
             }
 
             if ((fds[1].revents & POLLIN) != 0) {
-                if (!fileWatcher_->consumeChangedPaths().empty()) {
-                    sourceTriggered = true;
-                }
+                sourceTriggered = !fileWatcher_->consumeChangedPaths().empty();
             }
         }
 
+        /*
+         * The refresh eventfd serves both explicit refresh requests and
+         * ManagedWorker's shutdown wake. Determine which condition caused
+         * the wake only after draining it.
+         */
         if (stopToken.stop_requested()) {
             break;
         }
 
         bool requestPending = false;
+
         {
             std::scoped_lock lock(refreshMutex_);
             requestPending = refreshRequested_;
@@ -385,7 +420,7 @@ void InventoryService::runLoop(std::stop_token stopToken)
 
         if (requestPending || sourceTriggered) {
             doRefreshCycle(true);
-        } else if (std::chrono::steady_clock::now() >= nextReconcileTs_) {
+        } else if (std::chrono::steady_clock::now() >=nextReconcileTs_) {
             doRefreshCycle(false);
         }
     }
@@ -490,26 +525,14 @@ interop_contract::inventory::InventoryIssues InventoryService::getIssues() const
     return issues;
 }
 
-void InventoryService::publishInventoryChange(const std::shared_ptr<IInventoryTransport>& transport,
-                                              const std::string& fieldName) const noexcept
-{
-    try {
-        transport->publishInventoryChanged(fieldName);
-    } catch (const std::exception& e) {
-        diagnostics::logError(name(),
-                              "transport." + diagnostics::sanitizeField(transport->name()),
-                              "publish_inventory_changed",
-                              "transport_publish_failed",
-                              fieldName,
-                              e.what());
-    } catch (...) {
-        diagnostics::logError(name(),
-                              "transport." + diagnostics::sanitizeField(transport->name()),
-                              "publish_inventory_changed",
-                              "transport_publish_failed",
-                              fieldName,
-                              "unknown exception");
-    }
+void InventoryService::publishInventoryChange(const std::shared_ptr<IInventoryTransport>& transport, const std::string& fieldName) const noexcept {
+        invokeTransportOperationNoexcept(
+            *transport,
+            "publish_inventory_changed",
+            "transport_publish_failed",
+            fieldName,
+            [&] { transport->publishInventoryChanged(fieldName);}
+            );
 }
 
 void InventoryService::publishSourceStateChange(const std::shared_ptr<IInventoryTransport>& transport,
