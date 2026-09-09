@@ -11,17 +11,20 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
-#include <functional>
 #include <condition_variable>
 #include <cstdlib>
+#include <functional>
 #include <future>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
+#include <system_error>
 #include <thread>
 #include <vector>
+
 
 namespace {
 
@@ -153,7 +156,7 @@ public:
         eventfd_t value = 0;
         while (::eventfd_read(fd_, &value) == 0) {
         }
-        std::scoped_lock lock(mutex_);
+        std::scoped_lock lock(changedMutex_);
         std::vector<std::string> changed;
         changed.swap(changedPaths_);
         return changed;
@@ -163,14 +166,15 @@ public:
 
     void signalChanged(std::string path) {
         {
-            std::scoped_lock lock(mutex_);
+            std::scoped_lock lock(changedMutex_);
             changedPaths_.push_back(std::move(path));
         }
 
         const eventfd_t value = 1;
 
         if (::eventfd_write(fd_, value) != 0) {
-            throw std::system_error(errno,std::generic_category(),"FakeFileWatcher: eventfd_write failed");
+            const int error = errno;
+            throw std::system_error(error,std::generic_category(),"FakeFileWatcher: eventfd_write failed");
         }
     }
 

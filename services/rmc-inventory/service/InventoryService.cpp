@@ -12,6 +12,7 @@
 
 #include <glog/logging.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
@@ -36,18 +37,6 @@ namespace {
         return 0;
     }
     return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(ts - now).count());
-}
-
-[[nodiscard]] std::vector<std::shared_ptr<IInventoryTransport>> inventoryTransports(const ServiceBase& service)
-{
-    std::vector<std::shared_ptr<IInventoryTransport>> typed;
-    typed.reserve(service.transports().size());
-    for (const auto& transport : service.transports()) {
-        if (auto typedTransport = std::dynamic_pointer_cast<IInventoryTransport>(transport)) {
-            typed.push_back(std::move(typedTransport));
-        }
-    }
-    return typed;
 }
 
 } // namespace
@@ -147,7 +136,7 @@ bool InventoryService::initializeComponents()
             return false;
         }
     }
-    for (const auto& transport : inventoryTransports(*this)) {
+    for (const auto& transport : transportsOfType<IInventoryTransport>()) {
         transport->bindQueryService(*this);
     }
 
@@ -358,7 +347,7 @@ void InventoryService::runLoop(std::stop_token stopToken) {
             },
         };
 
-        const PollUtils::PollResult pollResult = PollUtils::pollOnce(fds,msUntil(wakeTs),stopToken);
+        const auto pollResult = PollUtils::pollOnce(fds,msUntil(wakeTs),stopToken);
 
         switch (pollResult.kind) {
             case PollUtils::PollResult::Kind::StopRequested:
@@ -461,7 +450,7 @@ void InventoryService::publishDiff(const InventoryDiff& diff,
                                    bool oldReady,
                                    bool newReady)
 {
-    const auto typedTransports = inventoryTransports(*this);
+    const auto typedTransports = transportsOfType<IInventoryTransport>();
 
     for (const auto& field : diff.changedFields) {
         for (const auto& transport : typedTransports) {
@@ -535,26 +524,14 @@ void InventoryService::publishInventoryChange(const std::shared_ptr<IInventoryTr
             );
 }
 
-void InventoryService::publishSourceStateChange(const std::shared_ptr<IInventoryTransport>& transport,
-                                                const std::string& sourceName) const noexcept
-{
-    try {
-        transport->publishSourceStateChanged(sourceName);
-    } catch (const std::exception& e) {
-        diagnostics::logError(name(),
-                              "transport." + diagnostics::sanitizeField(transport->name()),
-                              "publish_source_state_changed",
-                              "transport_publish_failed",
-                              sourceName,
-                              e.what());
-    } catch (...) {
-        diagnostics::logError(name(),
-                              "transport." + diagnostics::sanitizeField(transport->name()),
-                              "publish_source_state_changed",
-                              "transport_publish_failed",
-                              sourceName,
-                              "unknown exception");
-    }
+void InventoryService::publishSourceStateChange(const std::shared_ptr<IInventoryTransport>& transport, const std::string& sourceName) const noexcept {
+    invokeTransportOperationNoexcept(
+            *transport,
+            "publish_source_state_changed",
+            "transport_publish_failed",
+            sourceName,
+            [&] { transport->publishSourceStateChanged(sourceName);}
+            );
 }
 
 } // namespace RSCGroup
