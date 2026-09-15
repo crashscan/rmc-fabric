@@ -2,20 +2,22 @@
 set -Eeuo pipefail
 
 # Usage:
-#   ./collect.sh [-o output_file] [source_directory ...]
+#   ./collect.sh [-o output_file] [input ...]
 #
 # Examples:
 #   ./collect.sh
 #   ./collect.sh src include tests
-#   ./collect.sh -o collected-source.txt "/path/to/project" "/path/to/other"
-#   ./collect.sh -o collected-source.txt "D:/linux/automation/__new/rmc-fabric" ../shared
+#   ./collect.sh -o collected-source.txt main.cpp lib/util.cpp include
+#   ./collect.sh -o collected-source.txt "D:/linux/automation/__new/rmc-fabric" ../shared/readme.md
 #
 # Notes:
-#   - Options must come before source directories.
-#   - If no source directory is given, the current directory is used.
-#   - Each source is scanned with its own Git context: sources may live
-#     in different repositories, or in no repository at all.
-#   - Overlapping or repeated sources are de-duplicated: every file is
+#   - Options must come before inputs.
+#   - Each input is a file or a directory. Directories are scanned
+#     recursively; files are collected directly.
+#   - An explicitly named file is collected even if Git ignores it;
+#     directory scans honour Git ignore rules.
+#   - If no input is given, the current directory is used.
+#   - Overlapping or repeated inputs are de-duplicated: every file is
 #     collected at most once.
 
 OUTPUT="collected-source.txt"
@@ -23,13 +25,17 @@ OUTPUT="collected-source.txt"
 usage() {
     cat <<'EOF'
 Usage:
-  collect.sh [-o output_file] [source_directory ...]
+  collect.sh [-o output_file] [input ...]
 
-Options (must come before source directories):
+Options (must come before inputs):
   -o FILE   Write output to FILE (default: collected-source.txt)
   -h        Show this help
 
-If no source directory is given, the current directory is used.
+Each input is a file or a directory. Directories are scanned
+recursively (honouring Git ignore rules inside a repository);
+files are collected directly, even if ignored by Git.
+
+If no input is given, the current directory is used.
 EOF
 }
 
@@ -56,10 +62,10 @@ while getopts ":o:h" opt; do
 done
 shift $((OPTIND - 1))
 
-SOURCES=("$@")
+INPUTS=("$@")
 
-if ((${#SOURCES[@]} == 0)); then
-    SOURCES=(".")
+if ((${#INPUTS[@]} == 0)); then
+    INPUTS=(".")
 fi
 
 # Resolve the output path without requiring that the file already exists.
@@ -72,15 +78,27 @@ else
     OUTPUT="$OUTPUT_DIR/$OUTPUT_NAME"
 fi
 
-# Start with an empty output file BEFORE scanning any source, so the
+# Start with an empty output file BEFORE processing any input, so the
 # output file itself is never collected.
 : > "$OUTPUT"
 
 # De-duplication state and file counter. The scan loops below run in the
-# current shell (process substitution, not pipelines) precisely so that
-# updates to these persist across sources.
+# current shell (process substitution, not pipelines) so that updates to
+# these persist across inputs.
 declare -A SEEN=()
 COLLECTED_COUNT=0
+
+# Resolve a file path to a canonical physical path. The dirname is
+# resolved the same way as directory inputs (cd && pwd), so a file
+# passed directly de-duplicates against the same file found by a
+# directory scan.
+resolve_file() {
+    local file="$1"
+    local dir
+
+    dir="$(cd "$(dirname "$file")" && pwd)"
+    printf '%s/%s\n' "$dir" "$(basename "$file")"
+}
 
 # Convert Unix/MSYS paths to Windows-style paths when possible.
 display_path() {
@@ -195,7 +213,7 @@ append_file() {
     local formatted_path
     local language
 
-    # Skip duplicates produced by overlapping or repeated sources.
+    # Skip duplicates produced by overlapping or repeated inputs.
     if [[ -n "${SEEN[$file]:-}" ]]; then
         return 0
     fi
@@ -218,8 +236,93 @@ append_file() {
     ((++COLLECTED_COUNT))
 }
 
-# Scan one resolved source directory.
-collect_from_source() {
+# Scan one resolved directory input.
+collect_from_dir() {
     local root="$1"
     local git_root=""
     local prefix
+    local relpath
+    local file
+
+    # Find the Git repository containing this directory, if one exists.
+    # Each directory input may belong to a different repository (or to
+    # none).
+    if command -v git >/dev/null 2>&1; then
+        git_root="$(
+            git -C "$root" rev-parse --show-toplevel 2>/dev/null || true
+        )"
+    fi
+
+    if [[ -n "$git_root" ]]; then
+        # Git-aware scan.
+        #
+        # Ask Git itself for every file that is NOT ignored:
+        #   --cached            tracked files
+        #   --others            untracked files
+        #   --exclude-standard  honour .gitignore at every level,
+        #                       .git/info/exclude, and core.excludesFile
+        #
+        # When the directory is a subdirectory of the repository,
+        # --show-prefix gives the pathspec that limits the listing to
+        # that subtree.
+
+        # Normalize to the same path style as $root (e.g. /d/... rather
+        # than D:/... on MSYS) so file paths compare correctly against
+        # $OUTPUT and de-duplicate reliably.
+        git_root="$(cd "$git_root" && pwd)"
+
+        prefix="$(git -C "$root" rev-parse --show-prefix)"
+
+        while IFS= read -r -d '' relpath; do
+            file="$git_root/$relpath"
+
+            # Skip non-regular files (e.g. submodule gitlinks, files
+            # deleted from the working tree but still tracked) and the
+            # output file.
+            [[ -f "$file" && "$file" != "$OUTPUT" ]] || continue
+
+            append_file "$file"
+        done < <(
+            git -C "$git_root" ls-files -z \
+                --cached --others --exclude-standard --full-name \
+                -- "${prefix:-.}"
+        )
+    else
+        # Basic scan when the directory is not inside a Git repository.
+        while IFS= read -r -d '' file; do
+            append_file "$file"
+        done < <(
+            find "$root" \
+                -type d -name ".git" -prune -o \
+                -type f ! -path "$OUTPUT" -print0
+        )
+    fi
+}
+
+for INPUT in "${INPUTS[@]}"; do
+    if [[ -f "$INPUT" ]]; then
+        # Explicitly named file: collect it directly, even if Git would
+        # ignore it.
+        FILE_PATH="$(resolve_file "$INPUT")"
+
+        if [[ "$FILE_PATH" == "$OUTPUT" ]]; then
+            echo "Warning: skipping the output file itself: $INPUT" >&2
+            continue
+        fi
+
+        if ! is_text_file "$FILE_PATH"; then
+            echo "Warning: skipping non-text file: $INPUT" >&2
+            continue
+        fi
+
+        append_file "$FILE_PATH"
+    elif [[ -d "$INPUT" ]]; then
+        ROOT="$(cd "$INPUT" && pwd)"
+        collect_from_dir "$ROOT"
+    else
+        echo "Error: input is neither a file nor a directory: $INPUT" >&2
+        exit 1
+    fi
+done
+
+echo "Collected $COLLECTED_COUNT file(s) from ${#INPUTS[@]} input(s) into: $OUTPUT"
