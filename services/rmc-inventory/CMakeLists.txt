@@ -17,7 +17,6 @@ add_subdirectory(apps)
 install(
     FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/config/inventory-agentd.conf
-        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/config/inventory-agentd.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/inventory-agent
     COMPONENT rel
 )
