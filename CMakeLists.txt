@@ -18,24 +18,7 @@ option(RMC_FABRIC_COVERAGE "Enable gcov/lcov coverage instrumentation"        OF
 option(RMC_FABRIC_BUILD_INTEGRATION_TESTS "Build hermetic D-Bus integration tests" OFF)
 option(RMC_FABRIC_BUILD_FUZZ_TARGETS "Build libFuzzer codec ingress targets when supported" OFF)
 option(RMC_FABRIC_BUILD_BENCHMARKS "Build benchmark-style performance executables" OFF)
-set(RMC_FABRIC_SANITIZE "" CACHE STRING
-    "Comma-separated sanitizer list, e.g. address,undefined (passed to -fsanitize=)")
-
-# ---------------------------------------------------------------------------
-# rmc_fabric_warnings — INTERFACE target consumed only by in-tree targets.
-# Downstream consumers never see these flags.
-# ---------------------------------------------------------------------------
-add_library(rmc_fabric_warnings INTERFACE)
-
-target_compile_options(rmc_fabric_warnings INTERFACE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:
-        -Wall
-        -Wextra
-        -Wshadow
-        -Wno-unused-parameter
-        $<$<BOOL:${RMC_FABRIC_WERROR}>:-Werror>
-    >
-)
+set(RMC_FABRIC_SANITIZE "" CACHE STRING "Comma-separated sanitizer list, e.g. address,undefined (passed to -fsanitize=)")
 
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     add_compile_options(-Wall -Wextra -Wshadow -Wno-unused-parameter)
@@ -239,8 +222,7 @@ set(CPACK_COMPONENT_LIBRARIES_DISPLAY_NAME "Libraries")
 set(CPACK_COMPONENT_HEADERS_DISPLAY_NAME "C++ Headers")
 
 set(CPACK_COMPONENTS_GROUPING ONE_PER_GROUP)
-set(CPACK_COMPONENT_DEVLIBRARIES_GROUP "dev")
-set(CPACK_COMPONENT_HEADERS_GROUP      "dev")
-set(CPACK_COMPONENT_RELLIBRARIES_GROUP "rel")
+set(CPACK_COMPONENT_DEV_GROUP "dev")
+set(CPACK_COMPONENT_REL_GROUP "rel")
 
 include(CPack)

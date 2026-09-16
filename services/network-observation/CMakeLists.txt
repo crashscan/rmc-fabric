@@ -1,3 +1,5 @@
+include(GNUInstallDirs)
+
 add_subdirectory(inputs)
 add_subdirectory(core)
 add_subdirectory(service)

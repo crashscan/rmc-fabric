@@ -39,6 +39,7 @@ install(
         PATTERN "*.h"
         PATTERN "*.hpp"
         PATTERN "tests" EXCLUDE
+        PATTERN "CMakeFiles" EXCLUDE
 )
 
 if(BUILD_TESTING)

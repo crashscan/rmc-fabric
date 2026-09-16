@@ -5,6 +5,8 @@ option(INVENTORY_ENABLE_STDOUT_TRANSPORT "Enable StdoutInventoryTransport for de
 
 set(RMC_INVENTORY_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
+include(GNUInstallDirs)
+
 add_subdirectory(core)
 add_subdirectory(service)
 add_subdirectory(inputs)
@@ -15,6 +17,7 @@ add_subdirectory(apps)
 install(
     FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/config/inventory-agentd.conf
+        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/config/inventory-agentd.conf.example
     DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/inventory-agent
     COMPONENT rel
 )
