@@ -144,10 +144,6 @@ if(BUILD_TESTING)
   add_subdirectory(tests)
 endif()
 
-if(BUILD_MANUAL_TESTS)
-  add_subdirectory(tests_manual)
-endif()
-
 # ---------------------------------------------------------------------------
 # Install and CMake package export
 # ---------------------------------------------------------------------------

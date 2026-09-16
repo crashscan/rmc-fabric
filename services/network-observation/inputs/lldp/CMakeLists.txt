@@ -48,6 +48,7 @@ if(BUILD_TESTING)
             lldp-observer
             GTest::gtest
             GTest::gtest_main
+            glog
         )
         add_test(NAME lldp_observer_tests COMMAND lldp_observer_tests)
         set_tests_properties(lldp_observer_tests PROPERTIES LABELS "unit")
