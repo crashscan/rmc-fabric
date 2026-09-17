@@ -25,6 +25,13 @@ namespace {
     // connect (1s) + one round-trip (2s) ≈ 3s per supervision interval.
     constexpr auto kProbeConnectTimeout = std::chrono::milliseconds{1000};
     constexpr auto kProbeIoTimeout = std::chrono::milliseconds{2000};
+    // Upper bound on waiting for in-flight callback leases during a
+    // reconnect. refreshAll() runs on the supervision thread, which the
+    // service joins BEFORE stopping the netlink monitor; an unbounded wait
+    // here would deadlock shutdown against a slow netlink-originated
+    // removeInterface(). stop() has no such bound because the monitor is
+    // already stopped by then.
+    constexpr auto kRefreshDrainTimeout = std::chrono::seconds{3};
 
     struct CachedLldpNeighbor {
         std::optional<std::string> rawChassisId;
@@ -231,7 +238,10 @@ public:
     void stop() {
         // 1. Claim stopping under lifecycleMutex_
         std::unique_lock lk(lifecycleMutex_);
-        if (state_ == State::Stopped) return;
+        // pendingDrain_ means a refreshAll() timed out with leases still
+        // outstanding: state_ is Stopped but the drain postcondition has
+        // not been met, so stop() must still run it.
+        if (state_ == State::Stopped && !pendingDrain_) return;
         if (state_ == State::Stopping) {
             // Another thread is already stopping — wait for it
             lifecycleCv_.wait(lk, [this] { return state_ == State::Stopped; });
@@ -271,6 +281,7 @@ public:
         // 8. Commit stopped and notify lifecycle waiters
         lk.lock();
         state_ = State::Stopped;
+        pendingDrain_ = false;
         lk.unlock();
         lifecycleCv_.notify_all();
 
@@ -306,11 +317,28 @@ public:
         // 4. Destroy old watch outside mutex
         oldWatch.reset();
 
-        // 5. Drain old callbacks
+        // 5. Drain old callbacks — BOUNDED. See kRefreshDrainTimeout.
+        bool drained = false;
         {
             std::unique_lock cbLk(callbackState_->mtx);
-            callbackState_->cv.wait(cbLk,
-                                    [this] { return callbackState_->activeCount == 0; });
+            drained = callbackState_->cv.wait_for(
+                cbLk, kRefreshDrainTimeout,
+                [this] { return callbackState_->activeCount == 0; });
+        }
+        if (!drained) {
+            // Abandon the reconnect rather than block shutdown. Admission
+            // stays closed, the cache is left intact (the outstanding
+            // callback may still be mutating it), and the source goes
+            // Stopped so the runtime's next tick() drops and re-acquires
+            // the observer. pendingDrain_ keeps stop()'s drain obligation
+            // alive for the leases we did not wait out.
+            LOG(ERROR) << "LldpdSource: reconnect drain timed out; abandoning refresh";
+            lk.lock();
+            state_ = State::Stopped;
+            pendingDrain_ = true;
+            lk.unlock();
+            lifecycleCv_.notify_all();
+            return;
         }
 
         // 6. Snapshot old cache for post-reconnect reconciliation
@@ -513,7 +541,11 @@ public:
         try {
             BoundedLldpConnection probe(resolvedCtlPath(), kProbeConnectTimeout, kProbeIoTimeout);
             return probe.QueryInterfacesOk();
-        } catch (const std::system_error &) {
+        } catch (const std::exception &e) {
+            VLOG(1) << "LLDP backend probe failed: " << e.what();
+            return false;
+        } catch (...) {
+            // Never let a probe failure kill the supervision worker.
             return false;
         }
     }
@@ -539,15 +571,14 @@ private:
     }
 
     /**
-     * @brief Bounded replacement for lldpcli::LldpCtl().GetInterfaces().
+     * @brief Invoke @p fn for each interface atom over a bounded connection.
      *
-     * The default liblldpctl transport has no timeout and would wedge the
-     * tick() thread against a hung lldpd. The returned atoms hold a
-     * non-owning alias of the bounded connection — @p bounded must outlive
-     * the returned list. GetPort()/GetAtomList() on the returned atoms do
-     * IO through the same bounded connection.
+     * Callback form on purpose: atoms alias the connection non-owningly, so
+     * they must never outlive this function — a returned list (the previous
+     * form) could escape the bounded scope with no compiler help.
      */
-    static std::list<lldpcli::LldpAtom> getInterfacesBounded(BoundedLldpConnection &bounded) {
+    template<typename Fn>
+    static void forEachInterfaceBounded(BoundedLldpConnection &bounded, Fn &&fn) {
         const std::shared_ptr<lldpctl_conn_t> aliased(bounded.connection(), [](lldpctl_conn_t *) {
         });
 
@@ -555,19 +586,18 @@ private:
         if (!raw) {
             throw std::system_error(
                 make_error_code(lldpctl_last_error(bounded.connection())),
-                "getInterfacesBounded: lldpctl_get_interfaces failed");
+                "forEachInterfaceBounded: lldpctl_get_interfaces failed");
         }
         struct AtomDecRef {
             void operator()(lldpctl_atom_t *a) const { ::lldpctl_atom_dec_ref(a); }
         };
         const std::unique_ptr<lldpctl_atom_t, AtomDecRef> interfaces(raw);
 
-        std::list<lldpcli::LldpAtom> list;
         lldpctl_atom_t *atom = nullptr;
         lldpctl_atom_foreach(interfaces.get(), atom) {
-            list.emplace_back(atom, true, aliased);
+            lldpcli::LldpAtom iface(atom, true, aliased);
+            fn(iface);
         }
-        return list;
     }
 
     bool makeWatch() {
@@ -701,6 +731,9 @@ private:
     mutable std::mutex lifecycleMutex_;
     std::condition_variable lifecycleCv_;
     State state_ = State::Stopped;
+    /// Set when refreshAll() gave up on the lease drain; forces stop() to
+    /// complete the drain even though state_ is already Stopped.
+    bool pendingDrain_ = false;
 };
 
 // ---------------------------------------------------------------------------

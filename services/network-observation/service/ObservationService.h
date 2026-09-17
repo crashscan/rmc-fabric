@@ -77,6 +77,12 @@ private:
     std::chrono::steady_clock::duration supervisionInterval_;
     std::mutex agingMutex_;
     std::condition_variable_any agingCv_;
+    /// Supervision has its own pair: sharing agingCv_ makes every
+    /// notify_all() cross-wake the other loop, and agingLoop's
+    /// end-of-body re-lock would contend with a supervision cycle —
+    /// reintroducing the coupling the worker split exists to remove.
+    std::mutex supervisionMutex_;
+    std::condition_variable_any supervisionCv_;
     mutable std::mutex issuesMutex_;
     interop_contract::network_observation::ObservationIssues issues_;
 

@@ -48,6 +48,7 @@ inline constexpr std::string_view SEVERITY_WARNING = "warning";
 // Stable issue codes
 inline constexpr std::string_view ISSUE_CODE_RUNTIME_STOPPED = "observation.runtime.stopped";
 inline constexpr std::string_view ISSUE_CODE_AGING_LOOP_STOPPED = "observation.worker.aging.stopped";
+inline constexpr std::string_view ISSUE_CODE_SUPERVISION_LOOP_STOPPED = "observation.worker.supervision.stopped";
 inline constexpr std::string_view ISSUE_CODE_LLDP_UNAVAILABLE = "observation.input.lldp.unavailable";
 
 // Variant map field keys — local interface
