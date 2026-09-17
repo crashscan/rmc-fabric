@@ -6,7 +6,6 @@
 #include <string_view>
 
 namespace {
-
 using interop_contract::inventory::FieldValue;
 using interop_contract::inventory::InventoryFields;
 using interop_contract::inventory::InventoryIssueFields;
@@ -20,16 +19,14 @@ using interop_contract::inventory::get_field_value;
 using interop_contract::inventory::is_metadata_field;
 using interop_contract::inventory::make_single_field_map;
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr << message << "\n";
         std::exit(EXIT_FAILURE);
     }
 }
 
-InventorySnapshot makeSampleSnapshot()
-{
+InventorySnapshot makeSampleSnapshot() {
     InventorySnapshot snapshot;
     snapshot.version = 11;
     snapshot.timestamp = 123456789;
@@ -40,8 +37,7 @@ InventorySnapshot makeSampleSnapshot()
     return snapshot;
 }
 
-void testInventoryTypesSupportMixedValues()
-{
+void testInventoryTypesSupportMixedValues() {
     InventoryFields fields;
     fields.emplace("boolField", FieldValue{true});
     fields.emplace("signedField", FieldValue{int64_t{-12}});
@@ -54,8 +50,7 @@ void testInventoryTypesSupportMixedValues()
     expect(std::get<std::string>(fields.at("stringField")) == "value", "unexpected stringField");
 }
 
-void testInventoryIssueFieldsAliasCarriesFieldValues()
-{
+void testInventoryIssueFieldsAliasCarriesFieldValues() {
     InventoryIssueFields fields;
     fields.emplace(std::string(interop_contract::inventory::ISSUE_SEVERITY),
                    std::string(interop_contract::inventory::SEVERITY_ERROR));
@@ -66,27 +61,30 @@ void testInventoryIssueFieldsAliasCarriesFieldValues()
 
     expect(fields.size() == 3, "expected 3 issue fields");
     expect(std::get<std::string>(fields.at(std::string(interop_contract::inventory::ISSUE_SEVERITY))) ==
-               std::string(interop_contract::inventory::SEVERITY_ERROR),
+           std::string(interop_contract::inventory::SEVERITY_ERROR),
            "unexpected severity");
     expect(std::get<std::string>(fields.at(std::string(interop_contract::inventory::ISSUE_MESSAGE))) ==
-               "cannot open '/etc/rmc/uuid'",
+           "cannot open '/etc/rmc/uuid'",
            "unexpected message");
     expect(std::get<std::string>(fields.at(std::string(interop_contract::inventory::ISSUE_ORIGIN))) ==
-               "/etc/rmc/uuid",
+           "/etc/rmc/uuid",
            "unexpected origin");
 }
 
-void testInventoryIssuesMapUsesDeterministicSourceKeyOrdering()
-{
+void testInventoryIssuesMapUsesDeterministicSourceKeyOrdering() {
     InventoryIssues issues;
     issues.emplace("uuid-file", InventoryIssueFields{
-        {std::string(interop_contract::inventory::ISSUE_SEVERITY),
-         std::string(interop_contract::inventory::SEVERITY_ERROR)}
-    });
+                       {
+                           std::string(interop_contract::inventory::ISSUE_SEVERITY),
+                           std::string(interop_contract::inventory::SEVERITY_ERROR)
+                       }
+                   });
     issues.emplace("firmware-file", InventoryIssueFields{
-        {std::string(interop_contract::inventory::ISSUE_SEVERITY),
-         std::string(interop_contract::inventory::SEVERITY_WARNING)}
-    });
+                       {
+                           std::string(interop_contract::inventory::ISSUE_SEVERITY),
+                           std::string(interop_contract::inventory::SEVERITY_WARNING)
+                       }
+                   });
 
     expect(issues.size() == 2, "expected 2 issues");
 
@@ -98,8 +96,7 @@ void testInventoryIssuesMapUsesDeterministicSourceKeyOrdering()
     expect(it->first == "uuid-file", "expected lexicographically second issue key");
 }
 
-void testMetadataFieldRecognition()
-{
+void testMetadataFieldRecognition() {
     expect(is_metadata_field(std::string_view("version")),
            "expected version to be recognized as metadata");
     expect(is_metadata_field(std::string_view("timestamp")),
@@ -115,8 +112,7 @@ void testMetadataFieldRecognition()
            "did not expect nodeName to be metadata");
 }
 
-void testReservedMetadataFieldValidation()
-{
+void testReservedMetadataFieldValidation() {
     InventoryFields sourceFields{
         {"uuid", FieldValue{std::string("1234-5678")}},
         {"nodeName", FieldValue{std::string("rack12-node7")}}
@@ -139,8 +135,7 @@ void testReservedMetadataFieldValidation()
            "expected version to be first reserved metadata field");
 }
 
-void testSnapshotDefaultsAndStorage()
-{
+void testSnapshotDefaultsAndStorage() {
     const InventorySnapshot empty;
     expect(empty.version == 0, "expected default version to be 0");
     expect(empty.timestamp == 0, "expected default timestamp to be 0");
@@ -163,8 +158,7 @@ void testSnapshotDefaultsAndStorage()
            "unexpected uuid field");
 }
 
-void testFieldAccessHelpers()
-{
+void testFieldAccessHelpers() {
     const auto snapshot = makeSampleSnapshot();
 
     const auto uuid = get_field_value(snapshot, "uuid");
@@ -184,8 +178,7 @@ void testFieldAccessHelpers()
            "unexpected singleton uuid value");
 }
 
-void testInventoryUmbrellaHeaderSurface()
-{
+void testInventoryUmbrellaHeaderSurface() {
     InventorySnapshot snapshot;
     snapshot.version = 3;
     snapshot.timestamp = 444;
@@ -212,8 +205,7 @@ void testInventoryUmbrellaHeaderSurface()
     expect(issues.size() == 1, "expected one issue via umbrella header");
 }
 
-void testSourceStateContractTypes()
-{
+void testSourceStateContractTypes() {
     SourceState state;
     state.name = "firmware-file";
     state.required = true;
@@ -232,11 +224,9 @@ void testSourceStateContractTypes()
     expect(state.lastSuccessTs == 99, "unexpected source success timestamp");
     expect(state.origin.has_value() && *state.origin == "/etc/rmc/firmware", "unexpected source origin");
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testInventoryTypesSupportMixedValues();
     testInventoryIssueFieldsAliasCarriesFieldValues();
     testInventoryIssuesMapUsesDeterministicSourceKeyOrdering();

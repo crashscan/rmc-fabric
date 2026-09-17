@@ -26,7 +26,6 @@
 #include <vector>
 
 namespace {
-
 using integration_support::ChildProcess;
 using integration_support::PrivateBus;
 using integration_support::TempDir;
@@ -35,8 +34,7 @@ using integration_support::readFile;
 using integration_support::waitFor;
 namespace contract = interop_contract::network_observation;
 
-RSCGroup::LocalInterfaceState interfaceFromJson(const Json::Value& value)
-{
+RSCGroup::LocalInterfaceState interfaceFromJson(const Json::Value &value) {
     RSCGroup::LocalInterfaceState iface;
     iface.ifindex = value["ifindex"].asInt();
     iface.ifname = value["ifname"].asString();
@@ -47,17 +45,16 @@ RSCGroup::LocalInterfaceState interfaceFromJson(const Json::Value& value)
     if (value.isMember("master")) {
         iface.masterIfname = value["master"].asString();
     }
-    for (const auto& entry : value["ipv4"]) {
+    for (const auto &entry: value["ipv4"]) {
         iface.ipv4.insert(entry.asString());
     }
-    for (const auto& entry : value["ipv6"]) {
+    for (const auto &entry: value["ipv6"]) {
         iface.ipv6.insert(entry.asString());
     }
     return iface;
 }
 
-RSCGroup::RemoteCandidate candidateFromJson(const Json::Value& value)
-{
+RSCGroup::RemoteCandidate candidateFromJson(const Json::Value &value) {
     RSCGroup::RemoteCandidate candidate;
     candidate.mac = value["mac"].asString();
     candidate.classification = contract::classificationFromString(value["classification"].asString());
@@ -77,13 +74,13 @@ RSCGroup::RemoteCandidate candidateFromJson(const Json::Value& value)
     if (value.isMember("remoteSystemName")) {
         candidate.remoteSystemName = value["remoteSystemName"].asString();
     }
-    for (const auto& entry : value["neighborIfaces"]) {
+    for (const auto &entry: value["neighborIfaces"]) {
         candidate.neighborIfaces.insert(entry.asString());
     }
-    for (const auto& entry : value["ipv4"]) {
+    for (const auto &entry: value["ipv4"]) {
         candidate.ipv4.insert(entry.asString());
     }
-    for (const auto& entry : value["ipv6"]) {
+    for (const auto &entry: value["ipv6"]) {
         candidate.ipv6.insert(entry.asString());
     }
     return candidate;
@@ -92,62 +89,56 @@ RSCGroup::RemoteCandidate candidateFromJson(const Json::Value& value)
 class PipeControlledRuntime final : public RSCGroup::IObservationRuntime {
 public:
     explicit PipeControlledRuntime(int readFd)
-        : readFd_(readFd)
-    {
+        : readFd_(readFd) {
     }
 
-    ~PipeControlledRuntime() override
-    {
+    ~PipeControlledRuntime() override {
         stop();
     }
 
-    void setEventSink(RSCGroup::IModelEventSink* sink) override
-    {
+    void setEventSink(RSCGroup::IModelEventSink *sink) override {
         sink_ = sink;
     }
 
-    void setInterfacePolicy(std::unique_ptr<RSCGroup::IInterfacePolicy>) override {}
-    void setClassifier(std::unique_ptr<RSCGroup::ICandidateClassifier>) override {}
+    void setInterfacePolicy(std::unique_ptr<RSCGroup::IInterfacePolicy>) override {
+    }
 
-    bool start() override
-    {
+    void setClassifier(std::unique_ptr<RSCGroup::ICandidateClassifier>) override {
+    }
+
+    bool start() override {
         running_ = true;
         worker_ = std::thread([this] { run(); });
         return true;
     }
 
-    void stop() override
-    {
+    void stop() override {
         running_.exchange(false);
         if (worker_.joinable()) {
             worker_.join();
         }
     }
 
-    bool isRunning() const override
-    {
+    bool isRunning() const override {
         return running_.load();
     }
 
-    RSCGroup::LocalNetworkSnapshot localSnapshot() const override
-    {
+    RSCGroup::LocalNetworkSnapshot localSnapshot() const override {
         std::scoped_lock lock(mutex_);
         return snapshot_;
     }
 
-    std::vector<RSCGroup::RemoteCandidate> remoteCandidates() const override
-    {
+    std::vector<RSCGroup::RemoteCandidate> remoteCandidates() const override {
         std::scoped_lock lock(mutex_);
         std::vector<RSCGroup::RemoteCandidate> out;
         out.reserve(candidates_.size());
-        for (const auto& [_, candidate] : candidates_) {
+        for (const auto &[_, candidate]: candidates_) {
             out.push_back(candidate);
         }
         return out;
     }
 
-    std::optional<RSCGroup::RemoteCandidate> findCandidateByMac(const std::string& mac) const override
-    {
+    std::optional<RSCGroup::RemoteCandidate> findCandidateByMac(const std::string &mac) const override {
         std::scoped_lock lock(mutex_);
         const auto it = candidates_.find(mac);
         if (it == candidates_.end()) {
@@ -156,13 +147,13 @@ public:
         return it->second;
     }
 
-    void age(std::chrono::steady_clock::time_point) override {}
+    void age(std::chrono::steady_clock::time_point) override {
+    }
 
 private:
     void emit(RSCGroup::ModelEventKind kind,
               std::optional<std::string> ifname = std::nullopt,
-              std::optional<std::string> mac = std::nullopt)
-    {
+              std::optional<std::string> mac = std::nullopt) {
         if (!sink_) {
             return;
         }
@@ -174,9 +165,8 @@ private:
         sink_->onModelEvent(event);
     }
 
-    void run()
-    {
-        FILE* input = ::fdopen(readFd_, "r");
+    void run() {
+        FILE *input = ::fdopen(readFd_, "r");
         if (!input) {
             if (readFd_ >= 0) {
                 ::close(readFd_);
@@ -185,7 +175,7 @@ private:
             running_ = false;
             return;
         }
-        char* line = nullptr;
+        char *line = nullptr;
         size_t lineCap = 0;
         Json::CharReaderBuilder builder;
         while (running_.load()) {
@@ -196,8 +186,8 @@ private:
             Json::Value command;
             std::string errors;
             std::unique_ptr<Json::CharReader> reader(builder.newCharReader());
-            const char* begin = line;
-            const char* end = line + bytes;
+            const char *begin = line;
+            const char *end = line + bytes;
             if (!reader->parse(begin, end, &command, &errors)) {
                 continue;
             }
@@ -231,8 +221,9 @@ private:
                     candidates_[candidate.mac] = candidate;
                     return wasPresent;
                 }();
-                emit(existed ? RSCGroup::ModelEventKind::CandidateUpdated
-                             : RSCGroup::ModelEventKind::CandidateAdded,
+                emit(existed
+                         ? RSCGroup::ModelEventKind::CandidateUpdated
+                         : RSCGroup::ModelEventKind::CandidateAdded,
                      std::nullopt, candidate.mac);
                 continue;
             }
@@ -252,7 +243,7 @@ private:
     }
 
     int readFd_{-1};
-    RSCGroup::IModelEventSink* sink_{nullptr};
+    RSCGroup::IModelEventSink *sink_{nullptr};
     mutable std::mutex mutex_;
     RSCGroup::LocalNetworkSnapshot snapshot_;
     std::unordered_map<std::string, RSCGroup::RemoteCandidate> candidates_;
@@ -260,15 +251,14 @@ private:
     std::thread worker_;
 };
 
-ChildProcess spawnObservationService(const std::string& busAddress,
-                                     const std::string& logPath,
-                                     int readFd)
-{
+ChildProcess spawnObservationService(const std::string &busAddress,
+                                     const std::string &logPath,
+                                     int readFd) {
     const pid_t pid = ::fork();
     expect(pid >= 0, "fork for observation service failed");
     if (pid == 0) {
         ::setenv("DBUS_SESSION_BUS_ADDRESS", busAddress.c_str(), 1);
-        FILE* log = std::fopen(logPath.c_str(), "a");
+        FILE *log = std::fopen(logPath.c_str(), "a");
         if (!log) {
             _exit(127);
         }
@@ -277,7 +267,7 @@ ChildProcess spawnObservationService(const std::string& busAddress,
         std::fclose(log);
 
         auto runtime = std::make_unique<PipeControlledRuntime>(readFd);
-        auto* runtimePtr = runtime.get();
+        auto *runtimePtr = runtime.get();
         auto transport = std::make_shared<RSCGroup::DbusTransport>("session");
         RSCGroup::ObservationService service(std::move(runtime), transport, std::chrono::hours(1));
         if (!service.start()) {
@@ -294,15 +284,14 @@ ChildProcess spawnObservationService(const std::string& busAddress,
     return ChildProcess(pid, logPath);
 }
 
-ChildProcess spawnMalformedObservationService(const std::string& busAddress,
-                                              const std::string& logPath,
-                                              int readFd)
-{
+ChildProcess spawnMalformedObservationService(const std::string &busAddress,
+                                              const std::string &logPath,
+                                              int readFd) {
     const pid_t pid = ::fork();
     expect(pid >= 0, "fork for malformed observation service failed");
     if (pid == 0) {
         ::setenv("DBUS_SESSION_BUS_ADDRESS", busAddress.c_str(), 1);
-        FILE* log = std::fopen(logPath.c_str(), "a");
+        FILE *log = std::fopen(logPath.c_str(), "a");
         if (!log) {
             _exit(127);
         }
@@ -320,11 +309,11 @@ ChildProcess spawnMalformedObservationService(const std::string& busAddress,
 
         auto object = connection->create_object(std::string(contract::OBJECT_PATH));
         connection->register_object(object);
-        object->create_method<std::map<std::string, DBus::Variant>()>(
+        object->create_method < std::map<std::string, DBus::Variant>() > (
             std::string(contract::INTERFACE),
             std::string(contract::METHOD_GET_LOCAL_SNAPSHOT),
             [] { return std::map<std::string, DBus::Variant>{}; });
-        object->create_method<std::map<std::string, DBus::Variant>(std::string)>(
+        object->create_method < std::map<std::string, DBus::Variant>(std::string) > (
             std::string(contract::INTERFACE),
             std::string(contract::METHOD_GET_INTERFACE),
             [](std::string) {
@@ -339,29 +328,29 @@ ChildProcess spawnMalformedObservationService(const std::string& busAddress,
                     {std::string(contract::K_IPV6), DBus::Variant(std::vector<DBus::Variant>{})},
                 };
             });
-        object->create_method<std::vector<std::string>()>(
+        object->create_method < std::vector<std::string>() > (
             std::string(contract::INTERFACE),
             std::string(contract::METHOD_GET_REMOTE_CANDIDATE_MACS),
             [] { return std::vector<std::string>{}; });
-        object->create_method<std::map<std::string, DBus::Variant>(std::string)>(
+        object->create_method < std::map<std::string, DBus::Variant>(std::string) > (
             std::string(contract::INTERFACE),
             std::string(contract::METHOD_GET_CANDIDATE_BY_MAC),
             [](std::string) { return std::map<std::string, DBus::Variant>{}; });
-        object->create_method<bool()>(
+        object->create_method < bool() > (
             std::string(contract::INTERFACE),
             std::string(contract::METHOD_GET_READY),
             [] { return true; });
-        object->create_method<std::string()>(
+        object->create_method < std::string() > (
             std::string(contract::INTERFACE),
             std::string(contract::METHOD_GET_PHASE),
             [] { return std::string(contract::PHASE_LIVE); });
 
-        FILE* input = ::fdopen(readFd, "r");
+        FILE *input = ::fdopen(readFd, "r");
         if (!input) {
             _exit(4);
         }
         char buffer[8];
-        (void)::fread(buffer, 1, sizeof(buffer), input);
+        (void) ::fread(buffer, 1, sizeof(buffer), input);
         ::fclose(input);
         connection->unregister_object(std::string(contract::OBJECT_PATH));
         _exit(0);
@@ -370,8 +359,7 @@ ChildProcess spawnMalformedObservationService(const std::string& busAddress,
     return ChildProcess(pid, logPath);
 }
 
-void sendCommand(int writeFd, const Json::Value& command)
-{
+void sendCommand(int writeFd, const Json::Value &command) {
     Json::StreamWriterBuilder builder;
     builder["indentation"] = "";
     const std::string payload = Json::writeString(builder, command) + "\n";
@@ -379,8 +367,7 @@ void sendCommand(int writeFd, const Json::Value& command)
     expect(written == static_cast<ssize_t>(payload.size()), "failed to send control command");
 }
 
-void testObservationServiceRoundTrip()
-{
+void testObservationServiceRoundTrip() {
     TempDir sandbox;
     PrivateBus bus(sandbox.path() + "/session-bus.sock");
     int commandPipe[2];
@@ -402,19 +389,19 @@ void testObservationServiceRoundTrip()
         std::scoped_lock lock(eventsMutex);
         events.push_back("local");
     });
-    client.onInterfaceChanged([&](const std::string& ifname) {
+    client.onInterfaceChanged([&](const std::string &ifname) {
         std::scoped_lock lock(eventsMutex);
         events.push_back("iface+" + ifname);
     });
-    client.onInterfaceRemoved([&](const std::string& ifname) {
+    client.onInterfaceRemoved([&](const std::string &ifname) {
         std::scoped_lock lock(eventsMutex);
         events.push_back("iface-" + ifname);
     });
-    client.onCandidateChanged([&](const std::string& mac) {
+    client.onCandidateChanged([&](const std::string &mac) {
         std::scoped_lock lock(eventsMutex);
         events.push_back("cand+" + mac);
     });
-    client.onCandidateRemoved([&](const std::string& mac) {
+    client.onCandidateRemoved([&](const std::string &mac) {
         std::scoped_lock lock(eventsMutex);
         events.push_back("cand-" + mac);
     });
@@ -532,8 +519,7 @@ void testObservationServiceRoundTrip()
     }, std::chrono::seconds(5)), "observation client did not surface service_unavailable after shutdown");
 }
 
-void testObservationClientReconnectRequiresExplicitReconnect()
-{
+void testObservationClientReconnectRequiresExplicitReconnect() {
     TempDir sandbox;
     PrivateBus bus(sandbox.path() + "/session-bus.sock");
     int commandPipe[2];
@@ -582,8 +568,7 @@ void testObservationClientReconnectRequiresExplicitReconnect()
     expect(WIFEXITED(secondStatus), "second observation service should exit cleanly");
 }
 
-void testObservationClientRejectsMalformedResponse()
-{
+void testObservationClientRejectsMalformedResponse() {
     TempDir sandbox;
     PrivateBus bus(sandbox.path() + "/session-bus.sock");
     int controlPipe[2];
@@ -609,17 +594,15 @@ void testObservationClientRejectsMalformedResponse()
     const int status = child.waitForExit();
     expect(WIFEXITED(status), "malformed observation service should exit cleanly");
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     try {
         testObservationServiceRoundTrip();
         testObservationClientReconnectRequiresExplicitReconnect();
         testObservationClientRejectsMalformedResponse();
         return EXIT_SUCCESS;
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';
         return EXIT_FAILURE;
     }

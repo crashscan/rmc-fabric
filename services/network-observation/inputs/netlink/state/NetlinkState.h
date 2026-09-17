@@ -23,8 +23,7 @@
 #include <vector>
 
 namespace RSCGroup {
-
-using DeviceEventCallback = std::function<void(const DeviceEvent&)>;
+using DeviceEventCallback = std::function<void(const DeviceEvent &)>;
 
 struct MacAggregate {
     std::optional<FdbEvent> fdb;
@@ -36,13 +35,18 @@ class NetlinkState {
 public:
     NetlinkState() = default;
 
-    std::optional<LinkEvent> updateLink(const LinkEvent& event);
-    std::optional<InterfaceIpEvent> updateAddress(const InterfaceIpEvent& event);
-    std::optional<FdbEvent> updateFdb(const FdbEvent& event, DeviceEventCallback onDevice);
-    std::optional<NeighborEvent> updateNeighbor(const NeighborEvent& event, DeviceEventCallback onDevice);
+    std::optional<LinkEvent> updateLink(const LinkEvent &event);
+
+    std::optional<InterfaceIpEvent> updateAddress(const InterfaceIpEvent &event);
+
+    std::optional<FdbEvent> updateFdb(const FdbEvent &event, DeviceEventCallback onDevice);
+
+    std::optional<NeighborEvent> updateNeighbor(const NeighborEvent &event, DeviceEventCallback onDevice);
 
     std::vector<DeviceEvent> getDevicesSnapshot() const;
+
     std::vector<LinkEvent> getLinksSnapshot() const;
+
     void clear();
 
 private:
@@ -54,7 +58,6 @@ private:
     std::unordered_map<std::string, MacAggregate> macAggregates_;
     std::unordered_map<std::string, DeviceEvent> deviceStatesByMac_;
 
-    std::optional<DeviceEvent> refreshMergedDeviceLocked(const std::string& mac);
+    std::optional<DeviceEvent> refreshMergedDeviceLocked(const std::string &mac);
 };
-
 } // namespace RSCGroup

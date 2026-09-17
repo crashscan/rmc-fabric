@@ -1,9 +1,9 @@
 add_executable(net-observe
-    main.cpp
+        main.cpp
 )
 
 target_link_libraries(net-observe
-    PRIVATE
+        PRIVATE
         network_observation_client
         pthread
         glog
@@ -12,7 +12,7 @@ target_link_libraries(net-observe
 )
 
 install(
-    TARGETS net-observe
-    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
-    COMPONENT rel
+        TARGETS net-observe
+        RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+        COMPONENT rel
 )

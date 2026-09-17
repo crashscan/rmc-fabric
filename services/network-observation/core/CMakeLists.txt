@@ -32,7 +32,7 @@ target_link_libraries(observation-model
         rsc_util
 )
 
-if(BUILD_TESTING)
+if (BUILD_TESTING)
     add_executable(observation_model_public_headers_test
             tests/PublicHeadersCompileTest.cpp
     )
@@ -46,5 +46,5 @@ if(BUILD_TESTING)
             NAME observation_model_public_headers_test
             COMMAND observation_model_public_headers_test
     )
-endif()
+endif ()
 

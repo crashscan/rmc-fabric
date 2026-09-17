@@ -4,8 +4,7 @@
 #include "RuleBasedClassifier.h"
 
 namespace RSCGroup {
-
-CandidateClassification RuleBasedClassifier::classify(const RemoteCandidate& candidate) {
+CandidateClassification RuleBasedClassifier::classify(const RemoteCandidate &candidate) {
     // Bundled-classifier invariant (see ICandidateClassifier.h):
     // LLDP evidence alone suffices for TopologyPeer.
     if (candidate.seenInLldp)
@@ -22,5 +21,4 @@ CandidateClassification RuleBasedClassifier::classify(const RemoteCandidate& can
         return CandidateClassification::WeakCandidate;
     return CandidateClassification::Unknown;
 }
-
 } // namespace RSCGroup

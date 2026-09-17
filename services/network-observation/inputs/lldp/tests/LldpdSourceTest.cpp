@@ -224,7 +224,7 @@ namespace {
     TEST(LldpdSourceTest, BackendProbeDoesNotThrow) {
         LldpdSource source({}, [](const LldpObservation &) {
         });
-        EXPECT_NO_THROW((void)source.isBackendAlive());
+        EXPECT_NO_THROW((void) source.isBackendAlive());
     }
 
     // refreshAll when not running remains a no-op (regression guard after the
@@ -303,7 +303,7 @@ namespace {
         sockaddr_un addr{};
         addr.sun_family = AF_UNIX;
         std::strncpy(addr.sun_path, socketPath.c_str(), sizeof(addr.sun_path) - 1);
-        ASSERT_EQ(::bind(serverFd, reinterpret_cast<sockaddr*>(&addr), sizeof(addr)), 0);
+        ASSERT_EQ(::bind(serverFd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)), 0);
         ASSERT_EQ(::listen(serverFd, 4), 0);
 
         std::atomic<bool> stopServer{false};
@@ -336,9 +336,9 @@ namespace {
 
         // Bound: connect (1s) + one round-trip (2s) + CI slack.
         const auto elapsedMs =
-            std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
+                std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
         EXPECT_LT(elapsedMs, 5000)
-            << "probe blocked " << elapsedMs << "ms against a hung backend";
+                << "probe blocked " << elapsedMs << "ms against a hung backend";
     }
 } // namespace
 } // namespace RSCGroup

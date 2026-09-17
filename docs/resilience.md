@@ -15,19 +15,21 @@ signal ordering:
 ### ServiceBinding (query-admission gate)
 
 The `ServiceBinding<T>` template now uses an explicit admission flag and active-count rather than
-a shared mutex.  This is starvation-free: once `detach()` closes admission, a continuous stream of
-new readers cannot delay it.  Callers hold only a reference count during calls; no mutex is held
+a shared mutex. This is starvation-free: once `detach()` closes admission, a continuous stream of
+new readers cannot delay it. Callers hold only a reference count during calls; no mutex is held
 when blocking on drain.
 
 ### Producer-drain postconditions
 
 `ILldpSource::stop()` guarantees on return:
+
 - no admitted callback is executing;
 - no new callback will be admitted until a successful restart;
 - watch/subscription handle is released;
 - cached neighbor state is cleared.
 
 `IObservationRuntime::stop()` guarantees on return:
+
 - all producer threads (netlink, LLDP) are stopped and drained;
 - no `IModelEventSink` call is active or will occur until restart;
 - the event sink pointer is cleared.
@@ -35,7 +37,7 @@ when blocking on drain.
 ### Terminal ReadyChanged(false) ordering
 
 `ReadyChanged(false)` is emitted *after* all producers have drained and *before* transports are
-closed.  `ReadyChanged(true)` is rejected once shutdown is claimed.  No domain signal or
+closed.  `ReadyChanged(true)` is rejected once shutdown is claimed. No domain signal or
 readiness-true transition may occur after the terminal false transition.
 
 ## Event delivery / backpressure
@@ -64,19 +66,19 @@ Manual/scheduled longer variants can increase `RMC_FABRIC_SOAK_CYCLES`.
 ## Worker and lifecycle resilience
 
 Both services share `lifecycle_runner::ManagedWorker` and
-`lifecycle_runner::LifecycleCoordinator`.  Neither primitive decides service health; restart and
+`lifecycle_runner::LifecycleCoordinator`. Neither primitive decides service health; restart and
 degradation policy stays service-owned.
 
-- **Inventory (Policy A)** — a repeated `start()` on a healthy running service returns `true`.  If
+- **Inventory (Policy A)** — a repeated `start()` on a healthy running service returns `true`. If
   the refresh worker has crashed, `start()` throws `std::logic_error` and an explicit `stop()` is
   required to reap and reset the failed epoch before the service can start again.
-- **Observation** — an aging-worker crash is degradation, not a hard failure.  It is reported as
+- **Observation** — an aging-worker crash is degradation, not a hard failure. It is reported as
   `observation.worker.aging.stopped`, readiness is preserved, and a repeated `start()` remains a
   no-op.
-- **Worker exceptions** are captured, never propagated out of the thread entry point.  The exit
+- **Worker exceptions** are captured, never propagated out of the thread entry point. The exit
   handler runs on the worker thread with the worker identity still valid, and must not drive its own
   worker's lifecycle.
-- **Wake and exit-handler exceptions** are contained and logged.  A swallowed wake degrades stop
+- **Wake and exit-handler exceptions** are contained and logged. A swallowed wake degrades stop
   latency to the worker's natural wake interval; it cannot deadlock or lose the stop request.
 - **`ExitReason::returned` versus `stop_requested`** is advisory only — a worker return can race a
   stop request — so services must not use it as an authoritative synchronization fact.

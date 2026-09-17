@@ -11,7 +11,6 @@
 #include <vector>
 
 namespace RSCGroup {
-
 struct ObservationRuntimeHealth {
     bool running{false};
     bool lldpAvailable{true};
@@ -25,8 +24,10 @@ class IObservationRuntime {
 public:
     virtual ~IObservationRuntime() = default;
 
-    virtual void setEventSink(IModelEventSink* sink) = 0;
+    virtual void setEventSink(IModelEventSink *sink) = 0;
+
     virtual void setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy) = 0;
+
     virtual void setClassifier(std::unique_ptr<ICandidateClassifier> classifier) = 0;
 
     [[nodiscard]] virtual bool start() = 0;
@@ -51,12 +52,17 @@ public:
      * a no-op.
      */
     virtual void stop() = 0;
+
     [[nodiscard]] virtual bool isRunning() const = 0;
+
     [[nodiscard]] virtual ObservationRuntimeHealth health() const = 0;
 
     [[nodiscard]] virtual LocalNetworkSnapshot localSnapshot() const = 0;
+
     [[nodiscard]] virtual std::vector<RemoteCandidate> remoteCandidates() const = 0;
-    [[nodiscard]] virtual std::optional<RemoteCandidate> findCandidateByMac(const std::string& mac) const = 0;
+
+    [[nodiscard]] virtual std::optional<RemoteCandidate> findCandidateByMac(const std::string &mac) const = 0;
+
     virtual void age(std::chrono::steady_clock::time_point now) = 0;
 
 
@@ -72,7 +78,6 @@ public:
      * Threading: concurrent with producer callbacks (netlink, LLDP watch)
      * and with query calls. Default no-op.
      */
-    virtual void tick(std::chrono::steady_clock::time_point now) { (void)now; }
+    virtual void tick(std::chrono::steady_clock::time_point now) { (void) now; }
 };
-
 } // namespace RSCGroup

@@ -17,20 +17,21 @@
 #include <unordered_map>
 
 namespace RSCGroup {
-
 class LocalStateTracker {
 public:
     LocalStateTracker() = default;
 
-    bool onLinkObservation(const LinkObservation& obs);
-    bool onAddressObservation(const AddressObservation& obs);
+    bool onLinkObservation(const LinkObservation &obs);
+
+    bool onAddressObservation(const AddressObservation &obs);
 
     /// Reset all interface state and MAC/IP refcounts (source restart).
     void clear();
 
-    const LocalNetworkSnapshot& snapshot() const { return snapshot_; }
+    const LocalNetworkSnapshot &snapshot() const { return snapshot_; }
 
     bool isLocalMac(std::string_view mac) const;
+
     bool isLocalIp(std::string_view ip) const;
 
 private:
@@ -40,10 +41,12 @@ private:
     std::unordered_map<std::string, int> localMacRefcount_;
     std::unordered_map<std::string, int> localIpRefcount_;
 
-    void incrementMac(const std::string& mac);
-    void decrementMac(const std::string& mac);
-    void incrementIp(const std::string& ip);
-    void decrementIp(const std::string& ip);
-};
+    void incrementMac(const std::string &mac);
 
+    void decrementMac(const std::string &mac);
+
+    void incrementIp(const std::string &ip);
+
+    void decrementIp(const std::string &ip);
+};
 } // namespace RSCGroup

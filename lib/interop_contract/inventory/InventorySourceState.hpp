@@ -6,7 +6,6 @@
 #include <string>
 
 namespace interop_contract::inventory {
-
 enum class SourceHealth {
     OK,
     DEGRADED,
@@ -27,5 +26,4 @@ struct SourceState {
 };
 
 using SourceStateMap = std::map<std::string, SourceState>;
-
 } // namespace interop_contract::inventory

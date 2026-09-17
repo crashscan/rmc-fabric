@@ -10,33 +10,36 @@
 #include <string>
 
 namespace RSCGroup {
-
-template <typename T>
-const rtattr* attrBegin(const T* msg) {
-    return reinterpret_cast<const rtattr*>(
-        reinterpret_cast<const char*>(msg) + NLMSG_ALIGN(sizeof(T)));
+template<typename T>
+const rtattr *attrBegin(const T *msg) {
+    return reinterpret_cast<const rtattr *>(
+        reinterpret_cast<const char *>(msg) + NLMSG_ALIGN(sizeof(T)));
 }
 
-template <typename Msg>
-const Msg* getPayloadAndAttrLen(const nlmsghdr* nh, int& attrLen) {
+template<typename Msg>
+const Msg *getPayloadAndAttrLen(const nlmsghdr *nh, int &attrLen) {
     constexpr int headerLen = static_cast<int>(NLMSG_LENGTH(sizeof(Msg)));
     const int messageLen = static_cast<int>(nh->nlmsg_len);
     if (messageLen < headerLen) {
         return nullptr;
     }
     attrLen = messageLen - headerLen;
-    return reinterpret_cast<const Msg*>(NLMSG_DATA(nh));
+    return reinterpret_cast<const Msg *>(NLMSG_DATA(nh));
 }
 
-template const rtattr* attrBegin<ifinfomsg>(const ifinfomsg*);
-template const rtattr* attrBegin<ifaddrmsg>(const ifaddrmsg*);
-template const rtattr* attrBegin<ndmsg>(const ndmsg*);
+template const rtattr *attrBegin<ifinfomsg>(const ifinfomsg *);
 
-template const ifinfomsg* getPayloadAndAttrLen<ifinfomsg>(const nlmsghdr*, int&);
-template const ifaddrmsg* getPayloadAndAttrLen<ifaddrmsg>(const nlmsghdr*, int&);
-template const ndmsg* getPayloadAndAttrLen<ndmsg>(const nlmsghdr*, int&);
+template const rtattr *attrBegin<ifaddrmsg>(const ifaddrmsg *);
 
-void processMessage(const nlmsghdr* nh,
+template const rtattr *attrBegin<ndmsg>(const ndmsg *);
+
+template const ifinfomsg *getPayloadAndAttrLen<ifinfomsg>(const nlmsghdr *, int &);
+
+template const ifaddrmsg *getPayloadAndAttrLen<ifaddrmsg>(const nlmsghdr *, int &);
+
+template const ndmsg *getPayloadAndAttrLen<ndmsg>(const nlmsghdr *, int &);
+
+void processMessage(const nlmsghdr *nh,
                     LinkEventCallback onLink,
                     IpEventCallback onIp,
                     FdbEventCallback onFdb,
@@ -60,7 +63,7 @@ void processMessage(const nlmsghdr* nh,
                 LOG(ERROR) << "received NLMSG_ERROR too short, len=" << nh->nlmsg_len;
                 break;
             }
-            const auto* err = reinterpret_cast<const nlmsgerr*>(NLMSG_DATA(nh));
+            const auto *err = reinterpret_cast<const nlmsgerr *>(NLMSG_DATA(nh));
             LOG(ERROR) << "received NLMSG_ERROR code=" << err->error;
             break;
         }
@@ -70,9 +73,9 @@ void processMessage(const nlmsghdr* nh,
     }
 }
 
-void handleLink(const nlmsghdr* nh, LinkEventCallback onLink) {
+void handleLink(const nlmsghdr *nh, LinkEventCallback onLink) {
     int attrLen{0};
-    const auto* ifinfo = getPayloadAndAttrLen<ifinfomsg>(nh, attrLen);
+    const auto *ifinfo = getPayloadAndAttrLen<ifinfomsg>(nh, attrLen);
     if (!ifinfo) {
         return;
     }
@@ -89,21 +92,21 @@ void handleLink(const nlmsghdr* nh, LinkEventCallback onLink) {
 
     bool hasIfname = false;
 
-    for (auto* attr = attrBegin(ifinfo); RTA_OK(attr, attrLen); attr = RTA_NEXT(attr, attrLen)) {
+    for (auto *attr = attrBegin(ifinfo); RTA_OK(attr, attrLen); attr = RTA_NEXT(attr, attrLen)) {
         switch (attr->rta_type) {
             case IFLA_OPERSTATE:
                 if (RTA_PAYLOAD(attr) >= sizeof(unsigned char)) {
-                    event.operState = *static_cast<const unsigned char*>(RTA_DATA(attr));
+                    event.operState = *static_cast<const unsigned char *>(RTA_DATA(attr));
                 }
                 break;
             case IFLA_ADDRESS:
                 event.mac = formatMacAddress(
-                    static_cast<const unsigned char*>(RTA_DATA(attr)),
+                    static_cast<const unsigned char *>(RTA_DATA(attr)),
                     RTA_PAYLOAD(attr));
                 break;
             case IFLA_IFNAME: {
                 if (RTA_PAYLOAD(attr) < 1) break;
-                const char* p = static_cast<const char*>(RTA_DATA(attr));
+                const char *p = static_cast<const char *>(RTA_DATA(attr));
                 const int len = RTA_PAYLOAD(attr);
                 // Trim trailing NUL only if present
                 std::string name(p, p + len - (p[len - 1] == '\0' ? 1 : 0));
@@ -116,7 +119,7 @@ void handleLink(const nlmsghdr* nh, LinkEventCallback onLink) {
             }
             case IFLA_MASTER:
                 if (RTA_PAYLOAD(attr) >= sizeof(int)) {
-                    const int masterIdx = *static_cast<const int*>(RTA_DATA(attr));
+                    const int masterIdx = *static_cast<const int *>(RTA_DATA(attr));
                     event.masterIfindex = masterIdx;
                     event.masterIfname = ifIndexToName(masterIdx);
                 }
@@ -135,9 +138,9 @@ void handleLink(const nlmsghdr* nh, LinkEventCallback onLink) {
     }
 }
 
-void handleAddr(const nlmsghdr* nh, IpEventCallback onIp) {
+void handleAddr(const nlmsghdr *nh, IpEventCallback onIp) {
     int attrLen{0};
-    const auto* ifaddr = getPayloadAndAttrLen<ifaddrmsg>(nh, attrLen);
+    const auto *ifaddr = getPayloadAndAttrLen<ifaddrmsg>(nh, attrLen);
     if (!ifaddr) {
         return;
     }
@@ -150,7 +153,7 @@ void handleAddr(const nlmsghdr* nh, IpEventCallback onIp) {
     const bool isDelete = (nh->nlmsg_type == RTM_DELADDR);
 
     struct AttrData {
-        const void* data = nullptr;
+        const void *data = nullptr;
         int len = 0;
     };
 
@@ -158,24 +161,24 @@ void handleAddr(const nlmsghdr* nh, IpEventCallback onIp) {
     AttrData v4addr;
     AttrData v6addr;
 
-    for (auto* attr = attrBegin(ifaddr); RTA_OK(attr, attrLen); attr = RTA_NEXT(attr, attrLen)) {
+    for (auto *attr = attrBegin(ifaddr); RTA_OK(attr, attrLen); attr = RTA_NEXT(attr, attrLen)) {
         if (v4) {
             if (attr->rta_type == IFA_LOCAL) {
-                v4local = { RTA_DATA(attr), RTA_PAYLOAD(attr) };
+                v4local = {RTA_DATA(attr), RTA_PAYLOAD(attr)};
             } else if (attr->rta_type == IFA_ADDRESS) {
-                v4addr = { RTA_DATA(attr), RTA_PAYLOAD(attr) };
+                v4addr = {RTA_DATA(attr), RTA_PAYLOAD(attr)};
             }
         } else if (v6 && attr->rta_type == IFA_ADDRESS) {
-            v6addr = { RTA_DATA(attr), RTA_PAYLOAD(attr) };
+            v6addr = {RTA_DATA(attr), RTA_PAYLOAD(attr)};
         }
     }
 
-    auto emitIp = [&](const AttrData& ad) {
+    auto emitIp = [&](const AttrData &ad) {
         if (ad.len == 0) return;
         if (v4 && ad.len != 4) return;
         if (v6 && ad.len != 16) return;
         const std::string ip = formatIpAddress(ifaddr->ifa_family, ad.data);
-        InterfaceIpEvent event{ ifname, ifaddr->ifa_family, ip, ifaddr->ifa_prefixlen, !isDelete };
+        InterfaceIpEvent event{ifname, ifaddr->ifa_family, ip, ifaddr->ifa_prefixlen, !isDelete};
         if (onIp) onIp(event);
     };
 
@@ -190,11 +193,11 @@ void handleAddr(const nlmsghdr* nh, IpEventCallback onIp) {
     }
 }
 
-void handleNeigh(const nlmsghdr* nh,
+void handleNeigh(const nlmsghdr *nh,
                  FdbEventCallback onFdb,
                  NeighborEventCallback onNeigh) {
     int attrLen{0};
-    const auto* ndm = getPayloadAndAttrLen<ndmsg>(nh, attrLen);
+    const auto *ndm = getPayloadAndAttrLen<ndmsg>(nh, attrLen);
     if (!ndm) {
         return;
     }
@@ -210,17 +213,17 @@ void handleNeigh(const nlmsghdr* nh,
     }
 }
 
-void handleFdb(const nlmsghdr* nh,
-               const ndmsg& ndm,
-               const std::string& ifname,
+void handleFdb(const nlmsghdr *nh,
+               const ndmsg &ndm,
+               const std::string &ifname,
                int attrLen,
                FdbEventCallback onFdb) {
     std::optional<std::string> mac;
-    for (auto* attr = attrBegin(&ndm); RTA_OK(attr, attrLen); attr = RTA_NEXT(attr, attrLen)) {
+    for (auto *attr = attrBegin(&ndm); RTA_OK(attr, attrLen); attr = RTA_NEXT(attr, attrLen)) {
         if (attr->rta_type == NDA_LLADDR) {
             if (RTA_PAYLOAD(attr) < 6) continue;
             mac = formatMacAddress(
-                static_cast<const unsigned char*>(RTA_DATA(attr)),
+                static_cast<const unsigned char *>(RTA_DATA(attr)),
                 RTA_PAYLOAD(attr));
         }
     }
@@ -241,24 +244,24 @@ void handleFdb(const nlmsghdr* nh,
     }
 }
 
-void handleNeighborL3(const nlmsghdr* nh,
-                      const ndmsg& ndm,
-                      const std::string& ifname,
+void handleNeighborL3(const nlmsghdr *nh,
+                      const ndmsg &ndm,
+                      const std::string &ifname,
                       int attrLen,
                       NeighborEventCallback onNeigh) {
     std::optional<std::string> mac;
     std::optional<std::string> ip;
-    for (auto* attr = attrBegin(&ndm); RTA_OK(attr, attrLen); attr = RTA_NEXT(attr, attrLen)) {
+    for (auto *attr = attrBegin(&ndm); RTA_OK(attr, attrLen); attr = RTA_NEXT(attr, attrLen)) {
         switch (attr->rta_type) {
             case NDA_LLADDR:
                 if (RTA_PAYLOAD(attr) >= 6) {
                     mac = formatMacAddress(
-                        static_cast<const unsigned char*>(RTA_DATA(attr)),
+                        static_cast<const unsigned char *>(RTA_DATA(attr)),
                         RTA_PAYLOAD(attr));
                 }
                 break;
             case NDA_DST:
-                if ((ndm.ndm_family == AF_INET  && RTA_PAYLOAD(attr) == 4) ||
+                if ((ndm.ndm_family == AF_INET && RTA_PAYLOAD(attr) == 4) ||
                     (ndm.ndm_family == AF_INET6 && RTA_PAYLOAD(attr) == 16)) {
                     ip = formatIpAddress(ndm.ndm_family, RTA_DATA(attr));
                 }
@@ -285,5 +288,4 @@ void handleNeighborL3(const nlmsghdr* nh,
         onNeigh(event);
     }
 }
-
 } // namespace RSCGroup

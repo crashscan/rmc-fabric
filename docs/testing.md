@@ -2,15 +2,15 @@
 
 ## Test matrix
 
-| Label | Scope | Default |
-|---|---|---|
-| `unit` | service, contract, codec, lifecycle, file-source tests | yes |
-| `integration` | hermetic private-bus end-to-end tests | opt-in |
-| `architecture` | boundary and transport-isolation checks | yes |
-| `resilience` | lifecycle failure, restart, degradation, and recovery tests | yes |
-| `soak-short` | bounded repeated start/stop and fd-stability smoke | yes |
-| `package` | install-tree consumer and runtime-layout verification | yes |
-| `fuzz-smoke` | bounded libFuzzer smoke runs | opt-in |
+| Label          | Scope                                                       | Default |
+|----------------|-------------------------------------------------------------|---------|
+| `unit`         | service, contract, codec, lifecycle, file-source tests      | yes     |
+| `integration`  | hermetic private-bus end-to-end tests                       | opt-in  |
+| `architecture` | boundary and transport-isolation checks                     | yes     |
+| `resilience`   | lifecycle failure, restart, degradation, and recovery tests | yes     |
+| `soak-short`   | bounded repeated start/stop and fd-stability smoke          | yes     |
+| `package`      | install-tree consumer and runtime-layout verification       | yes     |
+| `fuzz-smoke`   | bounded libFuzzer smoke runs                                | opt-in  |
 
 ## Common commands
 
@@ -66,5 +66,6 @@ cmake --build --preset benchmark
 
 - Integration tests start a private `dbus-daemon`; they do not touch the host system bus.
 - Fuzz targets are bounded smoke checks in CI and are not intended to run indefinitely there.
-- Package verification installs into a temporary prefix, validates runtime assets, and builds public consumers against that install tree.
+- Package verification installs into a temporary prefix, validates runtime assets, and builds public consumers against
+  that install tree.
 - Scheduled/manual CI runs extend soak, fuzz, and benchmark coverage beyond bounded PR jobs.

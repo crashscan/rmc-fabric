@@ -23,8 +23,7 @@ namespace {
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_shuttingDown{false};
 
-void handleSignal(int)
-{
+void handleSignal(int) {
     g_shuttingDown = true;
     g_running = false;
 }
@@ -41,9 +40,8 @@ std::optional<std::string> g_lastInventoryField;
 std::optional<std::string> g_lastSourceName;
 std::optional<bool> g_lastReadyValue;
 
-std::string fieldValueToString(const FieldValue& v)
-{
-    return std::visit([](const auto& x) -> std::string {
+std::string fieldValueToString(const FieldValue &v) {
+    return std::visit([](const auto &x) -> std::string {
         using T = std::decay_t<decltype(x)>;
         if constexpr (std::is_same_v<T, bool>) {
             return x ? "true" : "false";
@@ -55,33 +53,34 @@ std::string fieldValueToString(const FieldValue& v)
     }, v);
 }
 
-void printSnapshotUnlocked(const InventorySnapshot& snap)
-{
+void printSnapshotUnlocked(const InventorySnapshot &snap) {
     std::cout << "--- Inventory Snapshot ---\n";
     std::cout << "version:   " << snap.version << "\n";
     std::cout << "timestamp: " << snap.timestamp << "\n";
     std::cout << "ready:     " << (snap.ready ? "true" : "false") << "\n";
     std::cout << "phase:     " << snap.phase << "\n";
     std::cout << "fields (" << snap.fields.size() << "):\n";
-    for (const auto& [key, value] : snap.fields) {
+    for (const auto &[key, value]: snap.fields) {
         std::cout << "  " << key << " = " << fieldValueToString(value) << "\n";
     }
 }
 
-void printSourceStatesUnlocked(const interop_contract::inventory::SourceStateMap& states)
-{
+void printSourceStatesUnlocked(const interop_contract::inventory::SourceStateMap &states) {
     std::cout << "--- Source States ---\n";
-    for (const auto& [name, state] : states) {
+    for (const auto &[name, state]: states) {
         std::string healthStr;
         switch (state.health) {
-            case SourceHealth::OK:       healthStr = "ok"; break;
-            case SourceHealth::DEGRADED: healthStr = "degraded"; break;
-            case SourceHealth::FAILED:   healthStr = "failed"; break;
+            case SourceHealth::OK: healthStr = "ok";
+                break;
+            case SourceHealth::DEGRADED: healthStr = "degraded";
+                break;
+            case SourceHealth::FAILED: healthStr = "failed";
+                break;
         }
         std::cout << "  " << name
-                  << ": health=" << healthStr
-                  << " required=" << (state.required ? "true" : "false")
-                  << " stale=" << (state.stale ? "true" : "false");
+                << ": health=" << healthStr
+                << " required=" << (state.required ? "true" : "false")
+                << " stale=" << (state.stale ? "true" : "false");
         if (state.lastError) {
             std::cout << " error=\"" << *state.lastError << "\"";
         }
@@ -92,30 +91,28 @@ void printSourceStatesUnlocked(const interop_contract::inventory::SourceStateMap
     }
 }
 
-void printIssuesUnlocked(const interop_contract::inventory::InventoryIssues& issues)
-{
+void printIssuesUnlocked(const interop_contract::inventory::InventoryIssues &issues) {
     if (issues.empty()) {
         std::cout << "--- Issues: none ---\n";
         return;
     }
     std::cout << "--- Issues ---\n";
-    for (const auto& [name, fields] : issues) {
+    for (const auto &[name, fields]: issues) {
         std::cout << "  " << name << ":";
-        for (const auto& [k, v] : fields) {
+        for (const auto &[k, v]: fields) {
             std::cout << " " << k << "=" << fieldValueToString(v);
         }
         std::cout << "\n";
     }
 }
 
-void printAll(const InventoryClient& client)
-{
+void printAll(const InventoryClient &client) {
     if (g_shuttingDown.load()) {
         return;
     }
 
     try {
-        const auto snap   = client.getIdentity();
+        const auto snap = client.getIdentity();
         const auto states = client.getSourceStates();
         const auto issues = client.getIssues();
 
@@ -128,18 +125,16 @@ void printAll(const InventoryClient& client)
         printSourceStatesUnlocked(states);
         printIssuesUnlocked(issues);
         std::cout << std::endl;
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         if (!g_shuttingDown.load()) {
             std::scoped_lock lock(g_outMutex);
             std::cerr << "printAll failed: " << e.what() << "\n";
         }
     }
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     std::signal(SIGINT, handleSignal);
     std::signal(SIGTERM, handleSignal);
 
@@ -157,7 +152,7 @@ int main()
         }
         printAll(*client);
 
-        client->onInventoryChanged([](const std::string& fieldPath) {
+        client->onInventoryChanged([](const std::string &fieldPath) {
             if (g_shuttingDown.load()) return;
             {
                 std::scoped_lock lock(g_eventMutex);
@@ -167,7 +162,7 @@ int main()
             g_refreshRequested = true;
         });
 
-        client->onSourceStateChanged([](const std::string& sourceName) {
+        client->onSourceStateChanged([](const std::string &sourceName) {
             if (g_shuttingDown.load()) return;
             {
                 std::scoped_lock lock(g_eventMutex);
@@ -199,14 +194,14 @@ int main()
                 std::optional<bool> ready;
 
                 const bool sawInventory = g_seenInventoryChanged.exchange(false);
-                const bool sawSource    = g_seenSourceStateChanged.exchange(false);
-                const bool sawReady     = g_seenReadyChanged.exchange(false);
+                const bool sawSource = g_seenSourceStateChanged.exchange(false);
+                const bool sawReady = g_seenReadyChanged.exchange(false);
 
                 {
                     std::scoped_lock lock(g_eventMutex);
-                    field  = g_lastInventoryField;
+                    field = g_lastInventoryField;
                     source = g_lastSourceName;
-                    ready  = g_lastReadyValue;
+                    ready = g_lastReadyValue;
                 }
 
                 {
@@ -219,7 +214,7 @@ int main()
                     }
                     if (sawReady && ready) {
                         std::cout << "[event] ReadyChanged: "
-                                  << (*ready ? "true" : "false") << "\n";
+                                << (*ready ? "true" : "false") << "\n";
                     }
                 }
 
@@ -239,7 +234,7 @@ int main()
         g_shuttingDown = true;
 
         client.reset();
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         std::scoped_lock lock(g_outMutex);
         std::cerr << "inventory-watch failed: " << e.what() << "\n";
         return 1;

@@ -8,11 +8,11 @@
 
 namespace DBus {
 class Object;
-template<typename...> class Signal;
+template<typename...>
+class Signal;
 }
 
 namespace RSCGroup {
-
 class IObservationQueryService;
 class NetworkObservationQueryHandler;
 
@@ -33,15 +33,17 @@ class NetworkObservationQueryHandler;
 class NetworkObservationDbusAdapter : public DbusServiceAdapter {
 public:
     NetworkObservationDbusAdapter();
+
     ~NetworkObservationDbusAdapter() override;
 
-    NetworkObservationDbusAdapter(const NetworkObservationDbusAdapter&) = delete;
-    NetworkObservationDbusAdapter& operator=(const NetworkObservationDbusAdapter&) = delete;
+    NetworkObservationDbusAdapter(const NetworkObservationDbusAdapter &) = delete;
 
-    void setService(IObservationQueryService* service);
+    NetworkObservationDbusAdapter &operator=(const NetworkObservationDbusAdapter &) = delete;
 
-    void bind(const std::shared_ptr<DBus::Object>& object,
-              const std::string& interfaceName) override;
+    void setService(IObservationQueryService *service);
+
+    void bind(const std::shared_ptr<DBus::Object> &object,
+              const std::string &interfaceName) override;
 
     /**
      * @brief Closes query admission and waits for in-flight D-Bus handler
@@ -63,10 +65,15 @@ public:
     void onTransportStopping() override;
 
     void publishLocalStateChanged();
-    void publishInterfaceChanged(const std::string& ifname);
-    void publishInterfaceRemoved(const std::string& ifname);
-    void publishCandidateChanged(const std::string& mac);
-    void publishCandidateRemoved(const std::string& mac);
+
+    void publishInterfaceChanged(const std::string &ifname);
+
+    void publishInterfaceRemoved(const std::string &ifname);
+
+    void publishCandidateChanged(const std::string &mac);
+
+    void publishCandidateRemoved(const std::string &mac);
+
     void publishReadyChanged(bool ready);
 
 private:
@@ -76,17 +83,17 @@ private:
 
     std::shared_ptr<NetworkObservationQueryHandler> handler_;
 
-    std::shared_ptr<DBus::Signal<void()>>           signalLocalStateChanged_;
-    std::shared_ptr<DBus::Signal<void(std::string)>> signalInterfaceChanged_;
-    std::shared_ptr<DBus::Signal<void(std::string)>> signalInterfaceRemoved_;
-    std::shared_ptr<DBus::Signal<void(std::string)>> signalCandidateChanged_;
-    std::shared_ptr<DBus::Signal<void(std::string)>> signalCandidateRemoved_;
-    std::shared_ptr<DBus::Signal<void(bool)>>        signalReadyChanged_;
+    std::shared_ptr<DBus::Signal<void()> > signalLocalStateChanged_;
+    std::shared_ptr<DBus::Signal<void(std::string)> > signalInterfaceChanged_;
+    std::shared_ptr<DBus::Signal<void(std::string)> > signalInterfaceRemoved_;
+    std::shared_ptr<DBus::Signal<void(std::string)> > signalCandidateChanged_;
+    std::shared_ptr<DBus::Signal<void(std::string)> > signalCandidateRemoved_;
+    std::shared_ptr<DBus::Signal<void(bool)> > signalReadyChanged_;
 
-    void createSignals(const std::shared_ptr<DBus::Object>& object,
-                       const std::string& interfaceName);
-    void bindMethods(const std::shared_ptr<DBus::Object>& object,
-                     const std::string& interfaceName);
+    void createSignals(const std::shared_ptr<DBus::Object> &object,
+                       const std::string &interfaceName);
+
+    void bindMethods(const std::shared_ptr<DBus::Object> &object,
+                     const std::string &interfaceName);
 };
-
 } // namespace RSCGroup

@@ -1,7 +1,6 @@
 #include <DbusClient.h>
 
-int main()
-{
+int main() {
     using Result = interop_contract::ClientResult<
         interop_contract::network_observation::LocalNetworkSnapshot>;
     Result result = interop_contract::ClientError{
@@ -9,6 +8,6 @@ int main()
         "diagnostic",
     };
 
-    RSCGroup::DbusClient* client = nullptr;
+    RSCGroup::DbusClient *client = nullptr;
     return client == nullptr && !result ? 0 : 1;
 }

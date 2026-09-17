@@ -4,37 +4,39 @@
 #include "LldpObserver.h"
 
 namespace RSCGroup {
-
 class LldpObserver::Impl {
 public:
     explicit Impl(std::unique_ptr<ILldpSource> source)
-        : source_(std::move(source)) {}
+        : source_(std::move(source)) {
+    }
 
     bool start() { return source_->start(); }
     void stop() { source_->stop(); }
     bool isRunning() const { return source_->isRunning(); }
 
     void refreshAll() { source_->refreshAll(); }
-    void refreshInterface(const std::string& ifname) { source_->refreshInterface(ifname); }
+    void refreshInterface(const std::string &ifname) { source_->refreshInterface(ifname); }
 
-    void onInterfaceUp(const std::string& ifname) {
+    void onInterfaceUp(const std::string &ifname) {
         source_->refreshInterface(ifname);
     }
 
-    void onInterfaceDown(const std::string& ifname) {
+    void onInterfaceDown(const std::string &ifname) {
         source_->removeInterface(ifname);
     }
 
-    void onInterfaceRemoved(const std::string& ifname) {
+    void onInterfaceRemoved(const std::string &ifname) {
         source_->removeInterface(ifname);
     }
 
     void reassertAll() {
         source_->reassertAll();
     }
+
     bool isBackendAlive() {
         return source_->isBackendAlive();
     }
+
     [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const {
         return source_->lastEventAt();
     }
@@ -44,7 +46,8 @@ private:
 };
 
 LldpObserver::LldpObserver(std::unique_ptr<ILldpSource> source)
-    : impl_(std::make_unique<Impl>(std::move(source))) {}
+    : impl_(std::make_unique<Impl>(std::move(source))) {
+}
 
 LldpObserver::~LldpObserver() = default;
 
@@ -53,14 +56,13 @@ void LldpObserver::stop() { impl_->stop(); }
 bool LldpObserver::isRunning() const { return impl_->isRunning(); }
 
 void LldpObserver::refreshAll() { impl_->refreshAll(); }
-void LldpObserver::refreshInterface(const std::string& ifname) { impl_->refreshInterface(ifname); }
+void LldpObserver::refreshInterface(const std::string &ifname) { impl_->refreshInterface(ifname); }
 
-void LldpObserver::onInterfaceUp(const std::string& ifname) { impl_->onInterfaceUp(ifname); }
-void LldpObserver::onInterfaceDown(const std::string& ifname) { impl_->onInterfaceDown(ifname); }
-void LldpObserver::onInterfaceRemoved(const std::string& ifname) { impl_->onInterfaceRemoved(ifname); }
+void LldpObserver::onInterfaceUp(const std::string &ifname) { impl_->onInterfaceUp(ifname); }
+void LldpObserver::onInterfaceDown(const std::string &ifname) { impl_->onInterfaceDown(ifname); }
+void LldpObserver::onInterfaceRemoved(const std::string &ifname) { impl_->onInterfaceRemoved(ifname); }
 
 void LldpObserver::reassertAll() { impl_->reassertAll(); }
 bool LldpObserver::isBackendAlive() { return impl_->isBackendAlive(); }
 std::chrono::steady_clock::time_point LldpObserver::lastEventAt() const { return impl_->lastEventAt(); }
-
 } // namespace RSCGroup

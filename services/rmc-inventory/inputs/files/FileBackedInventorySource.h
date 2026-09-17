@@ -8,37 +8,44 @@
 #include <string>
 
 namespace RSCGroup {
-
 class FileBackedInventorySource : public IInventorySource, public IWatchableInventorySource {
 public:
     FileBackedInventorySource(std::string name,
                               bool required,
                               std::string filePath,
                               FieldNameList ownedFields);
+
     ~FileBackedInventorySource() override;
 
-    FileBackedInventorySource(const FileBackedInventorySource&) = delete;
-    FileBackedInventorySource& operator=(const FileBackedInventorySource&) = delete;
+    FileBackedInventorySource(const FileBackedInventorySource &) = delete;
+
+    FileBackedInventorySource &operator=(const FileBackedInventorySource &) = delete;
 
     [[nodiscard]] std::string getName() const override { return name_; }
     [[nodiscard]] bool isRequired() const override { return required_; }
     [[nodiscard]] FieldNameList getOwnedFields() const override { return ownedFields_; }
+
     [[nodiscard]] InventoryFields collect() override;
+
     [[nodiscard]] SourceState getState() const override;
 
     [[nodiscard]] std::string getWatchPath() const override { return filePath_; }
-    [[nodiscard]] const std::string& getFilePath() const { return filePath_; }
+    [[nodiscard]] const std::string &getFilePath() const { return filePath_; }
 
 protected:
-    [[nodiscard]] virtual InventoryFields fieldsFromContents(const std::string& contents) const = 0;
-    [[nodiscard]] static std::string scalarFromContents(const std::string& contents,
-                                                        const std::string& what);
+    [[nodiscard]] virtual InventoryFields fieldsFromContents(const std::string &contents) const = 0;
+
+    [[nodiscard]] static std::string scalarFromContents(const std::string &contents,
+                                                        const std::string &what);
 
 private:
-    [[nodiscard]] static std::string readFileContents(const std::string& filePath);
+    [[nodiscard]] static std::string readFileContents(const std::string &filePath);
+
     [[nodiscard]] static std::string boundedErrorText(std::string_view error);
+
     void noteSuccess();
-    void noteFailure(const std::string& error);
+
+    void noteFailure(const std::string &error);
 
     static constexpr std::size_t kMaxFileBytes = 64 * 1024;
 
@@ -50,5 +57,4 @@ private:
     mutable std::mutex stateMutex_;
     SourceState state_;
 };
-
 } // namespace RSCGroup

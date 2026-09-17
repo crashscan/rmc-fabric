@@ -5,7 +5,6 @@
 #include <inventory/InventoryTypes.hpp>
 
 namespace RSCGroup {
-
 using FieldValue = interop_contract::inventory::FieldValue;
 using InventoryFields = interop_contract::inventory::InventoryFields;
 using FieldNameList = interop_contract::inventory::FieldNameList;
@@ -21,5 +20,4 @@ struct InventoryDiff {
         return changedFields.empty() && removedFields.empty();
     }
 };
-
 } // namespace RSCGroup

@@ -138,7 +138,7 @@ bool ObservationService::start() {
     try {
         (void) supervisionWorker_.start();
     } catch (const std::exception &e) {
-        supervisionWorker_.stop();   // idempotent; guards a partially-started worker
+        supervisionWorker_.stop(); // idempotent; guards a partially-started worker
         agingWorker_.stop();
         runtime_->stop();
         ServiceBase::stop();

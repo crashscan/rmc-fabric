@@ -2,8 +2,7 @@
 #include <inventory.hpp>
 #include <network_observation/NetworkObservationTypes.hpp>
 
-int main()
-{
+int main() {
     interop_contract::ClientResult<int> value = 42;
     if (!value || value.value() != 42) {
         return 1;

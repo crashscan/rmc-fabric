@@ -40,7 +40,7 @@ target_link_libraries(
         glog
 )
 
-if(BUILD_TESTING)
+if (BUILD_TESTING)
     add_executable(
             inventory_service_tests
             tests/InventoryServiceTests.cpp
@@ -71,4 +71,4 @@ if(BUILD_TESTING)
             TIMEOUT 15
             LABELS "unit;resilience"
     )
-endif()
+endif ()

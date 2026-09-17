@@ -7,12 +7,11 @@
 #include <string>
 
 namespace RSCGroup {
+HardFilter::HardFilter(const ModelConfig &config)
+    : config_(config) {
+}
 
-HardFilter::HardFilter(const ModelConfig& config)
-    : config_(config)
-{}
-
-bool HardFilter::passes(const NeighborObservation& obs, bool isLocalMac, bool isLocalIp) const {
+bool HardFilter::passes(const NeighborObservation &obs, bool isLocalMac, bool isLocalIp) const {
     if (config_.skipNullMac && isNullMac(obs.mac)) return false;
     if (config_.skipLoopbackInterface && obs.ifname == "lo") return false;
     if (config_.skipMulticastIPv4 && isMulticastIPv4(obs.ip)) return false;
@@ -24,7 +23,7 @@ bool HardFilter::passes(const NeighborObservation& obs, bool isLocalMac, bool is
     return true;
 }
 
-bool HardFilter::passes(const FdbObservation& obs, bool isLocalMac) const {
+bool HardFilter::passes(const FdbObservation &obs, bool isLocalMac) const {
     if (config_.skipNullMac && isNullMac(obs.mac)) return false;
     if (config_.skipMulticastMac && isMulticastMac(obs.mac)) return false;
     if (config_.skipIeeeReservedMac && isIeeeReservedMac(obs.mac)) return false;
@@ -43,7 +42,7 @@ bool HardFilter::isMulticastMac(std::string_view mac) {
     // Parse first two hex chars manually — sscanf(mac.data()) is unsafe
     // because string_view is not guaranteed null-terminated.
     char hexPair[3] = {mac[0], mac[1], '\0'};
-    char* end = nullptr;
+    char *end = nullptr;
     long firstOctet = std::strtol(hexPair, &end, 16);
     if (end == hexPair + 2)
         return (firstOctet & 0x01) != 0;
@@ -67,5 +66,4 @@ bool HardFilter::isMulticastIPv4(std::string_view ip) {
 bool HardFilter::isMulticastIPv6(std::string_view ip) {
     return ip.starts_with("ff");
 }
-
 } // namespace RSCGroup

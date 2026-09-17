@@ -1,24 +1,24 @@
 function(extract_first_match file_path regex output_var)
     file(READ "${file_path}" file_contents)
     string(REGEX MATCH "${regex}" match "${file_contents}")
-    if(NOT match)
+    if (NOT match)
         message(FATAL_ERROR "Could not extract value from ${file_path} using ${regex}")
-    endif()
+    endif ()
     set(${output_var} "${CMAKE_MATCH_1}" PARENT_SCOPE)
 endfunction()
 
-if(NOT DEFINED RELEASE_MANIFEST_SOURCE_DIR OR NOT DEFINED RELEASE_MANIFEST_INSTALL_PREFIX OR NOT DEFINED RELEASE_MANIFEST_OUTPUT)
+if (NOT DEFINED RELEASE_MANIFEST_SOURCE_DIR OR NOT DEFINED RELEASE_MANIFEST_INSTALL_PREFIX OR NOT DEFINED RELEASE_MANIFEST_OUTPUT)
     message(FATAL_ERROR "Release manifest inputs are required")
-endif()
+endif ()
 
 extract_first_match("${RELEASE_MANIFEST_SOURCE_DIR}/CMakeLists.txt"
-    "project\\(rmc-fabric VERSION ([0-9]+\\.[0-9]+\\.[0-9]+)" project_version)
+        "project\\(rmc-fabric VERSION ([0-9]+\\.[0-9]+\\.[0-9]+)" project_version)
 extract_first_match("${RELEASE_MANIFEST_SOURCE_DIR}/lib/interop_contract/ContractVersion.hpp"
-    "PUBLIC_CLIENT_API_VERSION = ([0-9]+)" public_client_api_version)
+        "PUBLIC_CLIENT_API_VERSION = ([0-9]+)" public_client_api_version)
 extract_first_match("${RELEASE_MANIFEST_SOURCE_DIR}/lib/interop_contract/inventory/InventoryContracts.hpp"
-    "CONTRACT_VERSION = ([0-9]+)" inventory_contract_version)
+        "CONTRACT_VERSION = ([0-9]+)" inventory_contract_version)
 extract_first_match("${RELEASE_MANIFEST_SOURCE_DIR}/lib/interop_contract/network_observation/NetworkObservationContracts.hpp"
-    "CONTRACT_VERSION = ([0-9]+)" network_contract_version)
+        "CONTRACT_VERSION = ([0-9]+)" network_contract_version)
 
 set(manifest "{\n")
 string(APPEND manifest "  \"version\": \"${project_version}\",\n")

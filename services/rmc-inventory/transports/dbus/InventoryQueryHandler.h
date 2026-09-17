@@ -8,11 +8,10 @@
 #include <string>
 
 namespace DBus {
-    class Variant;
+class Variant;
 }
 
 namespace RSCGroup {
-
 class IInventoryQueryService;
 
 template<typename T>
@@ -33,25 +32,29 @@ class ServiceBinding;
  */
 class InventoryQueryHandler final {
 public:
-    explicit InventoryQueryHandler(ServiceBinding<IInventoryQueryService>& binding) noexcept;
+    explicit InventoryQueryHandler(ServiceBinding<IInventoryQueryService> &binding) noexcept;
 
-    InventoryQueryHandler(const InventoryQueryHandler&) = delete;
-    InventoryQueryHandler& operator=(const InventoryQueryHandler&) = delete;
+    InventoryQueryHandler(const InventoryQueryHandler &) = delete;
+
+    InventoryQueryHandler &operator=(const InventoryQueryHandler &) = delete;
 
     [[nodiscard]] std::map<std::string, DBus::Variant> getIdentity();
+
     [[nodiscard]] std::map<std::string, DBus::Variant> getField(std::string fieldName);
 
-    [[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant>> getSourceStates();
-    [[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant>> getIssues();
+    [[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant> > getSourceStates();
+
+    [[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant> > getIssues();
 
     [[nodiscard]] bool getReady();
+
     [[nodiscard]] std::string getPhase();
+
     [[nodiscard]] std::uint64_t getVersion();
 
     void refresh();
 
 private:
-    ServiceBinding<IInventoryQueryService>& binding_;
+    ServiceBinding<IInventoryQueryService> &binding_;
 };
-
 } // namespace RSCGroup

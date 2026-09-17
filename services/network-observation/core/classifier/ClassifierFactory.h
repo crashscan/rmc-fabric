@@ -7,7 +7,5 @@
 #include <memory>
 
 namespace RSCGroup {
-
-std::unique_ptr<ICandidateClassifier> createClassifier(const ClassifierConfig& config);
-
+std::unique_ptr<ICandidateClassifier> createClassifier(const ClassifierConfig &config);
 } // namespace RSCGroup

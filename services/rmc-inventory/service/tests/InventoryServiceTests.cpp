@@ -27,20 +27,17 @@
 
 
 namespace {
-
 using namespace RSCGroup;
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr << message << '\n';
         std::exit(EXIT_FAILURE);
     }
 }
 
-bool waitFor(const std::function<bool()>& predicate,
-             std::chrono::milliseconds timeout = std::chrono::milliseconds(500))
-{
+bool waitFor(const std::function<bool()> &predicate,
+             std::chrono::milliseconds timeout = std::chrono::milliseconds(500)) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         if (predicate()) {
@@ -55,18 +52,15 @@ class FakeInventoryManager final : public IInventoryManager {
 public:
     explicit FakeInventoryManager(bool readyAfterRefresh = true, bool throwOnRefresh = false)
         : readyAfterRefresh_(readyAfterRefresh)
-        , throwOnRefresh_(throwOnRefresh)
-    {
+          , throwOnRefresh_(throwOnRefresh) {
         refreshDiff_.changedFields.push_back("identity.nodeName");
     }
 
-    void addSource(std::shared_ptr<IInventorySource> source) override
-    {
+    void addSource(std::shared_ptr<IInventorySource> source) override {
         sources_.push_back(std::move(source));
     }
 
-    InventoryDiff refreshAll() override
-    {
+    InventoryDiff refreshAll() override {
         ++refreshCalls_;
         if (onRefresh_) {
             onRefresh_();
@@ -82,13 +76,11 @@ public:
         return refreshDiff_;
     }
 
-    [[nodiscard]] interop_contract::inventory::InventorySnapshot getSnapshot() const override
-    {
+    [[nodiscard]] interop_contract::inventory::InventorySnapshot getSnapshot() const override {
         return snapshot_;
     }
 
-    [[nodiscard]] interop_contract::inventory::SourceStateMap getSourceStates() const override
-    {
+    [[nodiscard]] interop_contract::inventory::SourceStateMap getSourceStates() const override {
         return sourceStates_;
     }
 
@@ -99,10 +91,13 @@ public:
     void setRefreshDiff(InventoryDiff diff) { refreshDiff_ = std::move(diff); }
     void setThrowOnRefresh(bool value) { throwOnRefresh_ = value; }
     void setOnRefresh(std::function<void()> hook) { onRefresh_ = std::move(hook); }
-    void setRefreshedStates(interop_contract::inventory::SourceStateMap states) { refreshedStates_ = std::move(states); }
+
+    void setRefreshedStates(interop_contract::inventory::SourceStateMap states) {
+        refreshedStates_ = std::move(states);
+    }
 
 private:
-    std::vector<std::shared_ptr<IInventorySource>> sources_;
+    std::vector<std::shared_ptr<IInventorySource> > sources_;
     interop_contract::inventory::InventorySnapshot snapshot_{};
     InventoryDiff refreshDiff_{};
     interop_contract::inventory::SourceStateMap sourceStates_{};
@@ -117,30 +112,25 @@ private:
 class FakeFileWatcher final : public IFileWatcher {
 public:
     explicit FakeFileWatcher(bool blockMaintain = false)
-        : blockMaintain_(blockMaintain)
-    {
+        : blockMaintain_(blockMaintain) {
         fd_ = ::eventfd(0, EFD_NONBLOCK | EFD_CLOEXEC);
     }
 
-    ~FakeFileWatcher() override
-    {
+    ~FakeFileWatcher() override {
         if (fd_ >= 0) {
             ::close(fd_);
         }
     }
 
-    void watchPath(const std::string& path) override
-    {
+    void watchPath(const std::string &path) override {
         watchedPaths_.push_back(path);
     }
 
-    [[nodiscard]] int getPollFd() const override
-    {
+    [[nodiscard]] int getPollFd() const override {
         return fd_;
     }
 
-    void maintain() override
-    {
+    void maintain() override {
         if (!blockMaintain_) {
             return;
         }
@@ -151,8 +141,7 @@ public:
         releaseCv_.wait(lock, [&] { return releaseMaintain_; });
     }
 
-    [[nodiscard]] std::vector<std::string> consumeChangedPaths() override
-    {
+    [[nodiscard]] std::vector<std::string> consumeChangedPaths() override {
         eventfd_t value = 0;
         while (::eventfd_read(fd_, &value) == 0) {
         }
@@ -174,18 +163,16 @@ public:
 
         if (::eventfd_write(fd_, value) != 0) {
             const int error = errno;
-            throw std::system_error(error,std::generic_category(),"FakeFileWatcher: eventfd_write failed");
+            throw std::system_error(error, std::generic_category(), "FakeFileWatcher: eventfd_write failed");
         }
     }
 
-    void waitUntilMaintainEntered()
-    {
+    void waitUntilMaintainEntered() {
         std::unique_lock lock(mutex_);
         enteredCv_.wait(lock, [&] { return maintainEntered_; });
     }
 
-    void releaseMaintain()
-    {
+    void releaseMaintain() {
         std::scoped_lock lock(mutex_);
         releaseMaintain_ = true;
         releaseCv_.notify_all();
@@ -210,56 +197,48 @@ public:
                                     bool throwOnInventoryChanged = false,
                                     bool throwOnSourceStateChanged = false)
         : startResult_(startResult)
-        , throwOnInventoryChanged_(throwOnInventoryChanged)
-        , throwOnSourceStateChanged_(throwOnSourceStateChanged)
-    {
+          , throwOnInventoryChanged_(throwOnInventoryChanged)
+          , throwOnSourceStateChanged_(throwOnSourceStateChanged) {
     }
 
-    void bindQueryService(IInventoryQueryService& queryService) override
-    {
+    void bindQueryService(IInventoryQueryService &queryService) override {
         bound_ = &queryService;
     }
 
-    bool start() override
-    {
+    bool start() override {
         ++startCount_;
         started_ = startResult_;
         return startResult_;
     }
 
-    void stop() override
-    {
+    void stop() override {
         ++stopCount_;
         started_ = false;
     }
 
-    void quiesceQueries() noexcept override
-    {
+    void quiesceQueries() noexcept override {
         ++quiesceCount_;
     }
 
-    [[nodiscard]] std::string name() const override
-    {
+    [[nodiscard]] std::string name() const override {
         return startResult_ ? "fake" : "failing";
     }
 
-    void publishInventoryChanged(const std::string&) override
-    {
+    void publishInventoryChanged(const std::string &) override {
         ++inventoryChangedCount_;
         if (throwOnInventoryChanged_) {
             throw std::runtime_error("publishInventoryChanged failed");
         }
     }
-    void publishSourceStateChanged(const std::string&) override
-    {
+
+    void publishSourceStateChanged(const std::string &) override {
         ++sourceStateChangedCount_;
         if (throwOnSourceStateChanged_) {
             throw std::runtime_error("publishSourceStateChanged failed");
         }
     }
 
-    void publishReadyChanged(bool ready) override
-    {
+    void publishReadyChanged(bool ready) override {
         if (ready) {
             ++readyTrueCount_;
         } else {
@@ -281,7 +260,7 @@ private:
     bool startResult_{true};
     bool throwOnInventoryChanged_{false};
     bool throwOnSourceStateChanged_{false};
-    IInventoryQueryService* bound_{nullptr};
+    IInventoryQueryService *bound_{nullptr};
     std::atomic<bool> started_{false};
     std::atomic<int> startCount_{0};
     std::atomic<int> stopCount_{0};
@@ -302,8 +281,7 @@ public:
     [[nodiscard]] std::string getWatchPath() const override { return "/tmp/rmc-inventory-tests"; }
 };
 
-void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
-{
+void testStartStopBindsTransportAndPublishesReadinessExactlyOnce() {
     auto manager = std::make_shared<FakeInventoryManager>();
     auto transport = std::make_shared<FakeInventoryTransport>();
 
@@ -331,10 +309,9 @@ void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
     expect(transport->readyFalseCount() == 1, "expected ready=false publication on stop");
 }
 
-void testAddWatchableSourceRegistersWatchPath()
-{
+void testAddWatchableSourceRegistersWatchPath() {
     auto manager = std::make_shared<FakeInventoryManager>();
-    FakeFileWatcher* watcher = nullptr;
+    FakeFileWatcher *watcher = nullptr;
 
     InventoryService service(manager, {}, [&watcher] {
         auto impl = std::make_unique<FakeFileWatcher>();
@@ -347,8 +324,7 @@ void testAddWatchableSourceRegistersWatchPath()
     expect(watcher->watchedCount() == 1, "watchable source should register exactly one watch path");
 }
 
-void testTransportStartFailureRollsBackWithoutRunningLoop()
-{
+void testTransportStartFailureRollsBackWithoutRunningLoop() {
     auto manager = std::make_shared<FakeInventoryManager>();
     auto first = std::make_shared<FakeInventoryTransport>(true);
     auto failing = std::make_shared<FakeInventoryTransport>(false);
@@ -367,11 +343,10 @@ void testTransportStartFailureRollsBackWithoutRunningLoop()
     expect(failing->stopCount() == 1, "failing transport should be rolled back exactly once");
 }
 
-void testStopWaitsForWorkerBeforeStoppingTransports()
-{
+void testStopWaitsForWorkerBeforeStoppingTransports() {
     auto manager = std::make_shared<FakeInventoryManager>();
     auto transport = std::make_shared<FakeInventoryTransport>();
-    FakeFileWatcher* watcher = nullptr;
+    FakeFileWatcher *watcher = nullptr;
 
     InventoryService::Settings settings;
     settings.reconcileInterval = std::chrono::milliseconds(200);
@@ -409,8 +384,7 @@ void testStopWaitsForWorkerBeforeStoppingTransports()
 // but a repeated start() while the refresh worker has crashed must throw and
 // require an intervening stop().  The lifecycle coordinator never decides
 // worker health; inventory owns this through loopFailed_.
-void testRestartAfterWorkerCrashRequiresStopFirst()
-{
+void testRestartAfterWorkerCrashRequiresStopFirst() {
     auto manager = std::make_shared<FakeInventoryManager>(true, true);
     auto transport = std::make_shared<FakeInventoryTransport>();
 
@@ -425,8 +399,8 @@ void testRestartAfterWorkerCrashRequiresStopFirst()
 
     bool threw = false;
     try {
-        (void)service.start();
-    } catch (const std::logic_error&) {
+        (void) service.start();
+    } catch (const std::logic_error &) {
         threw = true;
     }
     expect(threw, "start() after a refresh worker crash must throw std::logic_error");
@@ -442,8 +416,7 @@ void testRestartAfterWorkerCrashRequiresStopFirst()
     service.stop();
 }
 
-void testRepeatedStartOnHealthyServiceReturnsTrue()
-{
+void testRepeatedStartOnHealthyServiceReturnsTrue() {
     auto manager = std::make_shared<FakeInventoryManager>();
     auto transport = std::make_shared<FakeInventoryTransport>();
 
@@ -458,8 +431,7 @@ void testRepeatedStartOnHealthyServiceReturnsTrue()
     service.stop();
 }
 
-void testSelfStopFromWorkerThreadIsRejected()
-{
+void testSelfStopFromWorkerThreadIsRejected() {
     auto manager = std::make_shared<FakeInventoryManager>();
     auto transport = std::make_shared<FakeInventoryTransport>();
 
@@ -489,11 +461,10 @@ void testSelfStopFromWorkerThreadIsRejected()
     expect(transport->stopCount() == 1, "transports should close exactly once");
 }
 
-void testConcurrentStopWaitsForTeardownCompletion()
-{
+void testConcurrentStopWaitsForTeardownCompletion() {
     auto manager = std::make_shared<FakeInventoryManager>();
     auto transport = std::make_shared<FakeInventoryTransport>();
-    FakeFileWatcher* watcher = nullptr;
+    FakeFileWatcher *watcher = nullptr;
 
     InventoryService service(manager, {}, [&watcher] {
         auto impl = std::make_unique<FakeFileWatcher>(true);
@@ -520,8 +491,7 @@ void testConcurrentStopWaitsForTeardownCompletion()
     expect(transport->stopCount() == 1, "transports must be closed exactly once");
 }
 
-void testPublishFailureDoesNotBlockLaterTransports()
-{
+void testPublishFailureDoesNotBlockLaterTransports() {
     auto manager = std::make_shared<FakeInventoryManager>();
     interop_contract::inventory::SourceState state;
     state.health = interop_contract::inventory::SourceHealth::FAILED;
@@ -549,8 +519,7 @@ void testPublishFailureDoesNotBlockLaterTransports()
     service.stop();
 }
 
-void testLoopFailurePublishesInventoryLoopIssue()
-{
+void testLoopFailurePublishesInventoryLoopIssue() {
     auto manager = std::make_shared<FakeInventoryManager>(true, true);
     auto transport = std::make_shared<FakeInventoryTransport>();
 
@@ -566,44 +535,41 @@ void testLoopFailurePublishesInventoryLoopIssue()
     service.stop();
 }
 
-void testFileWatcherReadinessTriggersRefresh()
-{
+void testFileWatcherReadinessTriggersRefresh() {
     auto manager = std::make_shared<FakeInventoryManager>();
     auto transport = std::make_shared<FakeInventoryTransport>();
 
-    FakeFileWatcher* watcher = nullptr;
+    FakeFileWatcher *watcher = nullptr;
 
     InventoryService::Settings settings;
     settings.reconcileInterval = std::chrono::seconds(30);
     settings.minRefreshInterval = std::chrono::milliseconds(1);
 
-    InventoryService service(manager,settings,[&watcher] {
-            auto implementation = std::make_unique<FakeFileWatcher>();
-            watcher = implementation.get();
-            return implementation;
-        });
+    InventoryService service(manager, settings, [&watcher] {
+        auto implementation = std::make_unique<FakeFileWatcher>();
+        watcher = implementation.get();
+        return implementation;
+    });
 
     service.addTransport(transport);
 
-    expect(service.start(),"service should start");
+    expect(service.start(), "service should start");
 
-    expect(waitFor([&] { return manager->refreshCalls() >= 1; }),"initial refresh did not run");
+    expect(waitFor([&] { return manager->refreshCalls() >= 1; }), "initial refresh did not run");
 
     const int initialRefreshCount = manager->refreshCalls();
     watcher->signalChanged("/tmp/rmc-inventory-tests");
 
     expect(waitFor([&] {
-            return manager->refreshCalls() > initialRefreshCount;
-        }),
-        "file-watcher readiness did not trigger refresh");
+               return manager->refreshCalls() > initialRefreshCount;
+           }),
+           "file-watcher readiness did not trigger refresh");
 
     service.stop();
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testStartStopBindsTransportAndPublishesReadinessExactlyOnce();
     testAddWatchableSourceRegistersWatchPath();
     testFileWatcherReadinessTriggersRefresh();

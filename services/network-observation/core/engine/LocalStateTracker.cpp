@@ -5,13 +5,11 @@
 #include <sys/socket.h>
 
 namespace RSCGroup {
-
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-static std::string extractIpFromCidr(const std::string& cidr)
-{
+static std::string extractIpFromCidr(const std::string &cidr) {
     auto pos = cidr.find('/');
     if (pos == std::string::npos) {
         // Malformed CIDR — no slash separator
@@ -20,15 +18,13 @@ static std::string extractIpFromCidr(const std::string& cidr)
     return cidr.substr(0, pos);
 }
 
-void LocalStateTracker::incrementMac(const std::string& mac)
-{
+void LocalStateTracker::incrementMac(const std::string &mac) {
     if (mac.empty()) return;
     if (++localMacRefcount_[mac] == 1)
         snapshot_.localMacs.insert(mac);
 }
 
-void LocalStateTracker::decrementMac(const std::string& mac)
-{
+void LocalStateTracker::decrementMac(const std::string &mac) {
     if (mac.empty()) return;
     auto it = localMacRefcount_.find(mac);
     if (it == localMacRefcount_.end()) return;
@@ -38,14 +34,12 @@ void LocalStateTracker::decrementMac(const std::string& mac)
     }
 }
 
-void LocalStateTracker::incrementIp(const std::string& ip)
-{
+void LocalStateTracker::incrementIp(const std::string &ip) {
     if (++localIpRefcount_[ip] == 1)
         snapshot_.localIps.insert(ip);
 }
 
-void LocalStateTracker::decrementIp(const std::string& ip)
-{
+void LocalStateTracker::decrementIp(const std::string &ip) {
     auto it = localIpRefcount_.find(ip);
     if (it == localIpRefcount_.end()) return;
     if (--it->second == 0) {
@@ -58,18 +52,17 @@ void LocalStateTracker::decrementIp(const std::string& ip)
 // Link observations
 // ---------------------------------------------------------------------------
 
-bool LocalStateTracker::onLinkObservation(const LinkObservation& obs)
-{
+bool LocalStateTracker::onLinkObservation(const LinkObservation &obs) {
     if (obs.event == ObservationEvent::Removed) {
         // Remove interface and all its MAC + IP ownership
         auto it = snapshot_.interfaces.find(obs.ifname);
         if (it != snapshot_.interfaces.end()) {
             decrementMac(it->second.mac);
-            for (const auto& cidr : it->second.ipv4) {
+            for (const auto &cidr: it->second.ipv4) {
                 if (auto ip = extractIpFromCidr(cidr); !ip.empty())
                     decrementIp(ip);
             }
-            for (const auto& cidr : it->second.ipv6) {
+            for (const auto &cidr: it->second.ipv6) {
                 if (auto ip = extractIpFromCidr(cidr); !ip.empty())
                     decrementIp(ip);
             }
@@ -81,14 +74,14 @@ bool LocalStateTracker::onLinkObservation(const LinkObservation& obs)
     }
 
     // Present: update or create interface state
-    auto& iface = snapshot_.interfaces[obs.ifname];
+    auto &iface = snapshot_.interfaces[obs.ifname];
     const bool isNew = iface.ifname.empty();
     const std::string oldMac = iface.mac;
 
-    iface.ifindex   = obs.ifindex;
-    iface.ifname    = obs.ifname;
-    iface.adminUp   = obs.adminUp;
-    iface.running   = obs.running;
+    iface.ifindex = obs.ifindex;
+    iface.ifname = obs.ifname;
+    iface.adminUp = obs.adminUp;
+    iface.running = obs.running;
     iface.operstate = obs.operstate;
     iface.masterIfname = obs.masterIfname;
 
@@ -109,9 +102,8 @@ bool LocalStateTracker::onLinkObservation(const LinkObservation& obs)
 // Address observations
 // ---------------------------------------------------------------------------
 
-bool LocalStateTracker::onAddressObservation(const AddressObservation& obs)
-{
-    auto& iface = snapshot_.interfaces[obs.ifname];
+bool LocalStateTracker::onAddressObservation(const AddressObservation &obs) {
+    auto &iface = snapshot_.interfaces[obs.ifname];
     std::string ip = extractIpFromCidr(obs.cidr);
     if (ip.empty()) return false;
 
@@ -148,21 +140,17 @@ bool LocalStateTracker::onAddressObservation(const AddressObservation& obs)
 // Lookup helpers
 // ---------------------------------------------------------------------------
 
-bool LocalStateTracker::isLocalMac(std::string_view mac) const
-{
+bool LocalStateTracker::isLocalMac(std::string_view mac) const {
     return snapshot_.localMacs.contains(std::string(mac));
 }
 
-bool LocalStateTracker::isLocalIp(std::string_view ip) const
-{
+bool LocalStateTracker::isLocalIp(std::string_view ip) const {
     return snapshot_.localIps.contains(std::string(ip));
 }
 
-void LocalStateTracker::clear()
-{
+void LocalStateTracker::clear() {
     snapshot_ = LocalNetworkSnapshot{};
     localMacRefcount_.clear();
     localIpRefcount_.clear();
 }
-
 } // namespace RSCGroup

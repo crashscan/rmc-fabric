@@ -12,19 +12,15 @@
 
 namespace RSCGroup {
 namespace {
+    using namespace interop_contract::inventory;
+    using dbus_client_support::invokeQuery;
 
-using namespace interop_contract::inventory;
-using dbus_client_support::invokeQuery;
-
-DBus::BusType toBusType(const std::string& busType)
-{
-    return busType == "session" ? DBus::BusType::SESSION : DBus::BusType::SYSTEM;
-}
-
+    DBus::BusType toBusType(const std::string &busType) {
+        return busType == "session" ? DBus::BusType::SESSION : DBus::BusType::SYSTEM;
+    }
 } // namespace
 
-class InventoryClient::Impl
-{
+class InventoryClient::Impl {
 public:
     std::shared_ptr<DBus::StandaloneDispatcher> dispatcher;
     std::shared_ptr<DBus::Connection> connection;
@@ -35,17 +31,16 @@ public:
     std::string objectPath;
     std::string interfaceName;
 
-    std::shared_ptr<DBus::SignalProxy<void(std::string)>> sigInventoryChanged;
-    std::shared_ptr<DBus::SignalProxy<void(std::string)>> sigSourceStateChanged;
-    std::shared_ptr<DBus::SignalProxy<void(bool)>> sigReadyChanged;
+    std::shared_ptr<DBus::SignalProxy<void(std::string)> > sigInventoryChanged;
+    std::shared_ptr<DBus::SignalProxy<void(std::string)> > sigSourceStateChanged;
+    std::shared_ptr<DBus::SignalProxy<void(bool)> > sigReadyChanged;
 };
 
 InventoryClient::InventoryClient(std::string busType,
                                  std::string serviceName,
                                  std::string objectPath,
                                  std::string interfaceName)
-    : impl_(std::make_unique<Impl>())
-{
+    : impl_(std::make_unique<Impl>()) {
     impl_->serviceName = std::move(serviceName);
     impl_->objectPath = std::move(objectPath);
     impl_->interfaceName = std::move(interfaceName);
@@ -65,8 +60,7 @@ InventoryClient::InventoryClient(std::string busType,
     }
 }
 
-InventoryClient::~InventoryClient()
-{
+InventoryClient::~InventoryClient() {
     if (!impl_) {
         return;
     }
@@ -80,8 +74,7 @@ InventoryClient::~InventoryClient()
     impl_->dispatcher.reset();
 }
 
-interop_contract::ClientResult<InventorySnapshot> InventoryClient::tryGetIdentity() const
-{
+interop_contract::ClientResult<InventorySnapshot> InventoryClient::tryGetIdentity() const {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -90,15 +83,14 @@ interop_contract::ClientResult<InventorySnapshot> InventoryClient::tryGetIdentit
     }
 
     return invokeQuery<InventorySnapshot>("InventoryClient::tryGetIdentity", [&] {
-        auto method = impl_->iface->create_method<
-            std::map<std::string, DBus::Variant>()>(std::string(METHOD_GET_IDENTITY));
+        auto method = impl_->iface->create_method <
+                      std::map<std::string, DBus::Variant>() > (std::string(METHOD_GET_IDENTITY));
         return InventoryDbusCodec::decodeSnapshot((*method)());
     });
 }
 
 interop_contract::ClientResult<InventoryFields>
-InventoryClient::tryGetField(const std::string& fieldName) const
-{
+InventoryClient::tryGetField(const std::string &fieldName) const {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -107,15 +99,14 @@ InventoryClient::tryGetField(const std::string& fieldName) const
     }
 
     return invokeQuery<InventoryFields>("InventoryClient::tryGetField", [&] {
-        auto method = impl_->iface->create_method<
-            std::map<std::string, DBus::Variant>(std::string)>(std::string(METHOD_GET_FIELD));
+        auto method = impl_->iface->create_method <
+                      std::map<std::string, DBus::Variant>(std::string) > (std::string(METHOD_GET_FIELD));
         return InventoryDbusCodec::decodeFields((*method)(fieldName));
     });
 }
 
 interop_contract::ClientResult<interop_contract::inventory::SourceStateMap>
-InventoryClient::tryGetSourceStates() const
-{
+InventoryClient::tryGetSourceStates() const {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -125,15 +116,14 @@ InventoryClient::tryGetSourceStates() const
 
     return invokeQuery<interop_contract::inventory::SourceStateMap>(
         "InventoryClient::tryGetSourceStates", [&] {
-            auto method = impl_->iface->create_method<
-                std::map<std::string, std::map<std::string, DBus::Variant>>()>(
-                    std::string(METHOD_GET_SOURCE_STATES));
+            auto method = impl_->iface->create_method <
+                          std::map<std::string, std::map<std::string, DBus::Variant> >() > (
+                              std::string(METHOD_GET_SOURCE_STATES));
             return InventoryDbusCodec::decodeSourceStates((*method)());
         });
 }
 
-interop_contract::ClientResult<bool> InventoryClient::tryGetReady() const
-{
+interop_contract::ClientResult<bool> InventoryClient::tryGetReady() const {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -142,13 +132,12 @@ interop_contract::ClientResult<bool> InventoryClient::tryGetReady() const
     }
 
     return invokeQuery<bool>("InventoryClient::tryGetReady", [&] {
-        auto method = impl_->iface->create_method<bool()>(std::string(METHOD_GET_READY));
+        auto method = impl_->iface->create_method < bool() > (std::string(METHOD_GET_READY));
         return (*method)();
     });
 }
 
-interop_contract::ClientResult<std::string> InventoryClient::tryGetPhase() const
-{
+interop_contract::ClientResult<std::string> InventoryClient::tryGetPhase() const {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -157,13 +146,12 @@ interop_contract::ClientResult<std::string> InventoryClient::tryGetPhase() const
     }
 
     return invokeQuery<std::string>("InventoryClient::tryGetPhase", [&] {
-        auto method = impl_->iface->create_method<std::string()>(std::string(METHOD_GET_PHASE));
+        auto method = impl_->iface->create_method < std::string() > (std::string(METHOD_GET_PHASE));
         return (*method)();
     });
 }
 
-interop_contract::ClientResult<uint64_t> InventoryClient::tryGetVersion() const
-{
+interop_contract::ClientResult<uint64_t> InventoryClient::tryGetVersion() const {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -172,14 +160,13 @@ interop_contract::ClientResult<uint64_t> InventoryClient::tryGetVersion() const
     }
 
     return invokeQuery<uint64_t>("InventoryClient::tryGetVersion", [&] {
-        auto method = impl_->iface->create_method<uint64_t()>(std::string(METHOD_GET_VERSION));
+        auto method = impl_->iface->create_method < uint64_t() > (std::string(METHOD_GET_VERSION));
         return (*method)();
     });
 }
 
 interop_contract::ClientResult<interop_contract::inventory::InventoryIssues>
-InventoryClient::tryGetIssues() const
-{
+InventoryClient::tryGetIssues() const {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -189,15 +176,14 @@ InventoryClient::tryGetIssues() const
 
     return invokeQuery<interop_contract::inventory::InventoryIssues>(
         "InventoryClient::tryGetIssues", [&] {
-            auto method = impl_->iface->create_method<
-                std::map<std::string, std::map<std::string, DBus::Variant>>()>(
-                    std::string(METHOD_GET_ISSUES));
+            auto method = impl_->iface->create_method <
+                          std::map<std::string, std::map<std::string, DBus::Variant> >() > (
+                              std::string(METHOD_GET_ISSUES));
             return InventoryDbusCodec::decodeIssues((*method)());
         });
 }
 
-interop_contract::ClientResult<void> InventoryClient::tryRefresh() const
-{
+interop_contract::ClientResult<void> InventoryClient::tryRefresh() const {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -206,14 +192,13 @@ interop_contract::ClientResult<void> InventoryClient::tryRefresh() const
     }
 
     return invokeQuery<void>("InventoryClient::tryRefresh", [&] {
-        auto method = impl_->iface->create_method<void()>(std::string(METHOD_REFRESH));
+        auto method = impl_->iface->create_method < void() > (std::string(METHOD_REFRESH));
         (*method)();
         return interop_contract::ClientResult<void>{};
     });
 }
 
-interop_contract::ClientResult<bool> InventoryClient::tryWaitReady(std::chrono::milliseconds timeout) const
-{
+interop_contract::ClientResult<bool> InventoryClient::tryWaitReady(std::chrono::milliseconds timeout) const {
     constexpr auto kPollInterval = std::chrono::milliseconds(200);
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     std::optional<interop_contract::ClientError> lastError;
@@ -224,7 +209,7 @@ interop_contract::ClientResult<bool> InventoryClient::tryWaitReady(std::chrono::
             return true;
         }
         if (!ready) {
-            const auto& error = ready.error();
+            const auto &error = ready.error();
             if (error.code != interop_contract::ClientErrorCode::service_unavailable) {
                 return ready;
             }
@@ -248,87 +233,74 @@ interop_contract::ClientResult<bool> InventoryClient::tryWaitReady(std::chrono::
     };
 }
 
-InventorySnapshot InventoryClient::getIdentity() const
-{
+InventorySnapshot InventoryClient::getIdentity() const {
     const auto result = tryGetIdentity();
     return result ? result.value() : InventorySnapshot{};
 }
 
-InventoryFields InventoryClient::getField(const std::string& fieldName) const
-{
+InventoryFields InventoryClient::getField(const std::string &fieldName) const {
     const auto result = tryGetField(fieldName);
     return result ? result.value() : InventoryFields{};
 }
 
-interop_contract::inventory::SourceStateMap InventoryClient::getSourceStates() const
-{
+interop_contract::inventory::SourceStateMap InventoryClient::getSourceStates() const {
     const auto result = tryGetSourceStates();
     return result ? result.value() : interop_contract::inventory::SourceStateMap{};
 }
 
-bool InventoryClient::getReady() const
-{
+bool InventoryClient::getReady() const {
     const auto result = tryGetReady();
     return result ? result.value() : false;
 }
 
-std::string InventoryClient::getPhase() const
-{
+std::string InventoryClient::getPhase() const {
     const auto result = tryGetPhase();
     return result ? result.value() : "unknown";
 }
 
-uint64_t InventoryClient::getVersion() const
-{
+uint64_t InventoryClient::getVersion() const {
     const auto result = tryGetVersion();
     return result ? result.value() : 0;
 }
 
-interop_contract::inventory::InventoryIssues InventoryClient::getIssues() const
-{
+interop_contract::inventory::InventoryIssues InventoryClient::getIssues() const {
     const auto result = tryGetIssues();
     return result ? result.value() : interop_contract::inventory::InventoryIssues{};
 }
 
-void InventoryClient::refresh() const
-{
-    (void)tryRefresh();
+void InventoryClient::refresh() const {
+    (void) tryRefresh();
 }
 
-void InventoryClient::onInventoryChanged(StringCallback cb)
-{
+void InventoryClient::onInventoryChanged(StringCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigInventoryChanged) {
-        impl_->sigInventoryChanged = impl_->iface->create_signal<void(std::string)>(
-            std::string(SIGNAL_INVENTORY_CHANGED));
+        impl_->sigInventoryChanged = impl_->iface->create_signal < void(std::string) > (
+                                         std::string(SIGNAL_INVENTORY_CHANGED));
     }
-    impl_->sigInventoryChanged->connect(sigc::slot<void(std::string)>(std::move(cb)));
+    impl_->sigInventoryChanged->connect(sigc::slot < void(std::string) > (std::move(cb)));
 }
 
-void InventoryClient::onSourceStateChanged(StringCallback cb)
-{
+void InventoryClient::onSourceStateChanged(StringCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigSourceStateChanged) {
-        impl_->sigSourceStateChanged = impl_->iface->create_signal<void(std::string)>(
-            std::string(SIGNAL_SOURCE_STATE_CHANGED));
+        impl_->sigSourceStateChanged = impl_->iface->create_signal < void(std::string) > (
+                                           std::string(SIGNAL_SOURCE_STATE_CHANGED));
     }
-    impl_->sigSourceStateChanged->connect(sigc::slot<void(std::string)>(std::move(cb)));
+    impl_->sigSourceStateChanged->connect(sigc::slot < void(std::string) > (std::move(cb)));
 }
 
-void InventoryClient::onReadyChanged(BoolCallback cb)
-{
+void InventoryClient::onReadyChanged(BoolCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigReadyChanged) {
-        impl_->sigReadyChanged = impl_->iface->create_signal<void(bool)>(
-            std::string(SIGNAL_READY_CHANGED));
+        impl_->sigReadyChanged = impl_->iface->create_signal < void(bool) > (
+                                     std::string(SIGNAL_READY_CHANGED));
     }
-    impl_->sigReadyChanged->connect(sigc::slot<void(bool)>(std::move(cb)));
+    impl_->sigReadyChanged->connect(sigc::slot < void(bool) > (std::move(cb)));
 }
 
-bool InventoryClient::waitReady(std::chrono::milliseconds timeout) const
-{
+bool InventoryClient::waitReady(std::chrono::milliseconds timeout) const {
     const auto result = tryWaitReady(timeout);
     return result ? result.value() : false;
 }
-
 } // namespace RSCGroup

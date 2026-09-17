@@ -6,15 +6,15 @@
 #include <ClassifierConfig.h>
 
 namespace RSCGroup {
-
 class ScoringClassifier : public ICandidateClassifier {
 public:
     explicit ScoringClassifier(int probable = 25, int confirmed = 50, int topology = 80);
 
     /// Construct with full weights and thresholds from ClassifierConfig
-    explicit ScoringClassifier(const ScoringWeights& weights, const ScoringThresholds& thresholds);
+    explicit ScoringClassifier(const ScoringWeights &weights, const ScoringThresholds &thresholds);
 
-    CandidateClassification classify(const RemoteCandidate& candidate) override;
+    CandidateClassification classify(const RemoteCandidate &candidate) override;
+
     std::string name() const override { return "scoring"; }
 
 private:
@@ -23,8 +23,8 @@ private:
     int confirmedThreshold_;
     int topologyThreshold_;
 
-    int computeScore(const RemoteCandidate& candidate) const;
+    int computeScore(const RemoteCandidate &candidate) const;
+
     CandidateClassification scoreToClass(int score) const;
 };
-
 } // namespace RSCGroup

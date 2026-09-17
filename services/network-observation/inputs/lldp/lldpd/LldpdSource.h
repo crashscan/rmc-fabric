@@ -40,10 +40,10 @@
 #include <string_view>
 
 namespace RSCGroup {
-
 class LldpdSource : public ILldpSource {
 public:
     LldpdSource(LldpSourceConfig config, LldpObservationCallback cb);
+
     ~LldpdSource() override;
 
     bool start() override;
@@ -56,11 +56,14 @@ public:
      * Safe to call multiple times (idempotent).
      */
     void stop() override;
+
     [[nodiscard]] bool isRunning() const override;
 
     void refreshAll() override;
-    void refreshInterface(const std::string& ifname) override;
-    void removeInterface(const std::string& ifname) override;
+
+    void refreshInterface(const std::string &ifname) override;
+
+    void removeInterface(const std::string &ifname) override;
 
     /**
      * @brief Re-emit all cached neighbors as keepalive Present observations.
@@ -70,7 +73,9 @@ public:
      * delivery. Does not stamp liveness. No-op when admission is closed.
      */
     void reassertAll() override;
+
     [[nodiscard]] bool isBackendAlive() override;
+
     [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const override;
 
     /**
@@ -88,6 +93,7 @@ public:
                                      std::optional<std::string> chassisId,
                                      std::optional<std::string> portId,
                                      std::optional<std::string> systemName);
+
     /**
      * @brief Test seam: open the callback admission gate without a backend.
      *
@@ -102,9 +108,9 @@ public:
      * @brief Test seam: close admission and drain active leases.
      */
     void closeAdmissionAndDrainForTest();
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
-
 } // namespace RSCGroup

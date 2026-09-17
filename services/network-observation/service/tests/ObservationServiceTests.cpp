@@ -14,20 +14,17 @@
 #include <vector>
 
 namespace {
-
 using namespace RSCGroup;
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr << message << '\n';
         std::exit(EXIT_FAILURE);
     }
 }
 
-bool waitFor(const std::function<bool()>& predicate,
-             std::chrono::milliseconds timeout = std::chrono::milliseconds(500))
-{
+bool waitFor(const std::function<bool()> &predicate,
+             std::chrono::milliseconds timeout = std::chrono::milliseconds(500)) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
     while (std::chrono::steady_clock::now() < deadline) {
         if (predicate()) {
@@ -42,63 +39,56 @@ class FakeObservationRuntime final : public IObservationRuntime {
 public:
     explicit FakeObservationRuntime(bool startResult = true, bool lldpAvailable = true)
         : startResult_(startResult)
-        , lldpAvailable_(lldpAvailable)
-    {
+          , lldpAvailable_(lldpAvailable) {
     }
 
-    void setEventSink(IModelEventSink* sink) override
-    {
+    void setEventSink(IModelEventSink *sink) override {
         sink_ = sink;
     }
 
-    void setInterfacePolicy(std::unique_ptr<IInterfacePolicy>) override {}
-    void setClassifier(std::unique_ptr<ICandidateClassifier>) override {}
+    void setInterfacePolicy(std::unique_ptr<IInterfacePolicy>) override {
+    }
 
-    bool start() override
-    {
+    void setClassifier(std::unique_ptr<ICandidateClassifier>) override {
+    }
+
+    bool start() override {
         ++startCount_;
         running_ = startResult_;
         return startResult_;
     }
 
-    void stop() override
-    {
+    void stop() override {
         std::scoped_lock lock(mutex_);
         ++stopCount_;
         stopSawActiveAge_ = ageActive_;
         running_ = false;
     }
 
-    bool isRunning() const override
-    {
+    bool isRunning() const override {
         return running_.load();
     }
 
-    ObservationRuntimeHealth health() const override
-    {
+    ObservationRuntimeHealth health() const override {
         ObservationRuntimeHealth health;
         health.running = running_.load();
         health.lldpAvailable = lldpAvailable_.load();
         return health;
     }
 
-    LocalNetworkSnapshot localSnapshot() const override
-    {
+    LocalNetworkSnapshot localSnapshot() const override {
         return {};
     }
 
-    std::vector<RemoteCandidate> remoteCandidates() const override
-    {
+    std::vector<RemoteCandidate> remoteCandidates() const override {
         return {};
     }
 
-    std::optional<RemoteCandidate> findCandidateByMac(const std::string&) const override
-    {
+    std::optional<RemoteCandidate> findCandidateByMac(const std::string &) const override {
         return std::nullopt;
     }
 
-    void age(std::chrono::steady_clock::time_point) override
-    {
+    void age(std::chrono::steady_clock::time_point) override {
         ++ageCalls_;
         if (onAge_) {
             onAge_();
@@ -116,22 +106,19 @@ public:
         ageActive_ = false;
     }
 
-    void waitUntilAgeEntered()
-    {
+    void waitUntilAgeEntered() {
         std::unique_lock lock(mutex_);
         ageEnteredCv_.wait(lock, [&] { return ageEntered_; });
     }
 
-    void releaseAge()
-    {
+    void releaseAge() {
         std::scoped_lock lock(mutex_);
         releaseAge_ = true;
         releaseAgeCv_.notify_all();
     }
 
     // --- tick blocking (supervision worker path) ---
-    void tick(std::chrono::steady_clock::time_point) override
-    {
+    void tick(std::chrono::steady_clock::time_point) override {
         std::unique_lock lock(tickMutex_);
         tickEntered_ = true;
         tickEnteredCv_.notify_all();
@@ -141,14 +128,12 @@ public:
     }
 
     [[nodiscard]] bool waitUntilTickEntered(
-        std::chrono::milliseconds timeout = std::chrono::milliseconds(500))
-    {
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(500)) {
         std::unique_lock lock(tickMutex_);
         return tickEnteredCv_.wait_for(lock, timeout, [&] { return tickEntered_; });
     }
 
-    void releaseTick()
-    {
+    void releaseTick() {
         {
             std::scoped_lock lock(tickMutex_);
             releaseTick_ = true;
@@ -156,15 +141,14 @@ public:
         releaseTickCv_.notify_all();
     }
 
-    void setBlockInTick(bool value)
-    {
+    void setBlockInTick(bool value) {
         std::scoped_lock lock(tickMutex_);
         blockInTick_ = value;
     }
 
     [[nodiscard]] int ageCalls() const { return ageCalls_.load(); }
 
-    [[nodiscard]] IModelEventSink* sink() const { return sink_; }
+    [[nodiscard]] IModelEventSink *sink() const { return sink_; }
     [[nodiscard]] int startCount() const { return startCount_.load(); }
     [[nodiscard]] int stopCount() const { return stopCount_.load(); }
     [[nodiscard]] bool stopSawActiveAge() const { return stopSawActiveAge_.load(); }
@@ -172,15 +156,15 @@ public:
     void setRunning(bool value) { running_.store(value); }
     void setThrowOnAge(bool value) { throwOnAge_.store(value); }
     void setOnAge(std::function<void()> hook) { onAge_ = std::move(hook); }
-    void setBlockInAge(bool value)
-    {
+
+    void setBlockInAge(bool value) {
         std::scoped_lock lock(mutex_);
         blockInAge_ = value;
     }
 
 private:
     bool startResult_{true};
-    IModelEventSink* sink_{nullptr};
+    IModelEventSink *sink_{nullptr};
     std::atomic<bool> running_{false};
     std::atomic<bool> lldpAvailable_{true};
     std::atomic<bool> throwOnAge_{false};
@@ -211,36 +195,30 @@ public:
                                       bool throwOnInterface = false,
                                       bool throwOnCandidate = false)
         : startResult_(startResult)
-        , throwOnLocal_(throwOnLocal)
-        , throwOnInterface_(throwOnInterface)
-        , throwOnCandidate_(throwOnCandidate)
-    {
+          , throwOnLocal_(throwOnLocal)
+          , throwOnInterface_(throwOnInterface)
+          , throwOnCandidate_(throwOnCandidate) {
     }
 
-    void bindQueryService(IObservationQueryService& provider) override
-    {
+    void bindQueryService(IObservationQueryService &provider) override {
         provider_ = &provider;
     }
 
-    bool start() override
-    {
+    bool start() override {
         ++startCount_;
         startSawBound_ = provider_ != nullptr;
         return startResult_;
     }
 
-    void stop() override
-    {
+    void stop() override {
         ++stopCount_;
     }
 
-    void quiesceQueries() noexcept override
-    {
+    void quiesceQueries() noexcept override {
         ++quiesceCount_;
     }
 
-    std::string name() const override
-    {
+    std::string name() const override {
         if (!name_.empty()) {
             return name_;
         }
@@ -249,8 +227,7 @@ public:
 
     void setName(std::string name) { name_ = std::move(name); }
 
-    void publishReadyChanged(bool ready) override
-    {
+    void publishReadyChanged(bool ready) override {
         if (ready) {
             ++readyTrueCount_;
         } else {
@@ -258,36 +235,35 @@ public:
         }
     }
 
-    void publishLocalStateChanged() override
-    {
+    void publishLocalStateChanged() override {
         ++localStateChangedCount_;
         if (throwOnLocal_) {
             throw std::runtime_error("publishLocalStateChanged failed");
         }
     }
-    void publishInterfaceChanged(const std::string&) override
-    {
+
+    void publishInterfaceChanged(const std::string &) override {
         ++interfaceChangedCount_;
         if (throwOnInterface_) {
             throw std::runtime_error("publishInterfaceChanged failed");
         }
     }
-    void publishInterfaceRemoved(const std::string&) override
-    {
+
+    void publishInterfaceRemoved(const std::string &) override {
         ++interfaceRemovedCount_;
         if (throwOnInterface_) {
             throw std::runtime_error("publishInterfaceRemoved failed");
         }
     }
-    void publishCandidateChanged(const std::string&) override
-    {
+
+    void publishCandidateChanged(const std::string &) override {
         ++candidateChangedCount_;
         if (throwOnCandidate_) {
             throw std::runtime_error("publishCandidateChanged failed");
         }
     }
-    void publishCandidateRemoved(const std::string&) override
-    {
+
+    void publishCandidateRemoved(const std::string &) override {
         ++candidateRemovedCount_;
         if (throwOnCandidate_) {
             throw std::runtime_error("publishCandidateRemoved failed");
@@ -315,7 +291,7 @@ private:
     std::atomic<bool> throwOnLocal_{false};
     std::atomic<bool> throwOnInterface_{false};
     std::atomic<bool> throwOnCandidate_{false};
-    IObservationQueryService* provider_{nullptr};
+    IObservationQueryService *provider_{nullptr};
     std::atomic<bool> startSawBound_{false};
     std::atomic<int> startCount_{0};
     std::atomic<int> stopCount_{0};
@@ -330,8 +306,7 @@ private:
     std::string name_;
 };
 
-void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
-{
+void testStartStopBindsTransportAndPublishesReadinessExactlyOnce() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     runtimePtr->setBlockInAge(true);
@@ -354,8 +329,7 @@ void testStartStopBindsTransportAndPublishesReadinessExactlyOnce()
     expect(service.getPhase() == "stopped", "phase should be stopped after stop");
 }
 
-void testTransportFailurePreventsRuntimeStart()
-{
+void testTransportFailurePreventsRuntimeStart() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     auto failingTransport = std::make_shared<FakeObservationTransport>(false);
@@ -366,8 +340,7 @@ void testTransportFailurePreventsRuntimeStart()
     expect(failingTransport->stopCount() == 1, "failing transport should be rolled back exactly once");
 }
 
-void testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport()
-{
+void testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     auto transport = std::make_shared<FakeObservationTransport>();
@@ -395,8 +368,7 @@ void testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport()
     expect(transport->stopCount() == 1, "transport should stop after runtime shutdown");
 }
 
-void testPublishFailureDoesNotBlockLaterTransports()
-{
+void testPublishFailureDoesNotBlockLaterTransports() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto throwing = std::make_shared<FakeObservationTransport>(true, true, true, true);
     auto observing = std::make_shared<FakeObservationTransport>();
@@ -422,14 +394,13 @@ void testPublishFailureDoesNotBlockLaterTransports()
     expect(observing->candidateChangedCount() == 1, "later transport should still receive candidate change");
     expect(waitFor([&] {
         return service.getIssues().contains("observation.transport.fake.publish_interface_changed.failed")
-            || service.getIssues().contains("observation.transport.fake.publish_local_state_changed.failed")
-            || service.getIssues().contains("observation.transport.fake.publish_candidate_changed.failed");
+               || service.getIssues().contains("observation.transport.fake.publish_local_state_changed.failed")
+               || service.getIssues().contains("observation.transport.fake.publish_candidate_changed.failed");
     }), "transport publish failure should surface as an issue");
     service.stop();
 }
 
-void testAddTransportAfterStartIsRejected()
-{
+void testAddTransportAfterStartIsRejected() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto transport = std::make_shared<FakeObservationTransport>();
     ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(100));
@@ -439,15 +410,14 @@ void testAddTransportAfterStartIsRejected()
     bool threw = false;
     try {
         service.addTransport(std::make_shared<FakeObservationTransport>());
-    } catch (const std::runtime_error&) {
+    } catch (const std::runtime_error &) {
         threw = true;
     }
     expect(threw, "addTransport after start should be rejected");
     service.stop();
 }
 
-void testReadinessIsIndependentFromRuntimeIssuesAndIssuesResetOnRestart()
-{
+void testReadinessIsIndependentFromRuntimeIssuesAndIssuesResetOnRestart() {
     auto runtime = std::make_unique<FakeObservationRuntime>(true, false);
     auto runtimePtr = runtime.get();
     auto transport = std::make_shared<FakeObservationTransport>();
@@ -471,8 +441,7 @@ void testReadinessIsIndependentFromRuntimeIssuesAndIssuesResetOnRestart()
     service.stop();
 }
 
-void testAgingLoopFailureSurfacesIssueWithoutClearingReadiness()
-{
+void testAgingLoopFailureSurfacesIssueWithoutClearingReadiness() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     runtimePtr->setThrowOnAge(true);
@@ -487,8 +456,7 @@ void testAgingLoopFailureSurfacesIssueWithoutClearingReadiness()
     service.stop();
 }
 
-void testOperationScopedIssueCodesPreserveInterfaceFailureAfterLocalStateSuccess()
-{
+void testOperationScopedIssueCodesPreserveInterfaceFailureAfterLocalStateSuccess() {
     // Verifies that a successful publishLocalStateChanged does not erase the
     // issue created by a prior publishInterfaceChanged failure on the same
     // transport (they use separate operation-scoped issue codes).
@@ -517,8 +485,7 @@ void testOperationScopedIssueCodesPreserveInterfaceFailureAfterLocalStateSuccess
     service.stop();
 }
 
-void testOperationScopedIssueClearedBySubsequentSuccess()
-{
+void testOperationScopedIssueClearedBySubsequentSuccess() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto transport = std::make_shared<FakeObservationTransport>(true, false, true, false);
 
@@ -546,8 +513,7 @@ void testOperationScopedIssueClearedBySubsequentSuccess()
     service.stop();
 }
 
-void testTwoOperationIssuesCanCoexist()
-{
+void testTwoOperationIssuesCanCoexist() {
     // Both publishInterfaceChanged and publishLocalStateChanged throw.
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto transport = std::make_shared<FakeObservationTransport>(true, true, true, false);
@@ -572,8 +538,7 @@ void testTwoOperationIssuesCanCoexist()
     service.stop();
 }
 
-void testSelfStopFromAgingThreadIsRejected()
-{
+void testSelfStopFromAgingThreadIsRejected() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     auto transport = std::make_shared<FakeObservationTransport>();
@@ -600,8 +565,7 @@ void testSelfStopFromAgingThreadIsRejected()
     expect(runtimePtr->stopCount() == 1, "an external stop must still stop the runtime exactly once");
 }
 
-void testAgingWorkerCrashRemainsObservationOwnedDegradation()
-{
+void testAgingWorkerCrashRemainsObservationOwnedDegradation() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     runtimePtr->setThrowOnAge(true);
@@ -622,8 +586,7 @@ void testAgingWorkerCrashRemainsObservationOwnedDegradation()
     expect(service.getIssues().empty(), "stop() should clear runtime issue state");
 }
 
-void testConcurrentStopWaitsForTeardownCompletion()
-{
+void testConcurrentStopWaitsForTeardownCompletion() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     runtimePtr->setBlockInAge(true);
@@ -650,8 +613,7 @@ void testConcurrentStopWaitsForTeardownCompletion()
 
 // Supervision runs on its own worker: a blocked tick() must not starve
 // aging, and stop() completes once the bounded tick returns.
-void testAgingContinuesWhileSupervisionTickIsBlocked()
-{
+void testAgingContinuesWhileSupervisionTickIsBlocked() {
     auto runtime = std::make_unique<FakeObservationRuntime>();
     auto runtimePtr = runtime.get();
     runtimePtr->setBlockInTick(true);
@@ -672,11 +634,9 @@ void testAgingContinuesWhileSupervisionTickIsBlocked()
     expect(runtimePtr->stopCount() == 1, "runtime stopped exactly once");
     expect(transport->stopCount() == 1, "transport stopped exactly once");
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testStartStopBindsTransportAndPublishesReadinessExactlyOnce();
     testTransportFailurePreventsRuntimeStart();
     testStopWaitsForAgingThreadBeforeStoppingRuntimeAndTransport();

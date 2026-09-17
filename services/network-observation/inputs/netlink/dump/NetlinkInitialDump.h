@@ -14,7 +14,6 @@
 struct nlmsghdr;
 
 namespace RSCGroup {
-
 /**
  * Executes the initial NETLINK_ROUTE snapshot dump.
  *
@@ -50,25 +49,23 @@ public:
          */
         int error{0};
 
-        [[nodiscard]] bool completed() const noexcept
-        {
+        [[nodiscard]] bool completed() const noexcept {
             return status == Status::completed;
         }
 
-        [[nodiscard]] bool interrupted() const noexcept
-        {
+        [[nodiscard]] bool interrupted() const noexcept {
             return status == Status::interrupted;
         }
     };
 
     using MessageHandler =
-        std::function<void(const nlmsghdr*)>;
+    std::function<void(const nlmsghdr *)>;
 
     /**
      * Creates, binds, and owns an AF_NETLINK/NETLINK_ROUTE dump socket.
      */
     NetlinkInitialDump(
-        EventFdSignal& stopSignal,
+        EventFdSignal &stopSignal,
         MessageHandler messageHandler);
 
     /**
@@ -76,22 +73,22 @@ public:
      */
     NetlinkInitialDump(
         int dumpFd,
-        EventFdSignal& stopSignal,
+        EventFdSignal &stopSignal,
         MessageHandler messageHandler);
 
     ~NetlinkInitialDump() = default;
 
     NetlinkInitialDump(
-        const NetlinkInitialDump&) = delete;
+        const NetlinkInitialDump &) = delete;
 
-    NetlinkInitialDump& operator=(
-        const NetlinkInitialDump&) = delete;
+    NetlinkInitialDump &operator=(
+        const NetlinkInitialDump &) = delete;
 
     NetlinkInitialDump(
-        NetlinkInitialDump&&) = delete;
+        NetlinkInitialDump &&) = delete;
 
-    NetlinkInitialDump& operator=(
-        NetlinkInitialDump&&) = delete;
+    NetlinkInitialDump &operator=(
+        NetlinkInitialDump &&) = delete;
 
     /**
      * Executes these transactions in order:
@@ -104,7 +101,7 @@ public:
      */
     [[nodiscard]] Result run();
 
-    [[nodiscard]] static const char* statusName(
+    [[nodiscard]] static const char *statusName(
         Status status) noexcept;
 
 private:
@@ -119,9 +116,8 @@ private:
     void validateHandler() const;
 
     NetlinkRouteSocket socket_;
-    EventFdSignal& stopSignal_;
+    EventFdSignal &stopSignal_;
     MessageHandler messageHandler_;
     std::uint32_t nextSequence_{1};
 };
-
 } // namespace RSCGroup

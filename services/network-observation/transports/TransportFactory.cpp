@@ -6,9 +6,7 @@
 #include <unordered_map>
 
 namespace RSCGroup {
-
-std::shared_ptr<IObservationTransport> createTransport(TransportKind kind, const std::string& config)
-{
+std::shared_ptr<IObservationTransport> createTransport(TransportKind kind, const std::string &config) {
     switch (kind) {
         case TransportKind::Dbus:
             return std::make_shared<DbusTransport>(config.empty() ? "system" : config);
@@ -18,8 +16,7 @@ std::shared_ptr<IObservationTransport> createTransport(TransportKind kind, const
     return nullptr;
 }
 
-std::shared_ptr<IObservationTransport> createTransport(const std::string& name, const std::string& config)
-{
+std::shared_ptr<IObservationTransport> createTransport(const std::string &name, const std::string &config) {
     static const std::unordered_map<std::string, TransportKind> map = {
         {"dbus", TransportKind::Dbus},
         {"stdout", TransportKind::Stdout},
@@ -31,5 +28,4 @@ std::shared_ptr<IObservationTransport> createTransport(const std::string& name, 
     }
     return createTransport(it->second, config);
 }
-
 } // namespace RSCGroup

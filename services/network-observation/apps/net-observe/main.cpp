@@ -11,81 +11,77 @@
 #include <thread>
 
 DEFINE_string(command, "status",
-    "Command: status, remote, watch, monitor");
+              "Command: status, remote, watch, monitor");
 DEFINE_string(bus, "system",
-    "D-Bus bus type: system or session");
+              "D-Bus bus type: system or session");
 DEFINE_string(interface, "",
-    "Filter output by interface name");
+              "Filter output by interface name");
 DEFINE_string(mac, "",
-    "Filter output by MAC address");
+              "Filter output by MAC address");
 DEFINE_bool(pretty, true,
-    "Pretty-print JSON output");
+            "Pretty-print JSON output");
 DEFINE_bool(lldp, false,
-    "For status/monitor: include LLDP neighbor details per interface. "
-    "For remote: show only LLDP-backed candidates.");
+            "For status/monitor: include LLDP neighbor details per interface. "
+            "For remote: show only LLDP-backed candidates.");
 
 namespace {
-
 namespace contract = interop_contract::network_observation;
 
 // ---------------------------------------------------------------------------
 // JSON output helpers
 // ---------------------------------------------------------------------------
 
-void printJson(const Json::Value& root)
-{
+void printJson(const Json::Value &root) {
     Json::StreamWriterBuilder builder;
     builder["indentation"] = FLAGS_pretty ? "  " : "";
     std::cout << Json::writeString(builder, root) << '\n';
 }
 
-Json::Value ifaceToJson(const contract::LocalInterfaceState& iface)
-{
+Json::Value ifaceToJson(const contract::LocalInterfaceState &iface) {
     Json::Value j;
-    j["ifindex"]   = iface.ifindex;
-    j["ifname"]    = iface.ifname;
-    j["mac"]       = iface.mac;
-    j["adminUp"]   = iface.adminUp;
-    j["running"]   = iface.running;
+    j["ifindex"] = iface.ifindex;
+    j["ifname"] = iface.ifname;
+    j["mac"] = iface.mac;
+    j["adminUp"] = iface.adminUp;
+    j["running"] = iface.running;
     j["operstate"] = iface.operstate;
     if (iface.masterIfname)
         j["master"] = *iface.masterIfname;
 
     Json::Value ipv4Arr;
-    for (const auto& a : iface.ipv4) ipv4Arr.append(a);
+    for (const auto &a: iface.ipv4) ipv4Arr.append(a);
     j["ipv4"] = ipv4Arr;
 
     Json::Value ipv6Arr;
-    for (const auto& a : iface.ipv6) ipv6Arr.append(a);
+    for (const auto &a: iface.ipv6) ipv6Arr.append(a);
     j["ipv6"] = ipv6Arr;
 
     return j;
 }
 
-Json::Value candidateToJson(const contract::RemoteCandidate& c)
-{
+Json::Value candidateToJson(const contract::RemoteCandidate &c) {
     Json::Value j;
-    j["mac"]            = c.mac;
+    j["mac"] = c.mac;
     j["classification"] = contract::classificationToString(c.classification);
-    j["status"]         = contract::statusToString(c.status);
-    j["seenInFdb"]      = c.seenInFdb;
-    j["seenInNeigh"]    = c.seenInNeigh;
-    j["seenInLldp"]     = c.seenInLldp;
-    if (c.bridgePort)       j["bridgePort"]       = *c.bridgePort;
-    if (c.remoteChassisId)  j["remoteChassisId"]  = *c.remoteChassisId;
-    if (c.remotePortId)     j["remotePortId"]     = *c.remotePortId;
+    j["status"] = contract::statusToString(c.status);
+    j["seenInFdb"] = c.seenInFdb;
+    j["seenInNeigh"] = c.seenInNeigh;
+    j["seenInLldp"] = c.seenInLldp;
+    if (c.bridgePort) j["bridgePort"] = *c.bridgePort;
+    if (c.remoteChassisId) j["remoteChassisId"] = *c.remoteChassisId;
+    if (c.remotePortId) j["remotePortId"] = *c.remotePortId;
     if (c.remoteSystemName) j["remoteSystemName"] = *c.remoteSystemName;
 
     Json::Value ipv4Arr;
-    for (const auto& ip : c.ipv4) ipv4Arr.append(ip);
+    for (const auto &ip: c.ipv4) ipv4Arr.append(ip);
     j["ipv4"] = ipv4Arr;
 
     Json::Value ipv6Arr;
-    for (const auto& ip : c.ipv6) ipv6Arr.append(ip);
+    for (const auto &ip: c.ipv6) ipv6Arr.append(ip);
     j["ipv6"] = ipv6Arr;
 
     Json::Value neighArr;
-    for (const auto& n : c.neighborIfaces) neighArr.append(n);
+    for (const auto &n: c.neighborIfaces) neighArr.append(n);
     j["neighborIfaces"] = neighArr;
 
     return j;
@@ -94,10 +90,9 @@ Json::Value candidateToJson(const contract::RemoteCandidate& c)
 /**
  * @brief Fetch all remote candidates using two-phase fetch (MACs then per-MAC).
  */
-static std::vector<contract::RemoteCandidate> fetchAllCandidates(RSCGroup::DbusClient& client)
-{
+static std::vector<contract::RemoteCandidate> fetchAllCandidates(RSCGroup::DbusClient &client) {
     std::vector<contract::RemoteCandidate> candidates;
-    for (const auto& mac : client.getRemoteCandidateMacs()) {
+    for (const auto &mac: client.getRemoteCandidateMacs()) {
         if (auto c = client.getCandidateByMac(mac))
             candidates.push_back(std::move(*c));
     }
@@ -108,17 +103,16 @@ static std::vector<contract::RemoteCandidate> fetchAllCandidates(RSCGroup::DbusC
  * @brief Build a JSON array of LLDP neighbor details for a given interface.
  */
 Json::Value getLldpNeighbors(
-    const std::string& ifname,
-    const std::vector<contract::RemoteCandidate>& candidates)
-{
+    const std::string &ifname,
+    const std::vector<contract::RemoteCandidate> &candidates) {
     Json::Value arr;
-    for (const auto& c : candidates) {
+    for (const auto &c: candidates) {
         if (!c.seenInLldp) continue;
         if (!c.neighborIfaces.contains(ifname)) continue;
 
         Json::Value entry;
-        if (c.remoteChassisId)  entry["chassisId"]  = *c.remoteChassisId;
-        if (c.remotePortId)     entry["portId"]     = *c.remotePortId;
+        if (c.remoteChassisId) entry["chassisId"] = *c.remoteChassisId;
+        if (c.remotePortId) entry["portId"] = *c.remotePortId;
         if (c.remoteSystemName) entry["systemName"] = *c.remoteSystemName;
         arr.append(entry);
     }
@@ -129,8 +123,7 @@ Json::Value getLldpNeighbors(
 // Command handlers
 // ---------------------------------------------------------------------------
 
-void printStatus(RSCGroup::DbusClient& client)
-{
+void printStatus(RSCGroup::DbusClient &client) {
     if (!FLAGS_interface.empty()) {
         auto iface = client.getInterface(FLAGS_interface);
         if (iface) {
@@ -140,7 +133,7 @@ void printStatus(RSCGroup::DbusClient& client)
             if (FLAGS_lldp) {
                 auto candidates = fetchAllCandidates(client);
                 root[FLAGS_interface]["lldpNeighbors"] =
-                    getLldpNeighbors(FLAGS_interface, candidates);
+                        getLldpNeighbors(FLAGS_interface, candidates);
             }
 
             printJson(root);
@@ -154,7 +147,7 @@ void printStatus(RSCGroup::DbusClient& client)
             candidates = fetchAllCandidates(client);
 
         Json::Value root;
-        for (const auto& [name, iface] : snap.interfaces) {
+        for (const auto &[name, iface]: snap.interfaces) {
             root[name] = ifaceToJson(iface);
             if (FLAGS_lldp)
                 root[name]["lldpNeighbors"] = getLldpNeighbors(name, candidates);
@@ -163,8 +156,7 @@ void printStatus(RSCGroup::DbusClient& client)
     }
 }
 
-void printRemote(RSCGroup::DbusClient& client)
-{
+void printRemote(RSCGroup::DbusClient &client) {
     if (!FLAGS_mac.empty()) {
         auto c = client.getCandidateByMac(FLAGS_mac);
         if (c) {
@@ -179,7 +171,7 @@ void printRemote(RSCGroup::DbusClient& client)
     } else {
         auto candidates = fetchAllCandidates(client);
         Json::Value arr;
-        for (const auto& c : candidates) {
+        for (const auto &c: candidates) {
             if (FLAGS_lldp && !c.seenInLldp) continue;
             arr.append(candidateToJson(c));
         }
@@ -187,25 +179,24 @@ void printRemote(RSCGroup::DbusClient& client)
     }
 }
 
-void watchEvents(RSCGroup::DbusClient& client)
-{
+void watchEvents(RSCGroup::DbusClient &client) {
     client.onLocalStateChanged([]() {
         std::cout << "[event] LocalStateChanged\n";
     });
 
-    client.onInterfaceChanged([](const std::string& ifname) {
+    client.onInterfaceChanged([](const std::string &ifname) {
         std::cout << "[event] InterfaceChanged: " << ifname << "\n";
     });
 
-    client.onInterfaceRemoved([](const std::string& ifname) {
+    client.onInterfaceRemoved([](const std::string &ifname) {
         std::cout << "[event] InterfaceRemoved: " << ifname << "\n";
     });
 
-    client.onCandidateChanged([](const std::string& mac) {
+    client.onCandidateChanged([](const std::string &mac) {
         std::cout << "[event] CandidateChanged: " << mac << "\n";
     });
 
-    client.onCandidateRemoved([](const std::string& mac) {
+    client.onCandidateRemoved([](const std::string &mac) {
         std::cout << "[event] CandidateRemoved: " << mac << "\n";
     });
 
@@ -218,11 +209,9 @@ void watchEvents(RSCGroup::DbusClient& client)
         std::this_thread::sleep_for(std::chrono::seconds(120));
     }
 }
-
 } // anonymous namespace
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     google::InitGoogleLogging(argv[0]);
     gflags::SetUsageMessage("Network Observation CLI");
     gflags::ParseCommandLineFlags(&argc, &argv, true);

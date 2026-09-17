@@ -18,7 +18,6 @@
 #include <vector>
 
 namespace {
-
 using RSCGroup::InventoryClient;
 namespace inventory = interop_contract::inventory;
 using integration_support::ChildProcess;
@@ -30,16 +29,15 @@ using integration_support::replaceFile;
 using integration_support::waitFor;
 using integration_support::writeFile;
 
-ChildProcess spawnInventoryDaemon(const std::string& daemonPath,
-                                  const std::string& busAddress,
-                                  const TempDir& sandbox)
-{
+ChildProcess spawnInventoryDaemon(const std::string &daemonPath,
+                                  const std::string &busAddress,
+                                  const TempDir &sandbox) {
     const std::string logPath = sandbox.path() + "/inventory-agentd.log";
     const pid_t pid = ::fork();
     expect(pid >= 0, "fork for inventory-agentd failed");
     if (pid == 0) {
         ::setenv("DBUS_SESSION_BUS_ADDRESS", busAddress.c_str(), 1);
-        FILE* log = std::fopen(logPath.c_str(), "a");
+        FILE *log = std::fopen(logPath.c_str(), "a");
         if (!log) {
             _exit(127);
         }
@@ -70,9 +68,9 @@ ChildProcess spawnInventoryDaemon(const std::string& daemonPath,
             "--uuid_path=" + uuid,
             "--software_path=" + software,
         };
-        std::vector<char*> argv;
+        std::vector<char *> argv;
         argv.reserve(argsStorage.size() + 1);
-        for (auto& arg : argsStorage) {
+        for (auto &arg: argsStorage) {
             argv.push_back(arg.data());
         }
         argv.push_back(nullptr);
@@ -82,8 +80,7 @@ ChildProcess spawnInventoryDaemon(const std::string& daemonPath,
     return ChildProcess(pid, logPath);
 }
 
-int findEvent(const std::vector<std::string>& events, const std::string& expected)
-{
+int findEvent(const std::vector<std::string> &events, const std::string &expected) {
     for (std::size_t index = 0; index < events.size(); ++index) {
         if (events[index] == expected) {
             return static_cast<int>(index);
@@ -92,8 +89,7 @@ int findEvent(const std::vector<std::string>& events, const std::string& expecte
     return -1;
 }
 
-void testInventoryDaemonLifecycle(const std::string& daemonPath)
-{
+void testInventoryDaemonLifecycle(const std::string &daemonPath) {
     TempDir sandbox;
     std::filesystem::create_directories(sandbox.path() + "/info");
     std::filesystem::create_directories(sandbox.path() + "/rmc");
@@ -125,11 +121,11 @@ void testInventoryDaemonLifecycle(const std::string& daemonPath)
 
     std::mutex eventsMutex;
     std::vector<std::string> events;
-    client.onInventoryChanged([&](const std::string& field) {
+    client.onInventoryChanged([&](const std::string &field) {
         std::scoped_lock lock(eventsMutex);
         events.push_back("inventory:" + field);
     });
-    client.onSourceStateChanged([&](const std::string& source) {
+    client.onSourceStateChanged([&](const std::string &source) {
         std::scoped_lock lock(eventsMutex);
         events.push_back("state:" + source);
     });
@@ -171,7 +167,8 @@ void testInventoryDaemonLifecycle(const std::string& daemonPath)
     expect(waitFor([&] {
         const auto updated = client.tryGetIdentity();
         return updated.hasValue() &&
-               std::get<std::string>(updated.value().fields.at(std::string(inventory::FIELD_NODE_NAME))) == "rack12-node8" &&
+               std::get<std::string>(updated.value().fields.at(std::string(inventory::FIELD_NODE_NAME))) ==
+               "rack12-node8" &&
                updated.value().version > versionBeforeRename;
     }, std::chrono::seconds(10)), "rename-replace node-name did not propagate");
 
@@ -190,8 +187,9 @@ void testInventoryDaemonLifecycle(const std::string& daemonPath)
 
     const auto retainedFirmware = client.tryGetField(std::string(inventory::FIELD_FIRMWARE_VERSION));
     expect(retainedFirmware.hasValue(), "firmware field query should succeed after source removal");
-    expect(std::get<std::string>(retainedFirmware.value().at(std::string(inventory::FIELD_FIRMWARE_VERSION))) == "2.7.1",
-           "firmware removal should retain last-known-good value");
+    expect(
+        std::get<std::string>(retainedFirmware.value().at(std::string(inventory::FIELD_FIRMWARE_VERSION))) == "2.7.1",
+        "firmware removal should retain last-known-good value");
 
     const auto stormDeadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(300);
     while (std::chrono::steady_clock::now() < stormDeadline) {
@@ -223,16 +221,14 @@ void testInventoryDaemonLifecycle(const std::string& daemonPath)
                stopped.error().code == interop_contract::ClientErrorCode::service_unavailable;
     }, std::chrono::seconds(5)), "inventory client did not surface service_unavailable after shutdown");
 }
-
 } // namespace
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     try {
         expect(argc == 2, "inventory integration test requires inventory-agentd path argument");
         testInventoryDaemonLifecycle(argv[1]);
         return EXIT_SUCCESS;
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         std::cerr << e.what() << '\n';
         return EXIT_FAILURE;
     }

@@ -11,23 +11,20 @@
 #include <dbus-cxx/variant.h>
 
 namespace {
-
 using RSCGroup::InventoryDbusCodec::decodeIssues;
 using RSCGroup::InventoryDbusCodec::encodeIssues;
 
 using InventoryFields = interop_contract::inventory::InventoryFields;
 using Issues = interop_contract::inventory::InventoryIssues;
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr << message << "\n";
         std::exit(EXIT_FAILURE);
     }
 }
 
-std::string typeName(const DBus::Variant& value)
-{
+std::string typeName(const DBus::Variant &value) {
     switch (value.type()) {
         case DBus::DataType::BOOLEAN:
             return "bool";
@@ -46,10 +43,9 @@ std::string typeName(const DBus::Variant& value)
     }
 }
 
-void expectStringField(const std::map<std::string, DBus::Variant>& issue,
-                       const std::string& key,
-                       const std::string& expectedValue)
-{
+void expectStringField(const std::map<std::string, DBus::Variant> &issue,
+                       const std::string &key,
+                       const std::string &expectedValue) {
     const auto it = issue.find(key);
     expect(it != issue.end(), "missing expected key: " + key);
     expect(it->second.type() == DBus::DataType::STRING,
@@ -58,21 +54,29 @@ void expectStringField(const std::map<std::string, DBus::Variant>& issue,
            "unexpected string value for key '" + key + "'");
 }
 
-void testEncodeIssuesPreservesDeterministicStructure()
-{
+void testEncodeIssuesPreservesDeterministicStructure() {
     Issues issues;
 
     issues.emplace("firmware-file", InventoryFields{
-        {std::string(interop_contract::inventory::ISSUE_MESSAGE), std::string("cannot open '/etc/rmc/firmware'")},
-        {std::string(interop_contract::inventory::ISSUE_ORIGIN), std::string("/etc/rmc/firmware")},
-        {std::string(interop_contract::inventory::ISSUE_SEVERITY), std::string(interop_contract::inventory::SEVERITY_ERROR)}
-    });
+                       {
+                           std::string(interop_contract::inventory::ISSUE_MESSAGE),
+                           std::string("cannot open '/etc/rmc/firmware'")
+                       },
+                       {std::string(interop_contract::inventory::ISSUE_ORIGIN), std::string("/etc/rmc/firmware")},
+                       {
+                           std::string(interop_contract::inventory::ISSUE_SEVERITY),
+                           std::string(interop_contract::inventory::SEVERITY_ERROR)
+                       }
+                   });
 
     issues.emplace("software-file", InventoryFields{
-        {std::string(interop_contract::inventory::ISSUE_MESSAGE), std::string("source data is stale")},
-        {std::string(interop_contract::inventory::ISSUE_ORIGIN), std::string("/etc/rmc/software")},
-        {std::string(interop_contract::inventory::ISSUE_SEVERITY), std::string(interop_contract::inventory::SEVERITY_WARNING)}
-    });
+                       {std::string(interop_contract::inventory::ISSUE_MESSAGE), std::string("source data is stale")},
+                       {std::string(interop_contract::inventory::ISSUE_ORIGIN), std::string("/etc/rmc/software")},
+                       {
+                           std::string(interop_contract::inventory::ISSUE_SEVERITY),
+                           std::string(interop_contract::inventory::SEVERITY_WARNING)
+                       }
+                   });
 
     const auto encoded = encodeIssues(issues);
 
@@ -109,14 +113,19 @@ void testEncodeIssuesPreservesDeterministicStructure()
                       "/etc/rmc/software");
 }
 
-void testEncodeDecodeIssuesRoundTripsContractShape()
-{
+void testEncodeDecodeIssuesRoundTripsContractShape() {
     Issues issues;
     issues.emplace("uuid-file", InventoryFields{
-        {std::string(interop_contract::inventory::ISSUE_SEVERITY), std::string(interop_contract::inventory::SEVERITY_ERROR)},
-        {std::string(interop_contract::inventory::ISSUE_MESSAGE), std::string("cannot open '/etc/rmc/uuid'")},
-        {std::string(interop_contract::inventory::ISSUE_ORIGIN), std::string("/etc/rmc/uuid")}
-    });
+                       {
+                           std::string(interop_contract::inventory::ISSUE_SEVERITY),
+                           std::string(interop_contract::inventory::SEVERITY_ERROR)
+                       },
+                       {
+                           std::string(interop_contract::inventory::ISSUE_MESSAGE),
+                           std::string("cannot open '/etc/rmc/uuid'")
+                       },
+                       {std::string(interop_contract::inventory::ISSUE_ORIGIN), std::string("/etc/rmc/uuid")}
+                   });
 
     const auto encoded = encodeIssues(issues);
     const auto decoded = decodeIssues(encoded);
@@ -127,18 +136,17 @@ void testEncodeDecodeIssuesRoundTripsContractShape()
     expect(it->second.size() == 3, "expected decoded uuid-file issue to have 3 fields");
 
     expect(std::get<std::string>(it->second.at(std::string(interop_contract::inventory::ISSUE_SEVERITY))) ==
-               std::string(interop_contract::inventory::SEVERITY_ERROR),
+           std::string(interop_contract::inventory::SEVERITY_ERROR),
            "unexpected decoded severity");
     expect(std::get<std::string>(it->second.at(std::string(interop_contract::inventory::ISSUE_MESSAGE))) ==
-               "cannot open '/etc/rmc/uuid'",
+           "cannot open '/etc/rmc/uuid'",
            "unexpected decoded message");
     expect(std::get<std::string>(it->second.at(std::string(interop_contract::inventory::ISSUE_ORIGIN))) ==
-               "/etc/rmc/uuid",
+           "/etc/rmc/uuid",
            "unexpected decoded origin");
 }
 
-void testDecodeSnapshotRejectsMissingMetadata()
-{
+void testDecodeSnapshotRejectsMissingMetadata() {
     std::map<std::string, DBus::Variant> raw;
     raw[std::string(interop_contract::inventory::FIELD_TIMESTAMP)] = DBus::Variant(int64_t{9});
     raw[std::string(interop_contract::inventory::FIELD_READY)] = DBus::Variant(true);
@@ -146,15 +154,14 @@ void testDecodeSnapshotRejectsMissingMetadata()
 
     bool threw = false;
     try {
-        (void)RSCGroup::InventoryDbusCodec::decodeSnapshot(raw);
-    } catch (const interop_contract::DecodeError&) {
+        (void) RSCGroup::InventoryDbusCodec::decodeSnapshot(raw);
+    } catch (const interop_contract::DecodeError &) {
         threw = true;
     }
     expect(threw, "decodeSnapshot should reject missing version metadata");
 }
 
-void testDecodeSourceStateRejectsUnknownHealth()
-{
+void testDecodeSourceStateRejectsUnknownHealth() {
     std::map<std::string, DBus::Variant> raw;
     raw[std::string(interop_contract::inventory::SOURCE_STATE_HEALTH)] = DBus::Variant(std::string("mystery"));
     raw[std::string(interop_contract::inventory::SOURCE_STATE_REQUIRED)] = DBus::Variant(true);
@@ -164,17 +171,15 @@ void testDecodeSourceStateRejectsUnknownHealth()
 
     bool threw = false;
     try {
-        (void)RSCGroup::InventoryDbusCodec::decodeSourceState(raw, "firmware");
-    } catch (const interop_contract::DecodeError&) {
+        (void) RSCGroup::InventoryDbusCodec::decodeSourceState(raw, "firmware");
+    } catch (const interop_contract::DecodeError &) {
         threw = true;
     }
     expect(threw, "decodeSourceState should reject unknown health values");
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testEncodeIssuesPreservesDeterministicStructure();
     testEncodeDecodeIssuesRoundTripsContractShape();
     testDecodeSnapshotRejectsMissingMetadata();

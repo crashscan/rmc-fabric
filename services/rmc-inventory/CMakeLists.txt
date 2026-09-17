@@ -15,31 +15,31 @@ add_subdirectory(clients)
 add_subdirectory(apps)
 
 install(
-    FILES
+        FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/config/inventory-agentd.conf
-    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/inventory-agent
-    COMPONENT rel
+        DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/inventory-agent
+        COMPONENT rel
 )
 
 install(
-    FILES
+        FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/monit/inventory-agentd.cfg
-    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/monit.d
-    COMPONENT rel
+        DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/monit.d
+        COMPONENT rel
 )
 
 install(
-    PROGRAMS
+        PROGRAMS
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/scripts/start-inventory-agentd
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/scripts/stop-inventory-agentd
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/scripts/check-inventory-agentd
-    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/inventory-agent
-    COMPONENT rel
+        DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/inventory-agent
+        COMPONENT rel
 )
 
 install(
-    FILES
+        FILES
         ${CMAKE_CURRENT_SOURCE_DIR}/packaging/dbus/org.rsc.Inventory.conf
-    DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/dbus-1/system.d
-    COMPONENT rel
+        DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/dbus-1/system.d
+        COMPONENT rel
 )

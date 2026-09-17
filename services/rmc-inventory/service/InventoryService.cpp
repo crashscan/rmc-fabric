@@ -24,50 +24,44 @@
 
 namespace RSCGroup {
 namespace {
-
-[[nodiscard]] bool sourceStateTransitioned(const SourceState& lhs, const SourceState& rhs)
-{
-    return lhs.health != rhs.health || lhs.stale != rhs.stale || lhs.lastError != rhs.lastError;
-}
-
-[[nodiscard]] int msUntil(std::chrono::steady_clock::time_point ts)
-{
-    const auto now = std::chrono::steady_clock::now();
-    if (ts <= now) {
-        return 0;
+    [[nodiscard]] bool sourceStateTransitioned(const SourceState &lhs, const SourceState &rhs) {
+        return lhs.health != rhs.health || lhs.stale != rhs.stale || lhs.lastError != rhs.lastError;
     }
-    return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(ts - now).count());
-}
 
+    [[nodiscard]] int msUntil(std::chrono::steady_clock::time_point ts) {
+        const auto now = std::chrono::steady_clock::now();
+        if (ts <= now) {
+            return 0;
+        }
+        return static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(ts - now).count());
+    }
 } // namespace
 
-std::unique_ptr<IFileWatcher> InventoryService::makeDefaultFileWatcher()
-{
+std::unique_ptr<IFileWatcher> InventoryService::makeDefaultFileWatcher() {
     return std::make_unique<InotifyFileWatcher>();
 }
 
 InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
                                    FileWatcherFactory fileWatcherFactory)
-    : InventoryService(std::move(manager), Settings{}, std::move(fileWatcherFactory))
-{
+    : InventoryService(std::move(manager), Settings{}, std::move(fileWatcherFactory)) {
 }
 
 InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
                                    Settings settings,
                                    FileWatcherFactory fileWatcherFactory)
     : ServiceBase("inventory-service")
-    , manager_(std::move(manager))
-    , settings_(settings)
-    , refreshWorker_("inventory-refresh",
-                     [this](std::stop_token stopToken) { runLoop(std::move(stopToken)); },
-                     [this] {
-                         if (!refreshSignal_) { return; }
-                         if (const int error = refreshSignal_->signal(); error != 0) {
-                             diagnostics::logError(name(),"worker.refresh","signal","worker_wake_failed","refresh-eventfd",errnoToString(error));
-                         }
-                     },
-                     [this](const ManagedWorker::Exit& exit) { onRefreshWorkerExit(exit); })
-{
+      , manager_(std::move(manager))
+      , settings_(settings)
+      , refreshWorker_("inventory-refresh",
+                       [this](std::stop_token stopToken) { runLoop(std::move(stopToken)); },
+                       [this] {
+                           if (!refreshSignal_) { return; }
+                           if (const int error = refreshSignal_->signal(); error != 0) {
+                               diagnostics::logError(name(), "worker.refresh", "signal", "worker_wake_failed",
+                                                     "refresh-eventfd", errnoToString(error));
+                           }
+                       },
+                       [this](const ManagedWorker::Exit &exit) { onRefreshWorkerExit(exit); }) {
     if (!manager_) {
         throw std::invalid_argument("InventoryService: manager is null");
     }
@@ -77,19 +71,18 @@ InventoryService::InventoryService(std::shared_ptr<IInventoryManager> manager,
     }
 }
 
-InventoryService::~InventoryService()
-{
+InventoryService::~InventoryService() {
     // Destructors must not throw.  stop() is structurally non-throwing, but
     // the guard makes that explicit at the destruction boundary.
     try {
         stop();
     } catch (...) {
-        diagnostics::logError(name(), "service.lifecycle", "destroy", "service_stop_failed", "inventory-service", "stop() threw during destruction");
+        diagnostics::logError(name(), "service.lifecycle", "destroy", "service_stop_failed", "inventory-service",
+                              "stop() threw during destruction");
     }
 }
 
-void InventoryService::addSource(std::shared_ptr<IInventorySource> source)
-{
+void InventoryService::addSource(std::shared_ptr<IInventorySource> source) {
     if (!source) {
         throw std::invalid_argument("InventoryService::addSource: source is null");
     }
@@ -105,8 +98,7 @@ void InventoryService::addSource(std::shared_ptr<IInventorySource> source)
     }
 }
 
-void InventoryService::addTransport(std::shared_ptr<IInventoryTransport> transport)
-{
+void InventoryService::addTransport(std::shared_ptr<IInventoryTransport> transport) {
     if (!transport) {
         throw std::invalid_argument("InventoryService::addTransport: transport is null");
     }
@@ -118,40 +110,40 @@ void InventoryService::addTransport(std::shared_ptr<IInventoryTransport> transpo
     ServiceBase::addTransport(std::move(transport));
 }
 
-void InventoryService::validateConfiguration()
-{
+void InventoryService::validateConfiguration() {
     // Manager is validated at construction time; nothing further to check.
 }
 
-bool InventoryService::initializeComponents()
-{
+bool InventoryService::initializeComponents() {
     if (!refreshSignal_) {
         try {
             refreshSignal_.emplace();
-        } catch (const std::exception& error) {
-            diagnostics::logError(name(),"worker.refresh","create_eventfd","worker_start_failed","refresh-eventfd",error.what());
+        } catch (const std::exception &error) {
+            diagnostics::logError(name(), "worker.refresh", "create_eventfd", "worker_start_failed", "refresh-eventfd",
+                                  error.what());
             return false;
         } catch (...) {
-            diagnostics::logError(name(),"worker.refresh","create_eventfd","worker_start_failed","refresh-eventfd","unknown exception");
+            diagnostics::logError(name(), "worker.refresh", "create_eventfd", "worker_start_failed", "refresh-eventfd",
+                                  "unknown exception");
             return false;
         }
     }
-    for (const auto& transport : transportsOfType<IInventoryTransport>()) {
+    for (const auto &transport: transportsOfType<IInventoryTransport>()) {
         transport->bindQueryService(*this);
     }
 
     return true;
 }
 
-bool InventoryService::start()
-{
+bool InventoryService::start() {
     auto transition = lifecycle_.beginStart();
     if (!transition) {
         // Inventory Policy A: the coordinator only reports that the epoch is
         // already running; inventory alone decides whether the refresh worker
         // is healthy enough for a repeated start to be a no-op.
         if (loopFailed_.load(std::memory_order_acquire)) {
-            diagnostics::logError(name(), "worker.refresh", "start", "restart_requires_stop", "refresh-loop", "loop thread is dead; call stop() before start()");
+            diagnostics::logError(name(), "worker.refresh", "start", "restart_requires_stop", "refresh-loop",
+                                  "loop thread is dead; call stop() before start()");
             throw std::logic_error("InventoryService: restart after crash requires stop() first");
         }
         // beginStart() returns an unowned transition only when the epoch was
@@ -172,8 +164,8 @@ bool InventoryService::start()
         // ManagedWorker::start() reaps a finished-but-unjoined worker before
         // launching, so a previously crashed epoch never blocks a new launch
         // at the primitive level.
-        (void)refreshWorker_.start();
-    } catch (const std::exception& e) {
+        (void) refreshWorker_.start();
+    } catch (const std::exception &e) {
         loopFailed_.store(false, std::memory_order_release);
         quiesceQueriesOnTransports();
         ServiceBase::stop();
@@ -186,7 +178,8 @@ bool InventoryService::start()
         quiesceQueriesOnTransports();
         ServiceBase::stop();
         refreshSignal_.reset();
-        diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop", "unknown exception");
+        diagnostics::logError(name(), "worker.refresh", "start", "worker_start_failed", "refresh-loop",
+                              "unknown exception");
         transition.fail();
         return false;
     }
@@ -195,13 +188,13 @@ bool InventoryService::start()
     return true;
 }
 
-void InventoryService::stop()
-{
+void InventoryService::stop() {
     // Self-stop is rejected *before* shutdown is claimed.  There is no detach
     // path: a detached worker capturing `this` would open a use-after-free
     // window and break the producer-drain guarantee.
     if (refreshWorker_.isCurrentThread()) {
-        diagnostics::logError(name(), "worker.refresh", "stop", "self_stop_rejected", "refresh-loop", "stop() called from the refresh worker thread; request shutdown externally");
+        diagnostics::logError(name(), "worker.refresh", "stop", "self_stop_rejected", "refresh-loop",
+                              "stop() called from the refresh worker thread; request shutdown externally");
         return;
     }
 
@@ -237,8 +230,7 @@ void InventoryService::stop()
     transition.complete();
 }
 
-void InventoryService::onRefreshWorkerExit(const ManagedWorker::Exit& exit)
-{
+void InventoryService::onRefreshWorkerExit(const ManagedWorker::Exit &exit) {
     // Runs on the worker thread after the worker state has been finalized.
     // It records inventory-owned crash state and diagnostics only; it must
     // never drive service or worker lifecycle.
@@ -253,50 +245,42 @@ void InventoryService::onRefreshWorkerExit(const ManagedWorker::Exit& exit)
         if (exit.exception) {
             std::rethrow_exception(exit.exception);
         }
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         detail = e.what();
     } catch (...) {
     }
     diagnostics::logError(name(), "worker.refresh", "run_loop", "worker_loop_failed", "refresh-loop", detail);
 }
 
-bool InventoryService::isRunning() const
-{
+bool InventoryService::isRunning() const {
     return ServiceBase::isRunning();
 }
 
-interop_contract::inventory::InventorySnapshot InventoryService::getIdentity() const
-{
+interop_contract::inventory::InventorySnapshot InventoryService::getIdentity() const {
     return manager_->getSnapshot();
 }
 
-InventoryFields InventoryService::getField(const std::string& fieldName) const
-{
+InventoryFields InventoryService::getField(const std::string &fieldName) const {
     return interop_contract::inventory::make_single_field_map(manager_->getSnapshot(), fieldName);
 }
 
-interop_contract::inventory::SourceStateMap InventoryService::getSourceStates() const
-{
+interop_contract::inventory::SourceStateMap InventoryService::getSourceStates() const {
     return manager_->getSourceStates();
 }
 
-bool InventoryService::getReady() const
-{
+bool InventoryService::getReady() const {
     return ServiceBase::isReady();
 }
 
-std::string InventoryService::getPhase() const
-{
+std::string InventoryService::getPhase() const {
     return manager_->getPhase();
 }
 
-uint64_t InventoryService::getVersion() const
-{
+uint64_t InventoryService::getVersion() const {
     return manager_->getVersion();
 }
 
-void InventoryService::refresh()
-{
+void InventoryService::refresh() {
     {
         std::scoped_lock lock(refreshMutex_);
         refreshRequested_ = true;
@@ -304,7 +288,7 @@ void InventoryService::refresh()
     if (!refreshSignal_) {
         return;
     }
-    if (const int error = refreshSignal_->signal();error != 0) {
+    if (const int error = refreshSignal_->signal(); error != 0) {
         diagnostics::logError(
             name(),
             "worker.refresh",
@@ -326,7 +310,7 @@ void InventoryService::runLoop(std::stop_token stopToken) {
         {
             std::scoped_lock lock(refreshMutex_);
             if (refreshRequested_) {
-                wakeTs = std::min(wakeTs,lastRefreshSteadyTs_ + settings_.minRefreshInterval);
+                wakeTs = std::min(wakeTs, lastRefreshSteadyTs_ + settings_.minRefreshInterval);
             }
         }
 
@@ -347,13 +331,13 @@ void InventoryService::runLoop(std::stop_token stopToken) {
             },
         };
 
-        const auto pollResult = PollUtils::pollOnce(fds,msUntil(wakeTs),stopToken);
+        const auto pollResult = PollUtils::pollOnce(fds, msUntil(wakeTs), stopToken);
 
         switch (pollResult.kind) {
             case PollUtils::PollResult::Kind::StopRequested:
                 return;
             case PollUtils::PollResult::Kind::SyscallFailure:
-                throw std::system_error(pollResult.errNo,std::generic_category(),"InventoryService: poll failed");
+                throw std::system_error(pollResult.errNo, std::generic_category(), "InventoryService: poll failed");
             case PollUtils::PollResult::Kind::Timeout:
             case PollUtils::PollResult::Kind::Ready:
                 break;
@@ -409,14 +393,13 @@ void InventoryService::runLoop(std::stop_token stopToken) {
 
         if (requestPending || sourceTriggered) {
             doRefreshCycle(true);
-        } else if (std::chrono::steady_clock::now() >=nextReconcileTs_) {
+        } else if (std::chrono::steady_clock::now() >= nextReconcileTs_) {
             doRefreshCycle(false);
         }
     }
 }
 
-void InventoryService::doRefreshCycle(bool force)
-{
+void InventoryService::doRefreshCycle(bool force) {
     const auto now = std::chrono::steady_clock::now();
 
     if (force && (now - lastRefreshSteadyTs_) < settings_.minRefreshInterval) {
@@ -444,27 +427,26 @@ void InventoryService::doRefreshCycle(bool force)
     nextReconcileTs_ = now + settings_.reconcileInterval;
 }
 
-void InventoryService::publishDiff(const InventoryDiff& diff,
-                                   const interop_contract::inventory::SourceStateMap& oldStates,
-                                   const interop_contract::inventory::SourceStateMap& newStates,
+void InventoryService::publishDiff(const InventoryDiff &diff,
+                                   const interop_contract::inventory::SourceStateMap &oldStates,
+                                   const interop_contract::inventory::SourceStateMap &newStates,
                                    bool oldReady,
-                                   bool newReady)
-{
+                                   bool newReady) {
     const auto typedTransports = transportsOfType<IInventoryTransport>();
 
-    for (const auto& field : diff.changedFields) {
-        for (const auto& transport : typedTransports) {
+    for (const auto &field: diff.changedFields) {
+        for (const auto &transport: typedTransports) {
             publishInventoryChange(transport, field);
         }
     }
 
-    for (const auto& field : diff.removedFields) {
-        for (const auto& transport : typedTransports) {
+    for (const auto &field: diff.removedFields) {
+        for (const auto &transport: typedTransports) {
             publishInventoryChange(transport, field);
         }
     }
 
-    for (const auto& [sourceName, newState] : newStates) {
+    for (const auto &[sourceName, newState]: newStates) {
         const auto oldIt = oldStates.find(sourceName);
         const bool transitioned = oldIt == oldStates.end() || sourceStateTransitioned(oldIt->second, newState);
 
@@ -485,7 +467,7 @@ void InventoryService::publishDiff(const InventoryDiff& diff,
                                      sourceName,
                                      "source recovered");
             }
-            for (const auto& transport : typedTransports) {
+            for (const auto &transport: typedTransports) {
                 publishSourceStateChange(transport, sourceName);
             }
         }
@@ -496,8 +478,7 @@ void InventoryService::publishDiff(const InventoryDiff& diff,
     }
 }
 
-interop_contract::inventory::InventoryIssues InventoryService::getIssues() const
-{
+interop_contract::inventory::InventoryIssues InventoryService::getIssues() const {
     auto issues = InventoryIssueUtil::deriveIssues(manager_->getSourceStates());
 
     if (loopFailed_.load(std::memory_order_acquire)) {
@@ -514,24 +495,25 @@ interop_contract::inventory::InventoryIssues InventoryService::getIssues() const
     return issues;
 }
 
-void InventoryService::publishInventoryChange(const std::shared_ptr<IInventoryTransport>& transport, const std::string& fieldName) const noexcept {
-        invokeTransportOperationNoexcept(
-            *transport,
-            "publish_inventory_changed",
-            "transport_publish_failed",
-            fieldName,
-            [&] { transport->publishInventoryChanged(fieldName);}
-            );
-}
-
-void InventoryService::publishSourceStateChange(const std::shared_ptr<IInventoryTransport>& transport, const std::string& sourceName) const noexcept {
+void InventoryService::publishInventoryChange(const std::shared_ptr<IInventoryTransport> &transport,
+                                              const std::string &fieldName) const noexcept {
     invokeTransportOperationNoexcept(
-            *transport,
-            "publish_source_state_changed",
-            "transport_publish_failed",
-            sourceName,
-            [&] { transport->publishSourceStateChanged(sourceName);}
-            );
+        *transport,
+        "publish_inventory_changed",
+        "transport_publish_failed",
+        fieldName,
+        [&] { transport->publishInventoryChanged(fieldName); }
+    );
 }
 
+void InventoryService::publishSourceStateChange(const std::shared_ptr<IInventoryTransport> &transport,
+                                                const std::string &sourceName) const noexcept {
+    invokeTransportOperationNoexcept(
+        *transport,
+        "publish_source_state_changed",
+        "transport_publish_failed",
+        sourceName,
+        [&] { transport->publishSourceStateChanged(sourceName); }
+    );
+}
 } // namespace RSCGroup

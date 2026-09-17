@@ -2,8 +2,7 @@
 
 #include <dbus-cxx.h>
 
-int main()
-{
+int main() {
     interop_contract::inventory::InventorySnapshot snapshot;
     snapshot.fields["hostname"] = std::string("test-host");
 

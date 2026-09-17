@@ -33,7 +33,6 @@
 #include <functional>
 
 namespace RSCGroup {
-
 namespace test_support {
     class NetlinkNetworkMonitorFactory;
 }
@@ -41,11 +40,15 @@ namespace test_support {
 class NetlinkNetworkMonitor {
 public:
     explicit NetlinkNetworkMonitor(MonitorCallbacks callbacks = {}, std::set<std::string> watchedInterfaces = {});
+
     ~NetlinkNetworkMonitor();
-    NetlinkNetworkMonitor(const NetlinkNetworkMonitor&) = delete;
-    NetlinkNetworkMonitor& operator=(const NetlinkNetworkMonitor&) = delete;
+
+    NetlinkNetworkMonitor(const NetlinkNetworkMonitor &) = delete;
+
+    NetlinkNetworkMonitor &operator=(const NetlinkNetworkMonitor &) = delete;
 
     [[nodiscard]] bool start();
+
     void stop();
 
     /**
@@ -56,7 +59,9 @@ public:
      * lifecycle epoch. An explicit stop() is required before restart.
      */
     [[nodiscard]] bool isRunning() const;
+
     [[nodiscard]] std::vector<DeviceEvent> getDevicesSnapshot() const;
+
     [[nodiscard]] std::vector<LinkEvent> getLinksSnapshot() const;
 
 private:
@@ -71,11 +76,12 @@ private:
      * A provider exception or negative returned descriptor causes start()
      * to roll back and return false.
      */
-    NetlinkNetworkMonitor(std::function<int()> liveFdProvider,MonitorCallbacks callbacks = {},std::set<std::string> watchedInterfaces = {});
+    NetlinkNetworkMonitor(std::function<int()> liveFdProvider, MonitorCallbacks callbacks = {},
+                          std::set<std::string> watchedInterfaces = {});
+
     friend class test_support::NetlinkNetworkMonitorFactory;
 
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
-
 } // namespace RSCGroup

@@ -14,22 +14,27 @@
 #include <unordered_map>
 
 namespace RSCGroup {
-
 class ObservationModelEngine : public INetworkObservationModel {
 public:
     explicit ObservationModelEngine(ModelConfig config);
 
-    void setEventSink(IModelEventSink* sink) override;
+    void setEventSink(IModelEventSink *sink) override;
 
-    void onLinkObservation(const LinkObservation& obs) override;
-    void onAddressObservation(const AddressObservation& obs) override;
-    void onNeighborObservation(const NeighborObservation& obs) override;
-    void onFdbObservation(const FdbObservation& obs) override;
-    void onLldpObservation(const LldpObservation& obs) override;
+    void onLinkObservation(const LinkObservation &obs) override;
+
+    void onAddressObservation(const AddressObservation &obs) override;
+
+    void onNeighborObservation(const NeighborObservation &obs) override;
+
+    void onFdbObservation(const FdbObservation &obs) override;
+
+    void onLldpObservation(const LldpObservation &obs) override;
 
     LocalNetworkSnapshot localSnapshot() const override;
+
     std::vector<RemoteCandidate> remoteCandidates() const override;
-    std::optional<RemoteCandidate> findCandidateByMac(const std::string& mac) const override;
+
+    std::optional<RemoteCandidate> findCandidateByMac(const std::string &mac) const override;
 
     void age(std::chrono::steady_clock::time_point now) override;
 
@@ -41,13 +46,14 @@ public:
 
     /// Runtime config mutations
     void setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy);
+
     void setClassifier(std::unique_ptr<ICandidateClassifier> classifier);
 
 private:
     enum class ModelPhase { Initializing, Live };
 
     ModelConfig config_;
-    IModelEventSink* sink_ = nullptr;
+    IModelEventSink *sink_ = nullptr;
     ModelPhase phase_ = ModelPhase::Initializing;
     mutable std::mutex mutex_;
 
@@ -58,15 +64,19 @@ private:
     std::unordered_map<std::string, RemoteCandidate> candidates_;
 
     void reconcileAffectedByLocalMac(std::string_view mac);
-    void reconcileAffectedByLocalIp(const std::string& ip);
+
+    void reconcileAffectedByLocalIp(const std::string &ip);
+
     void reconcileByKey(std::string_view mac);
-    RemoteCandidate& getOrCreateCandidate(const std::string& mac);
-    static bool isPublishable(const RemoteCandidate& c);
-    void updateClassification(RemoteCandidate& c);
+
+    RemoteCandidate &getOrCreateCandidate(const std::string &mac);
+
+    static bool isPublishable(const RemoteCandidate &c);
+
+    void updateClassification(RemoteCandidate &c);
 
     /// Revival + phase-based status transitions.
     /// Precondition: mutex_ held, updateClassification() already applied.
-    void reconcileStatusLocked(RemoteCandidate& c, ObservationEvent event);
+    void reconcileStatusLocked(RemoteCandidate &c, ObservationEvent event);
 };
-
 } // namespace RSCGroup

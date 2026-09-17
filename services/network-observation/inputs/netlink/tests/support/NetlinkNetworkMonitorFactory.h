@@ -8,7 +8,6 @@
 #include <string>
 
 namespace RSCGroup::test_support {
-
 /**
  * Test-only construction support for NetlinkNetworkMonitor.
  *
@@ -26,5 +25,4 @@ public:
         MonitorCallbacks callbacks = {},
         std::set<std::string> watchedInterfaces = {});
 };
-
 } // namespace RSCGroup::test_support

@@ -17,34 +17,34 @@ existing `GetReady()` / `GetPhase()` meanings.
 Both services follow a strict externally observable shutdown order for each service epoch:
 
 1. **Query quiescence** — D-Bus query admission closes; in-flight `Get*` and `Refresh` handlers
-   complete before any service dependency is torn down.  Queries arriving after quiescence return
+   complete before any service dependency is torn down. Queries arriving after quiescence return
    safe defaults.
 2. **Worker stop and drain** — service-owned worker threads and runtime input producers stop and
-   drain.  Domain signals produced by already-admitted work may still be emitted at this stage
+   drain. Domain signals produced by already-admitted work may still be emitted at this stage
    because transports remain open.
 3. **Terminal readiness transition** — after all event producers have drained, `ReadyChanged(false)`
-   is emitted if the service was ready.  This is the final service-originated signal of the epoch.
+   is emitted if the service was ready. This is the final service-originated signal of the epoch.
 4. **Transport close** — D-Bus object unregistration and connection release happen only after the
    terminal readiness signal.
 
 **Intentional ordering note**: query methods become unavailable (step 1) *before* subscribers
-receive the terminal `ReadyChanged(false)` (step 3).  Clients that rely on re-querying state after
+receive the terminal `ReadyChanged(false)` (step 3). Clients that rely on re-querying state after
 observing `ReadyChanged(false)` will receive safe defaults or errors.
 
-`ReadyChanged(true)` is rejected once shutdown has been claimed.  No domain signal or
+`ReadyChanged(true)` is rejected once shutdown has been claimed. No domain signal or
 readiness-true transition may occur after the terminal readiness-false transition.
 
 ### Query quiescence is a structural barrier
 
-`quiesceQueries()` is `noexcept` on the transport interface and on every concrete override.  It
+`quiesceQueries()` is `noexcept` on the transport interface and on every concrete override. It
 performs **local synchronization only**: it closes query admission and waits for admitted handlers to
-finish.  It performs no D-Bus/network I/O, no object unregistration, no disconnect, and destroys no
-publication resources — all of that belongs to `stop()`.  A quiescence violation is a structural
+finish. It performs no D-Bus/network I/O, no object unregistration, no disconnect, and destroys no
+publication resources — all of that belongs to `stop()`. A quiescence violation is a structural
 programming defect, not an ordinary recoverable transport error, so teardown must not appear
 abortable at that step.
 
-Worker wake and exit-handler callbacks are treated differently.  They are signalling mechanisms, so
-callback exceptions are caught and logged and worker state still finalizes.  The cost of a swallowed
+Worker wake and exit-handler callbacks are treated differently. They are signalling mechanisms, so
+callback exceptions are caught and logged and worker state still finalizes. The cost of a swallowed
 or failed wake is latency: stop may be delayed until the worker's natural poll/condition-variable
 wake interval, potentially up to inventory's reconcile interval or observation's aging interval.
 That containment is degradation tolerance, not free recovery.
@@ -60,14 +60,14 @@ uses abort-over-hang.
 ### Concurrent `stop()` now waits for completion
 
 **Behaviour change.**  Before the lifecycle-runner migration, a second concurrent `stop()` could
-return while teardown was still active.  After the migration, every normal return from `stop()`
+return while teardown was still active. After the migration, every normal return from `stop()`
 means the active teardown has completed and the service epoch is observably `stopped`.
 
 Because a second `stop()` now waits, no in-process component may synchronously call `stop()` on its
-own owner.  Worker loops, worker exit handlers, LLDP callbacks, netlink callbacks, and runtime
+own owner. Worker loops, worker exit handlers, LLDP callbacks, netlink callbacks, and runtime
 callbacks that attempt a self stop are **rejected** with a stable operational diagnostic
-(`category=self_stop_rejected`).  No worker thread is ever detached, and a rejected self stop
-never pretends a clean stop completed.  Components needing shutdown must raise an external shutdown
+(`category=self_stop_rejected`). No worker thread is ever detached, and a rejected self stop
+never pretends a clean stop completed. Components needing shutdown must raise an external shutdown
 request instead.
 
 ### Worker stop mechanics
@@ -80,13 +80,13 @@ request instead.
   exception-isolated per step: one failure cannot prevent later cleanup and cannot leave lifecycle
   coordination stuck in a transitional state.
 - An abandoned or unresolved start resolves to `stopped`; an abandoned or unresolved stop also
-  resolves to `stopped`.  Lifecycle state can never wedge in `starting` or `stopping`.
+  resolves to `stopped`. Lifecycle state can never wedge in `starting` or `stopping`.
 
 ## Asynchronous Refresh shutdown semantics
 
 A D-Bus `Refresh()` call admitted before query quiescence may finish enqueueing its asynchronous
-work request.  A refresh already running may complete and publish results before the terminal
-`ReadyChanged(false)`.  A refresh that is merely pending in the event queue may be discarded once
+work request. A refresh already running may complete and publish results before the terminal
+`ReadyChanged(false)`. A refresh that is merely pending in the event queue may be discarded once
 the worker has been stopped.
 
 The refresh eventfd is closed only *after* the refresh worker has been joined, so no admitted
@@ -100,7 +100,7 @@ the LLDP source closes the admission gate *before* destroying the watch handle a
 active callback leases to drain before clearing cache state.
 
 Observation callbacks must **not** synchronously drive source lifecycle (e.g. call `stop()` or
-`refreshAll()` from within a callback).  Doing so is a programming error and may log a warning or
+`refreshAll()` from within a callback). Doing so is a programming error and may log a warning or
 fail an assertion.
 
 ## Inventory semantics
@@ -108,7 +108,7 @@ fail an assertion.
 - `GetReady()` remains the existing readiness latch.
 - `GetPhase()` remains the existing last-known phase (`initializing` or `live`).
 - `GetIssues()` remains the operator surface for active source issues plus the stable service issue:
-  - `inventory.loop.stopped`
+    - `inventory.loop.stopped`
 
 Loop failure does not clear the readiness latch. Consumers that require fresh data should combine
 `GetReady()` with `GetIssues()`.

@@ -2,13 +2,13 @@ set(TRANSPORT_SOURCES
         dbus/DbusInventoryTransport.cpp
         dbus/InventoryDbusAdapter.cpp
         dbus/InventoryQueryHandler.cpp
-    TransportFactory.cpp
+        TransportFactory.cpp
 )
 
-if(INVENTORY_ENABLE_STDOUT_TRANSPORT)
+if (INVENTORY_ENABLE_STDOUT_TRANSPORT)
     list(APPEND TRANSPORT_SOURCES stdout/StdoutInventoryTransport.cpp)
     add_compile_definitions(INVENTORY_ENABLE_STDOUT_TRANSPORT)
-endif()
+endif ()
 
 add_library(inventory_transport STATIC ${TRANSPORT_SOURCES})
 add_library(inventory_dbus_codec STATIC dbus/InventoryDbusCodec.cpp)
@@ -17,7 +17,7 @@ target_compile_features(inventory_transport PUBLIC cxx_std_20)
 target_compile_features(inventory_dbus_codec PUBLIC cxx_std_20)
 
 target_include_directories(inventory_transport
-    PUBLIC
+        PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/dbus
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/stdout
@@ -26,18 +26,18 @@ target_include_directories(inventory_transport
 )
 
 target_include_directories(inventory_dbus_codec
-    PUBLIC
+        PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>/dbus
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/inventory>
 )
 
 target_link_libraries(inventory_transport
-    PUBLIC
+        PUBLIC
         rsc_util::service_dbus
         rsc_util::service_runtime
         interop_contract
         inventory_service_ports
-    PRIVATE
+        PRIVATE
         inventory_dbus_codec
         DBusCxx::DBusCxx
         SigCxx::SigCxx
@@ -45,62 +45,62 @@ target_link_libraries(inventory_transport
 )
 
 target_link_libraries(inventory_dbus_codec
-    PUBLIC
+        PUBLIC
         interop_contract
         DBusCxx::DBusCxx
 )
 
-if(BUILD_TESTING)
+if (BUILD_TESTING)
     add_executable(inventory_dbus_codec_characterization_tests
-        tests/InventoryDbusCodecCharacterizationTests.cpp
+            tests/InventoryDbusCodecCharacterizationTests.cpp
     )
 
     target_compile_features(inventory_dbus_codec_characterization_tests PRIVATE cxx_std_20)
 
     target_link_libraries(inventory_dbus_codec_characterization_tests
-        PRIVATE
+            PRIVATE
             DBusCxx::DBusCxx
             interop_contract
             inventory_dbus_codec
     )
 
     add_test(
-        NAME inventory_dbus_codec_characterization_tests
-        COMMAND inventory_dbus_codec_characterization_tests
+            NAME inventory_dbus_codec_characterization_tests
+            COMMAND inventory_dbus_codec_characterization_tests
     )
     set_tests_properties(inventory_dbus_codec_characterization_tests PROPERTIES TIMEOUT 10 LABELS "unit")
 
     add_executable(inventory_query_handler_tests
-        tests/InventoryQueryHandlerTests.cpp
+            tests/InventoryQueryHandlerTests.cpp
     )
 
     target_compile_features(
-        inventory_query_handler_tests
-        PRIVATE cxx_std_20
+            inventory_query_handler_tests
+            PRIVATE cxx_std_20
     )
 
     target_link_libraries(inventory_query_handler_tests
-        PRIVATE
+            PRIVATE
             DBusCxx::DBusCxx
             inventory_transport
             pthread
     )
 
     add_test(
-        NAME inventory_query_handler_tests
-        COMMAND inventory_query_handler_tests
+            NAME inventory_query_handler_tests
+            COMMAND inventory_query_handler_tests
     )
 
     set_tests_properties(
-        inventory_query_handler_tests
-        PROPERTIES
+            inventory_query_handler_tests
+            PROPERTIES
             TIMEOUT 10
             LABELS "unit;resilience"
     )
-endif()
+endif ()
 
 install(
-    TARGETS inventory_dbus_codec
-    EXPORT  rmc_fabricTargets
-    ARCHIVE COMPONENT dev
+        TARGETS inventory_dbus_codec
+        EXPORT rmc_fabricTargets
+        ARCHIVE COMPONENT dev
 )

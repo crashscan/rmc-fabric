@@ -7,8 +7,7 @@ namespace {
     namespace C = interop_contract::inventory;
 }
 
-InventoryIssues deriveIssues(const interop_contract::inventory::SourceStateMap& states)
-{
+InventoryIssues deriveIssues(const interop_contract::inventory::SourceStateMap &states) {
     InventoryIssues out;
     for (const auto &[name, state]: states) {
         if (state.health == SourceHealth::OK && !state.stale) continue;
@@ -32,5 +31,4 @@ InventoryIssues deriveIssues(const interop_contract::inventory::SourceStateMap& 
     }
     return out;
 }
-
 } // namespace RSCGroup::InventoryIssueUtil

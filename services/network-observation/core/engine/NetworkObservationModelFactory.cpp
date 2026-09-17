@@ -9,10 +9,7 @@
 #include <utility>
 
 namespace RSCGroup {
-
-std::unique_ptr<INetworkObservationModel> createNetworkObservationModel(ModelConfig config)
-{
+std::unique_ptr<INetworkObservationModel> createNetworkObservationModel(ModelConfig config) {
     return std::make_unique<ObservationModelEngine>(std::move(config));
 }
-
 } // namespace RSCGroup

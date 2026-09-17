@@ -1,6 +1,7 @@
 # Wrapper Scripts
 
-These wrapper scripts implement the runtime control surface for `network-observationd` in the **Monit-only** deployment model.
+These wrapper scripts implement the runtime control surface for `network-observationd` in the **Monit-only** deployment
+model.
 
 They are installed under:
 
@@ -138,6 +139,7 @@ These scripts can also be used directly for debugging:
 ## Design notes
 
 ### Why wrappers instead of direct Monit commands?
+
 Using wrappers keeps:
 
 - pidfile logic
@@ -150,11 +152,14 @@ in one place.
 This makes the deployment easier to debug and safer to change.
 
 ### Why no `/etc/init.d/` script?
+
 In this deployment model, Monit is the only service manager.  
 That avoids split ownership between SysV init and Monit.
 
 ### Why no D-Bus activation?
-The daemon is intended to be started explicitly by Monit at boot and supervised continuously, not lazily on first D-Bus use.
+
+The daemon is intended to be started explicitly by Monit at boot and supervised continuously, not lazily on first D-Bus
+use.
 
 ## Future improvements
 

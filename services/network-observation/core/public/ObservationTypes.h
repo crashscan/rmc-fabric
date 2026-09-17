@@ -11,7 +11,6 @@
 #include <string>
 
 namespace RSCGroup {
-
 enum class NeighborReachability {
     Unknown, Permanent, NoArp, Reachable, Stale, Probe, Delay, Incomplete, Failed
 };
@@ -21,6 +20,7 @@ enum class FdbEntryKind {
 };
 
 enum class ObservationEvent { Present, Removed };
+
 enum class ObservationKind { Link, Address, Neighbor, Fdb, Lldp };
 
 struct ObservationBase {
@@ -77,5 +77,4 @@ struct LldpObservation : ObservationBase {
     /// touches Removed tombstones. Producers must only set this on Present.
     bool keepalive = false;
 };
-
 } // namespace RSCGroup

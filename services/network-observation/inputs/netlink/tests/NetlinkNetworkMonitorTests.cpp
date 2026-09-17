@@ -18,20 +18,18 @@
 #include <thread>
 
 namespace {
-
 using namespace RSCGroup;
 using RSCGroup::test_support::NetlinkNetworkMonitorFactory;
 
 constexpr auto testTimeout = std::chrono::seconds(5);
 constexpr auto pollInterval = std::chrono::milliseconds(5);
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr
-            << "NetlinkNetworkMonitorTests: "
-            << message
-            << '\n';
+                << "NetlinkNetworkMonitorTests: "
+                << message
+                << '\n';
 
         std::exit(EXIT_FAILURE);
     }
@@ -42,15 +40,13 @@ struct SocketPair {
     UniqueFd peer;
 };
 
-[[nodiscard]] bool descriptorIsOpen(int fd)
-{
+[[nodiscard]] bool descriptorIsOpen(int fd) {
     errno = 0;
     return ::fcntl(fd, F_GETFD) != -1 ||
            errno != EBADF;
 }
 
-[[nodiscard]] SocketPair makeStreamSocketPair()
-{
+[[nodiscard]] SocketPair makeStreamSocketPair() {
     int descriptors[2]{-1, -1};
 
     if (::socketpair(
@@ -59,9 +55,9 @@ struct SocketPair {
             0,
             descriptors) < 0) {
         std::cerr
-            << "NetlinkNetworkMonitorTests: socketpair failed: "
-            << std::strerror(errno)
-            << '\n';
+                << "NetlinkNetworkMonitorTests: socketpair failed: "
+                << std::strerror(errno)
+                << '\n';
 
         std::exit(EXIT_FAILURE);
     }
@@ -73,11 +69,10 @@ struct SocketPair {
 }
 
 [[nodiscard]] bool waitFor(
-    const std::function<bool()>& predicate,
-    std::chrono::steady_clock::duration timeout = testTimeout)
-{
+    const std::function<bool()> &predicate,
+    std::chrono::steady_clock::duration timeout = testTimeout) {
     const auto deadline =
-        std::chrono::steady_clock::now() + timeout;
+            std::chrono::steady_clock::now() + timeout;
 
     while (std::chrono::steady_clock::now() < deadline) {
         if (predicate()) {
@@ -90,8 +85,7 @@ struct SocketPair {
     return predicate();
 }
 
-void testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart()
-{
+void testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart() {
     SocketPair first = makeStreamSocketPair();
     SocketPair second = makeStreamSocketPair();
 
@@ -105,9 +99,9 @@ void testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart()
     auto monitor = NetlinkNetworkMonitorFactory::create(
         [&]() -> int {
             const std::size_t index =
-                providerCalls.fetch_add(
-                    1,
-                    std::memory_order_relaxed);
+                    providerCalls.fetch_add(
+                        1,
+                        std::memory_order_relaxed);
 
             if (index >= liveDescriptors.size()) {
                 throw std::runtime_error(
@@ -200,8 +194,7 @@ void testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart()
         "two claimed startup epochs should request two descriptors");
 }
 
-void testInvalidProvidedDescriptorFailsStartup()
-{
+void testInvalidProvidedDescriptorFailsStartup() {
     std::atomic<int> providerCalls{0};
 
     auto monitor = NetlinkNetworkMonitorFactory::create(
@@ -228,8 +221,7 @@ void testInvalidProvidedDescriptorFailsStartup()
     monitor->stop();
 }
 
-void testProviderExceptionRollsBackStartup()
-{
+void testProviderExceptionRollsBackStartup() {
     std::atomic<int> providerCalls{0};
 
     auto monitor = NetlinkNetworkMonitorFactory::create(
@@ -256,11 +248,9 @@ void testProviderExceptionRollsBackStartup()
 
     monitor->stop();
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testWorkerDeathRequiresStopAndAllowsFreshDescriptorRestart();
     testInvalidProvidedDescriptorFailsStartup();
     testProviderExceptionRollsBackStartup();

@@ -21,7 +21,6 @@
 #include <vector>
 
 namespace RSCGroup {
-
 using interop_contract::network_observation::CandidateClassification;
 using interop_contract::network_observation::CandidateStatus;
 
@@ -35,8 +34,10 @@ struct NeighborEvidenceKey {
     std::string ifname;
     int family = 0;
     std::string ip;
-    bool operator==(const NeighborEvidenceKey& o) const = default;
-    bool operator<(const NeighborEvidenceKey& o) const {
+
+    bool operator==(const NeighborEvidenceKey &o) const = default;
+
+    bool operator<(const NeighborEvidenceKey &o) const {
         if (ifname != o.ifname) return ifname < o.ifname;
         if (family != o.family) return family < o.family;
         return ip < o.ip;
@@ -47,8 +48,10 @@ struct NeighborEvidenceKey {
 struct FdbEvidenceKey {
     std::string ifname;
     std::string mac;
-    bool operator==(const FdbEvidenceKey& o) const = default;
-    bool operator<(const FdbEvidenceKey& o) const {
+
+    bool operator==(const FdbEvidenceKey &o) const = default;
+
+    bool operator<(const FdbEvidenceKey &o) const {
         if (ifname != o.ifname) return ifname < o.ifname;
         return mac < o.mac;
     }
@@ -65,12 +68,12 @@ struct RemoteCandidate {
 
     // Per-source evidence sets — source of truth for seenIn* booleans
     std::set<NeighborEvidenceKey> neighborEvidence;
-    std::set<FdbEvidenceKey>       fdbEvidence;
+    std::set<FdbEvidenceKey> fdbEvidence;
 
     // Derived booleans (computed from evidence sets)
     bool seenInNeigh = false;
-    bool seenInFdb   = false;
-    bool seenInLldp  = false;
+    bool seenInFdb = false;
+    bool seenInLldp = false;
 
     std::optional<std::string> remoteChassisId;
     std::optional<std::string> remotePortId;
@@ -81,5 +84,4 @@ struct RemoteCandidate {
     CandidateClassification classification = CandidateClassification::Unknown;
     CandidateStatus status = CandidateStatus::Provisional;
 };
-
 } // namespace RSCGroup

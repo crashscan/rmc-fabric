@@ -10,7 +10,6 @@
 #include <vector>
 
 namespace RSCGroup {
-
 class INetworkObservationModel;
 class LldpObserver;
 class ModelConfig;
@@ -40,38 +39,53 @@ struct MonitorCallbacks;
 class NetlinkLldpObservationRuntime final : public IObservationRuntime {
 public:
     explicit NetlinkLldpObservationRuntime(ModelConfig config);
+
     explicit NetlinkLldpObservationRuntime(std::unique_ptr<INetworkObservationModel> model);
+
     ~NetlinkLldpObservationRuntime() override;
-    NetlinkLldpObservationRuntime(const NetlinkLldpObservationRuntime&) = delete;
-    NetlinkLldpObservationRuntime& operator=(const NetlinkLldpObservationRuntime&) = delete;
+
+    NetlinkLldpObservationRuntime(const NetlinkLldpObservationRuntime &) = delete;
+
+    NetlinkLldpObservationRuntime &operator=(const NetlinkLldpObservationRuntime &) = delete;
 
     [[nodiscard]] bool start() override;
+
     void stop() override;
+
     [[nodiscard]] bool isRunning() const override;
+
     [[nodiscard]] ObservationRuntimeHealth health() const override;
 
     void setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy) override;
-    void setEventSink(IModelEventSink* sink) override;
+
+    void setEventSink(IModelEventSink *sink) override;
+
     void setClassifier(std::unique_ptr<ICandidateClassifier> classifier) override;
 
     [[nodiscard]] LocalNetworkSnapshot localSnapshot() const override;
+
     [[nodiscard]] std::vector<RemoteCandidate> remoteCandidates() const override;
-    [[nodiscard]] std::optional<RemoteCandidate> findCandidateByMac(const std::string& mac) const override;
+
+    [[nodiscard]] std::optional<RemoteCandidate> findCandidateByMac(const std::string &mac) const override;
 
     void age(std::chrono::steady_clock::time_point now) override;
+
     void tick(std::chrono::steady_clock::time_point now) override;
 
 private:
     [[nodiscard]] std::shared_ptr<LldpObserver> createLldpObserver();
+
     [[nodiscard]] MonitorCallbacks makeCallbacks();
+
     void superviseLldp(std::chrono::steady_clock::time_point now);
+
     void reassertLldpNeighbors(std::chrono::steady_clock::time_point now);
 
     /// Keepalive period, derived from ModelConfig::candidateAgeout.
     std::chrono::steady_clock::duration reassertInterval_{std::chrono::seconds{30}};
 
     std::unique_ptr<INetworkObservationModel> model_;
-    std::atomic<std::shared_ptr<LldpObserver>> lldpObserver_{nullptr};
+    std::atomic<std::shared_ptr<LldpObserver> > lldpObserver_{nullptr};
 
     // LLDP supervision state — touched only on the tick() thread.
     std::chrono::steady_clock::time_point lastReassert_{};
@@ -82,5 +96,4 @@ private:
     // Must remain last: destroyed first. Its callbacks capture `this`.
     std::unique_ptr<NetlinkNetworkMonitor> monitor_;
 };
-
 } // namespace RSCGroup

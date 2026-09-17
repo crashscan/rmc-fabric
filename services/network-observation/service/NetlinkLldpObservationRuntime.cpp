@@ -15,84 +15,72 @@
 #include <chrono>
 
 namespace RSCGroup {
-
 namespace {
+    constexpr auto kLldpRetryInterval = std::chrono::seconds{30};
+    constexpr auto kLldpProbeInterval = std::chrono::seconds{60};
 
-constexpr auto kLldpRetryInterval = std::chrono::seconds{30};
-constexpr auto kLldpProbeInterval = std::chrono::seconds{60};
-
-/// Keepalive period for LLDP re-assertion. Must stay below candidateAgeout
+    /// Keepalive period for LLDP re-assertion. Must stay below candidateAgeout
 /// (default 60s) so stable LLDP-only candidates are never aged out.
-std::chrono::steady_clock::duration deriveReassertInterval(std::chrono::seconds candidateAgeout)
-{
-    using namespace std::chrono;
-    return std::clamp(candidateAgeout / 2, seconds{10}, seconds{300});
-}
-
-NeighborReachability nudToReachability(unsigned short nudState)
-{
-    using enum NeighborReachability;
-    switch (nudState) {
-        case NUD_INCOMPLETE: return Incomplete;
-        case NUD_REACHABLE: return Reachable;
-        case NUD_STALE: return Stale;
-        case NUD_DELAY: return Delay;
-        case NUD_PROBE: return Probe;
-        case NUD_FAILED: return Failed;
-        case NUD_NOARP: return NoArp;
-        case NUD_PERMANENT: return Permanent;
-        default: return Unknown;
+    std::chrono::steady_clock::duration deriveReassertInterval(std::chrono::seconds candidateAgeout) {
+        using namespace std::chrono;
+        return std::clamp(candidateAgeout / 2, seconds{10}, seconds{300});
     }
-}
 
-FdbEntryKind fdbToEntryKind(const FdbEvent& e)
-{
-    if (e.local) return FdbEntryKind::Local;
-    if (e.permanent) return FdbEntryKind::Static;
-    return FdbEntryKind::Dynamic;
-}
+    NeighborReachability nudToReachability(unsigned short nudState) {
+        using enum NeighborReachability;
+        switch (nudState) {
+            case NUD_INCOMPLETE: return Incomplete;
+            case NUD_REACHABLE: return Reachable;
+            case NUD_STALE: return Stale;
+            case NUD_DELAY: return Delay;
+            case NUD_PROBE: return Probe;
+            case NUD_FAILED: return Failed;
+            case NUD_NOARP: return NoArp;
+            case NUD_PERMANENT: return Permanent;
+            default: return Unknown;
+        }
+    }
 
-ObservationEvent toObsEvent(bool present)
-{
-    return present ? ObservationEvent::Present : ObservationEvent::Removed;
-}
+    FdbEntryKind fdbToEntryKind(const FdbEvent &e) {
+        if (e.local) return FdbEntryKind::Local;
+        if (e.permanent) return FdbEntryKind::Static;
+        return FdbEntryKind::Dynamic;
+    }
 
-std::string makeCidr(const InterfaceIpEvent& e)
-{
-    return e.address + "/" + std::to_string(static_cast<int>(e.prefixLen));
-}
+    ObservationEvent toObsEvent(bool present) {
+        return present ? ObservationEvent::Present : ObservationEvent::Removed;
+    }
 
+    std::string makeCidr(const InterfaceIpEvent &e) {
+        return e.address + "/" + std::to_string(static_cast<int>(e.prefixLen));
+    }
 } // namespace
 
 NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(ModelConfig config)
     : reassertInterval_(deriveReassertInterval(config.candidateAgeout))
-    , model_(createNetworkObservationModel(std::move(config)))
-{
+      , model_(createNetworkObservationModel(std::move(config))) {
 }
 
 NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(std::unique_ptr<INetworkObservationModel> model)
-    : model_(std::move(model))
-{
+    : model_(std::move(model)) {
 }
 
 NetlinkLldpObservationRuntime::~NetlinkLldpObservationRuntime() = default;
 
-std::shared_ptr<LldpObserver> NetlinkLldpObservationRuntime::createLldpObserver()
-{
+std::shared_ptr<LldpObserver> NetlinkLldpObservationRuntime::createLldpObserver() {
     auto source = std::make_unique<LldpdSource>(
         LldpSourceConfig{},
-        [this](const LldpObservation& obs) {
+        [this](const LldpObservation &obs) {
             model_->onLldpObservation(obs);
         });
     return std::make_shared<LldpObserver>(std::move(source));
 }
 
-MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks()
-{
+MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks() {
     MonitorCallbacks cb;
     auto now = [] { return std::chrono::steady_clock::now(); };
 
-    cb.onLinkChanged = [this, now](const LinkEvent& e) {
+    cb.onLinkChanged = [this, now](const LinkEvent &e) {
         LinkObservation obs;
         obs.observedAt = now();
         obs.kind = ObservationKind::Link;
@@ -117,7 +105,7 @@ MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks()
         }
     };
 
-    cb.onInterfaceIpChanged = [this, now](const InterfaceIpEvent& e) {
+    cb.onInterfaceIpChanged = [this, now](const InterfaceIpEvent &e) {
         AddressObservation obs;
         obs.observedAt = now();
         obs.kind = ObservationKind::Address;
@@ -128,7 +116,7 @@ MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks()
         model_->onAddressObservation(obs);
     };
 
-    cb.onFdbChanged = [this, now](const FdbEvent& e) {
+    cb.onFdbChanged = [this, now](const FdbEvent &e) {
         FdbObservation obs;
         obs.observedAt = now();
         obs.kind = ObservationKind::Fdb;
@@ -139,7 +127,7 @@ MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks()
         model_->onFdbObservation(obs);
     };
 
-    cb.onNeighborChanged = [this, now](const NeighborEvent& e) {
+    cb.onNeighborChanged = [this, now](const NeighborEvent &e) {
         NeighborObservation obs;
         obs.observedAt = now();
         obs.kind = ObservationKind::Neighbor;
@@ -155,8 +143,7 @@ MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks()
     return cb;
 }
 
-bool NetlinkLldpObservationRuntime::start()
-{
+bool NetlinkLldpObservationRuntime::start() {
     model_->prepareForRestart();
 
     if (auto observer = createLldpObserver(); observer->start()) {
@@ -178,8 +165,7 @@ bool NetlinkLldpObservationRuntime::start()
     return true;
 }
 
-void NetlinkLldpObservationRuntime::stop()
-{
+void NetlinkLldpObservationRuntime::stop() {
     // Ordering: stop netlink monitor first (its callbacks may call into LLDP),
     // then drain LLDP, then detach the event sink.  This ensures no
     // IModelEventSink callback fires after stop() returns.
@@ -190,20 +176,18 @@ void NetlinkLldpObservationRuntime::stop()
     }
     if (auto observer = lldpObserver_.load()) {
         lldpObserver_.store(nullptr);
-        observer->stop();  // drains in-flight LLDP callbacks
+        observer->stop(); // drains in-flight LLDP callbacks
     }
 
     // Detach event sink only after all producers have drained.
     model_->setEventSink(nullptr);
 }
 
-bool NetlinkLldpObservationRuntime::isRunning() const
-{
+bool NetlinkLldpObservationRuntime::isRunning() const {
     return monitor_ && monitor_->isRunning();
 }
 
-ObservationRuntimeHealth NetlinkLldpObservationRuntime::health() const
-{
+ObservationRuntimeHealth NetlinkLldpObservationRuntime::health() const {
     ObservationRuntimeHealth result;
     result.running = monitor_ && monitor_->isRunning();
     auto observer = lldpObserver_.load();
@@ -211,49 +195,40 @@ ObservationRuntimeHealth NetlinkLldpObservationRuntime::health() const
     return result;
 }
 
-void NetlinkLldpObservationRuntime::setEventSink(IModelEventSink* sink)
-{
+void NetlinkLldpObservationRuntime::setEventSink(IModelEventSink *sink) {
     model_->setEventSink(sink);
 }
 
-void NetlinkLldpObservationRuntime::setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy)
-{
+void NetlinkLldpObservationRuntime::setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy) {
     model_->setInterfacePolicy(std::move(policy));
 }
 
-void NetlinkLldpObservationRuntime::setClassifier(std::unique_ptr<ICandidateClassifier> classifier)
-{
+void NetlinkLldpObservationRuntime::setClassifier(std::unique_ptr<ICandidateClassifier> classifier) {
     model_->setClassifier(std::move(classifier));
 }
 
-LocalNetworkSnapshot NetlinkLldpObservationRuntime::localSnapshot() const
-{
+LocalNetworkSnapshot NetlinkLldpObservationRuntime::localSnapshot() const {
     return model_->localSnapshot();
 }
 
-std::vector<RemoteCandidate> NetlinkLldpObservationRuntime::remoteCandidates() const
-{
+std::vector<RemoteCandidate> NetlinkLldpObservationRuntime::remoteCandidates() const {
     return model_->remoteCandidates();
 }
 
-std::optional<RemoteCandidate> NetlinkLldpObservationRuntime::findCandidateByMac(const std::string& mac) const
-{
+std::optional<RemoteCandidate> NetlinkLldpObservationRuntime::findCandidateByMac(const std::string &mac) const {
     return model_->findCandidateByMac(mac);
 }
 
-void NetlinkLldpObservationRuntime::age(std::chrono::steady_clock::time_point now)
-{
+void NetlinkLldpObservationRuntime::age(std::chrono::steady_clock::time_point now) {
     model_->age(now);
 }
 
-void NetlinkLldpObservationRuntime::tick(std::chrono::steady_clock::time_point now)
-{
+void NetlinkLldpObservationRuntime::tick(std::chrono::steady_clock::time_point now) {
     superviseLldp(now);
     reassertLldpNeighbors(now);
 }
 
-void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::time_point now)
-{
+void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::time_point now) {
     auto observer = lldpObserver_.load();
 
     if (observer && !observer->isRunning()) {
@@ -271,7 +246,7 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
             lastLldpProbe_ = now;
             if (!observer->isBackendAlive()) {
                 LOG(WARNING) << "LLDP backend unreachable — reconnecting";
-                observer->refreshAll();  // on failure source stops; dropped next tick
+                observer->refreshAll(); // on failure source stops; dropped next tick
             }
         }
         return;
@@ -297,8 +272,7 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
     lldpRetryCount_ = 0;
 }
 
-void NetlinkLldpObservationRuntime::reassertLldpNeighbors(std::chrono::steady_clock::time_point now)
-{
+void NetlinkLldpObservationRuntime::reassertLldpNeighbors(std::chrono::steady_clock::time_point now) {
     auto observer = lldpObserver_.load();
     if (!observer || !observer->isRunning()) {
         return;
@@ -309,5 +283,4 @@ void NetlinkLldpObservationRuntime::reassertLldpNeighbors(std::chrono::steady_cl
     lastReassert_ = now;
     observer->reassertAll();
 }
-
 } // namespace RSCGroup

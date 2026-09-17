@@ -16,7 +16,6 @@
 #include <vector>
 
 namespace RSCGroup {
-
 class IInterfacePolicy;
 class ICandidateClassifier;
 
@@ -43,24 +42,31 @@ struct ModelEvent {
 class IModelEventSink {
 public:
     virtual ~IModelEventSink() = default;
-    virtual void onModelEvent(const ModelEvent&) = 0;
+
+    virtual void onModelEvent(const ModelEvent &) = 0;
 };
 
 class INetworkObservationModel {
 public:
     virtual ~INetworkObservationModel() = default;
 
-    virtual void setEventSink(IModelEventSink* sink) = 0;
+    virtual void setEventSink(IModelEventSink *sink) = 0;
 
-    virtual void onLinkObservation(const LinkObservation& obs) = 0;
-    virtual void onAddressObservation(const AddressObservation& obs) = 0;
-    virtual void onNeighborObservation(const NeighborObservation& obs) = 0;
-    virtual void onFdbObservation(const FdbObservation& obs) = 0;
-    virtual void onLldpObservation(const LldpObservation& obs) = 0;
+    virtual void onLinkObservation(const LinkObservation &obs) = 0;
+
+    virtual void onAddressObservation(const AddressObservation &obs) = 0;
+
+    virtual void onNeighborObservation(const NeighborObservation &obs) = 0;
+
+    virtual void onFdbObservation(const FdbObservation &obs) = 0;
+
+    virtual void onLldpObservation(const LldpObservation &obs) = 0;
 
     virtual LocalNetworkSnapshot localSnapshot() const = 0;
+
     virtual std::vector<RemoteCandidate> remoteCandidates() const = 0;
-    virtual std::optional<RemoteCandidate> findCandidateByMac(const std::string& mac) const = 0;
+
+    virtual std::optional<RemoteCandidate> findCandidateByMac(const std::string &mac) const = 0;
 
     virtual void age(std::chrono::steady_clock::time_point now) = 0;
 
@@ -77,7 +83,7 @@ public:
     virtual void markLive() = 0;
 
     virtual void setInterfacePolicy(std::unique_ptr<IInterfacePolicy> policy) = 0;
+
     virtual void setClassifier(std::unique_ptr<ICandidateClassifier> classifier) = 0;
 };
-
 } // namespace RSCGroup

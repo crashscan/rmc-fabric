@@ -10,29 +10,24 @@
 
 namespace test_support {
 namespace {
-
-template <typename T>
-T requireIntegral(const Json::Value& value, const char* typeName)
-{
-    if (!value.isIntegral()) {
-        throw std::runtime_error(std::string("fixture value is not integral for type ") + typeName);
+    template<typename T>
+    T requireIntegral(const Json::Value &value, const char *typeName) {
+        if (!value.isIntegral()) {
+            throw std::runtime_error(std::string("fixture value is not integral for type ") + typeName);
+        }
+        return static_cast<T>(value.asLargestInt());
     }
-    return static_cast<T>(value.asLargestInt());
-}
 
-template <>
-std::uint64_t requireIntegral<std::uint64_t>(const Json::Value& value, const char* typeName)
-{
-    if (!value.isUInt64() && !value.isUInt() && !value.isIntegral()) {
-        throw std::runtime_error(std::string("fixture value is not uint64 for type ") + typeName);
+    template<>
+    std::uint64_t requireIntegral<std::uint64_t>(const Json::Value &value, const char *typeName) {
+        if (!value.isUInt64() && !value.isUInt() && !value.isIntegral()) {
+            throw std::runtime_error(std::string("fixture value is not uint64 for type ") + typeName);
+        }
+        return value.asUInt64();
     }
-    return value.asUInt64();
-}
-
 } // namespace
 
-Json::Value loadJsonFile(const std::string& path)
-{
+Json::Value loadJsonFile(const std::string &path) {
     std::ifstream in(path);
     if (!in) {
         throw std::runtime_error("failed to open fixture: " + path);
@@ -47,15 +42,14 @@ Json::Value loadJsonFile(const std::string& path)
     return root;
 }
 
-DBus::Variant variantFromJson(const Json::Value& value)
-{
+DBus::Variant variantFromJson(const Json::Value &value) {
     if (!value.isObject() || value.size() != 1U) {
         throw std::runtime_error("fixture variant must be a single-key object");
     }
 
     const auto members = value.getMemberNames();
-    const std::string& type = members.front();
-    const Json::Value& payload = value[type];
+    const std::string &type = members.front();
+    const Json::Value &payload = value[type];
 
     if (type == "bool") {
         if (!payload.isBool()) {
@@ -87,7 +81,7 @@ DBus::Variant variantFromJson(const Json::Value& value)
         }
         std::vector<DBus::Variant> out;
         out.reserve(payload.size());
-        for (const auto& item : payload) {
+        for (const auto &item: payload) {
             out.push_back(variantFromJson(item));
         }
         return DBus::Variant(out);
@@ -99,34 +93,31 @@ DBus::Variant variantFromJson(const Json::Value& value)
     throw std::runtime_error("unsupported fixture variant type: " + type);
 }
 
-VariantMap variantMapFromJsonObject(const Json::Value& value)
-{
+VariantMap variantMapFromJsonObject(const Json::Value &value) {
     if (!value.isObject()) {
         throw std::runtime_error("fixture map payload must be object");
     }
 
     VariantMap out;
-    for (const auto& name : value.getMemberNames()) {
+    for (const auto &name: value.getMemberNames()) {
         out.emplace(name, variantFromJson(value[name]));
     }
     return out;
 }
 
-NestedVariantMap nestedVariantMapFromJsonObject(const Json::Value& value)
-{
+NestedVariantMap nestedVariantMapFromJsonObject(const Json::Value &value) {
     if (!value.isObject()) {
         throw std::runtime_error("fixture nested map payload must be object");
     }
 
     NestedVariantMap out;
-    for (const auto& name : value.getMemberNames()) {
+    for (const auto &name: value.getMemberNames()) {
         out.emplace(name, variantMapFromJsonObject(value[name]));
     }
     return out;
 }
 
-Json::Value jsonFromVariant(const DBus::Variant& value)
-{
+Json::Value jsonFromVariant(const DBus::Variant &value) {
     Json::Value out(Json::objectValue);
     switch (value.type()) {
         case DBus::DataType::BOOLEAN:
@@ -151,12 +142,12 @@ Json::Value jsonFromVariant(const DBus::Variant& value)
             Json::Value items(Json::arrayValue);
             auto copy = value;
             try {
-                for (const auto& item : copy.to_vector<DBus::Variant>()) {
+                for (const auto &item: copy.to_vector<DBus::Variant>()) {
                     items.append(jsonFromVariant(item));
                 }
-            } catch (const std::exception&) {
+            } catch (const std::exception &) {
                 auto stringCopy = value;
-                for (const auto& item : stringCopy.to_vector<std::string>()) {
+                for (const auto &item: stringCopy.to_vector<std::string>()) {
                     items.append(jsonFromVariant(DBus::Variant(item)));
                 }
             }
@@ -169,7 +160,7 @@ Json::Value jsonFromVariant(const DBus::Variant& value)
         default: {
             Json::Value map(Json::objectValue);
             auto copy = value;
-            for (const auto& [key, nested] : copy.to_map<std::string, DBus::Variant>()) {
+            for (const auto &[key, nested]: copy.to_map<std::string, DBus::Variant>()) {
                 map[key] = jsonFromVariant(nested);
             }
             out["map"] = std::move(map);
@@ -178,22 +169,19 @@ Json::Value jsonFromVariant(const DBus::Variant& value)
     }
 }
 
-Json::Value jsonFromVariantMap(const VariantMap& value)
-{
+Json::Value jsonFromVariantMap(const VariantMap &value) {
     Json::Value out(Json::objectValue);
-    for (const auto& [key, item] : value) {
+    for (const auto &[key, item]: value) {
         out[key] = jsonFromVariant(item);
     }
     return out;
 }
 
-Json::Value jsonFromNestedVariantMap(const NestedVariantMap& value)
-{
+Json::Value jsonFromNestedVariantMap(const NestedVariantMap &value) {
     Json::Value out(Json::objectValue);
-    for (const auto& [key, item] : value) {
+    for (const auto &[key, item]: value) {
         out[key] = jsonFromVariantMap(item);
     }
     return out;
 }
-
 } // namespace test_support

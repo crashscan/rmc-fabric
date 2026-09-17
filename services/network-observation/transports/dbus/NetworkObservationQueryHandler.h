@@ -10,7 +10,6 @@
 #include <vector>
 
 namespace RSCGroup {
-
 class IObservationQueryService;
 
 template<typename T>
@@ -31,21 +30,27 @@ class ServiceBinding;
  */
 class NetworkObservationQueryHandler final {
 public:
-    explicit NetworkObservationQueryHandler(ServiceBinding<IObservationQueryService>& binding) noexcept;
-    NetworkObservationQueryHandler(const NetworkObservationQueryHandler&) = delete;
-    NetworkObservationQueryHandler& operator=(const NetworkObservationQueryHandler&) = delete;
+    explicit NetworkObservationQueryHandler(ServiceBinding<IObservationQueryService> &binding) noexcept;
+
+    NetworkObservationQueryHandler(const NetworkObservationQueryHandler &) = delete;
+
+    NetworkObservationQueryHandler &operator=(const NetworkObservationQueryHandler &) = delete;
 
     [[nodiscard]] std::map<std::string, DBus::Variant> getLocalSnapshot();
+
     [[nodiscard]] std::map<std::string, DBus::Variant> getInterface(std::string ifname);
+
     [[nodiscard]] std::vector<std::string> getRemoteCandidateMacs();
+
     [[nodiscard]] std::map<std::string, DBus::Variant> getCandidateByMac(std::string mac);
-    [[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant>> getIssues();
+
+    [[nodiscard]] std::map<std::string, std::map<std::string, DBus::Variant> > getIssues();
 
     [[nodiscard]] bool getReady();
+
     [[nodiscard]] std::string getPhase();
 
 private:
-    ServiceBinding<IObservationQueryService>& binding_;
+    ServiceBinding<IObservationQueryService> &binding_;
 };
-
 } // namespace RSCGroup

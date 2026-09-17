@@ -17,20 +17,19 @@
 #include <chrono>
 #include <memory>
 
-DEFINE_string(transport,        "dbus",   "Transport: dbus, stdout");
+DEFINE_string(transport, "dbus", "Transport: dbus, stdout");
 DEFINE_string(transport_config, "system", "Transport-specific config (e.g. D-Bus bus type)");
-DEFINE_int32(reconcile_ms,      60000,    "Periodic full-refresh interval in milliseconds");
-DEFINE_int32(min_refresh_ms,    1000,     "Minimum interval between forced refreshes (coalescing window)");
+DEFINE_int32(reconcile_ms, 60000, "Periodic full-refresh interval in milliseconds");
+DEFINE_int32(min_refresh_ms, 1000, "Minimum interval between forced refreshes (coalescing window)");
 
 // Source paths (overridable for sandbox testing)
 DEFINE_string(device_meta_path, "/data/info/device-meta.json", "Device metadata JSON");
-DEFINE_string(node_name_path, "/data/info/node-name",          "Node name file");
-DEFINE_string(firmware_path,  "/etc/rmc/firmware",             "Firmware version file");
-DEFINE_string(uuid_path,      "/etc/rmc/uuid",                 "Device UUID file");
-DEFINE_string(software_path,  "/etc/rmc/software",             "Software version file");
+DEFINE_string(node_name_path, "/data/info/node-name", "Node name file");
+DEFINE_string(firmware_path, "/etc/rmc/firmware", "Firmware version file");
+DEFINE_string(uuid_path, "/etc/rmc/uuid", "Device UUID file");
+DEFINE_string(software_path, "/etc/rmc/software", "Software version file");
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     gflags::SetUsageMessage("Inventory Agent Daemon");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
@@ -42,7 +41,7 @@ int main(int argc, char* argv[])
     auto manager = std::make_shared<DefaultInventoryManager>();
 
     InventoryService::Settings settings;
-    settings.reconcileInterval  = std::chrono::milliseconds(cfg.getInt("reconcile_ms", 60000));
+    settings.reconcileInterval = std::chrono::milliseconds(cfg.getInt("reconcile_ms", 60000));
     settings.minRefreshInterval = std::chrono::milliseconds(cfg.getInt("min_refresh_ms", 1000));
 
     InventoryService service(manager, settings);
@@ -69,7 +68,7 @@ int main(int argc, char* argv[])
             "software-file", /*required=*/false,
             cfg.getString("software_path", "/etc/rmc/software"),
             std::string(FIELD_SOFTWARE_VERSION)));
-    } catch (const std::exception& e) {
+    } catch (const std::exception &e) {
         LOG(ERROR) << "Source registration failed: " << e.what();
         return 1;
     }
@@ -82,8 +81,8 @@ int main(int argc, char* argv[])
     if (transportName == "dbus") {
         dispatcher = DBus::StandaloneDispatcher::create();
         const auto busType = transportConfig == "session"
-            ? DBus::BusType::SESSION
-            : DBus::BusType::SYSTEM;
+                                 ? DBus::BusType::SESSION
+                                 : DBus::BusType::SYSTEM;
         connection = dispatcher->create_connection(busType);
     }
 

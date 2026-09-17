@@ -7,10 +7,8 @@
 #include <string>
 
 namespace interop_contract::inventory {
-
-[[nodiscard]] inline std::optional<FieldValue> get_field_value(const InventorySnapshot& snapshot,
-                                                               const std::string& field_name)
-{
+[[nodiscard]] inline std::optional<FieldValue> get_field_value(const InventorySnapshot &snapshot,
+                                                               const std::string &field_name) {
     if (const auto it = snapshot.fields.find(field_name); it != snapshot.fields.end()) {
         return it->second;
     }
@@ -31,13 +29,11 @@ namespace interop_contract::inventory {
     return std::nullopt;
 }
 
-[[nodiscard]] inline InventoryFields make_single_field_map(const InventorySnapshot& snapshot,
-                                                           const std::string& field_name)
-{
+[[nodiscard]] inline InventoryFields make_single_field_map(const InventorySnapshot &snapshot,
+                                                           const std::string &field_name) {
     if (const auto value = get_field_value(snapshot, field_name); value) {
         return {{field_name, value.value()}};
     }
     return {};
 }
-
 } // namespace interop_contract::inventory

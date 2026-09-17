@@ -73,10 +73,10 @@ debt, not as service-specific design freedom.
 
 ## Internal libraries
 
-| Target | Linkage | Purpose |
-|---|---|---|
-| `netlink-monitor` | Static, internal | Raw netlink event monitor for links, addresses, FDB entries, and neighbors |
-| `lldp-observer` | Static, internal | LLDP ingestion and callback-drain handling |
+| Target              | Linkage          | Purpose                                                                       |
+|---------------------|------------------|-------------------------------------------------------------------------------|
+| `netlink-monitor`   | Static, internal | Raw netlink event monitor for links, addresses, FDB entries, and neighbors    |
+| `lldp-observer`     | Static, internal | LLDP ingestion and callback-drain handling                                    |
 | `observation-model` | Static, internal | Source-agnostic model with filtering, classification, and candidate inference |
 
 These targets are linked into `network-observationd` through
@@ -86,7 +86,8 @@ as independent runtime libraries.
 
 ## 1. Raw Netlink Monitor
 
-The `netlink-monitor` library provides direct access to Linux netlink events — links, IP addresses, bridge FDB entries, and ARP/NDP neighbors.
+The `netlink-monitor` library provides direct access to Linux netlink events — links, IP addresses, bridge FDB entries,
+and ARP/NDP neighbors.
 
 ### Basic Usage
 
@@ -163,27 +164,27 @@ NetlinkNetworkMonitor monitor(callbacks, watchedInterfaces);
 
 ### LinkEvent Fields
 
-| Field | Description |
-|---|---|
-| `ifindex` | Kernel interface index |
-| `ifname` | Interface name (e.g. `"eth0"`, `"br-lan"`) |
-| `mac` | Hardware MAC address |
-| `adminUp` | Interface is administratively up |
-| `running` | Interface has carrier/running |
-| `operState` | RFC 2863 operstate (0=unknown, 6=up) |
-| `masterIfindex` | Bridge/bond master ifindex if enslaved |
-| `masterIfname` | Bridge/bond master name (e.g. `"br-lan"`) |
+| Field           | Description                                |
+|-----------------|--------------------------------------------|
+| `ifindex`       | Kernel interface index                     |
+| `ifname`        | Interface name (e.g. `"eth0"`, `"br-lan"`) |
+| `mac`           | Hardware MAC address                       |
+| `adminUp`       | Interface is administratively up           |
+| `running`       | Interface has carrier/running              |
+| `operState`     | RFC 2863 operstate (0=unknown, 6=up)       |
+| `masterIfindex` | Bridge/bond master ifindex if enslaved     |
+| `masterIfname`  | Bridge/bond master name (e.g. `"br-lan"`)  |
 
 ### NeighborEvent Fields
 
-| Field | Description |
-|---|---|
-| `ifname` | Interface the neighbor was learned on |
-| `mac` | MAC address |
-| `family` | `AF_INET` or `AF_INET6` |
-| `ip` | IP address |
+| Field      | Description                                             |
+|------------|---------------------------------------------------------|
+| `ifname`   | Interface the neighbor was learned on                   |
+| `mac`      | MAC address                                             |
+| `family`   | `AF_INET` or `AF_INET6`                                 |
+| `ip`       | IP address                                              |
 | `nudState` | Raw kernel NUD state (0x02=REACHABLE, 0x04=STALE, etc.) |
-| `present` | `true` if learned, `false` if removed |
+| `present`  | `true` if learned, `false` if removed                   |
 
 ---
 
@@ -250,19 +251,19 @@ adapter.stop();
 
 ### ModelConfig Fields
 
-| Field | Type | Default | Description |
-|---|---|---|---|
-| `skipNullMac` | `bool` | `true` | Reject MAC `00:00:00:00:00:00` (loopback placeholder) |
-| `skipMulticastMac` | `bool` | `true` | Reject MACs with multicast bit set: `01:xx:xx` / `33:33:xx` |
-| `skipMulticastIPv4` | `bool` | `true` | Reject IPv4 multicast range `224.0.0.0/4` |
-| `skipMulticastIPv6` | `bool` | `true` | Reject IPv6 multicast range `ff00::/8` |
-| `skipIeeeReservedMac` | `bool` | `true` | Reject IEEE reserved MAC range `01:80:c2:xx:xx:xx` |
-| `skipLoopbackInterface` | `bool` | `true` | Reject observations on loopback interface `lo` |
-| `emitDeviceIfIpOnly` | `bool` | `false` | If `true`, emit device events for IP-only entries with no FDB |
-| `candidateAgeout` | `seconds` | `60` | Interval after which a candidate is marked `Aged` |
-| `candidateExpire` | `seconds` | `300` | Interval after which a candidate is marked `Expired` |
-| `interfacePolicy` | `unique_ptr<IInterfacePolicy>` | `null` | Custom interface filter policy; defaults to `DefaultInterfacePolicy` |
-| `classifierConfig` | `ClassifierFactoryConfig` | `RuleBased` | Classifier kind selection (`RuleBased` or `Scoring`) |
+| Field                   | Type                           | Default     | Description                                                          |
+|-------------------------|--------------------------------|-------------|----------------------------------------------------------------------|
+| `skipNullMac`           | `bool`                         | `true`      | Reject MAC `00:00:00:00:00:00` (loopback placeholder)                |
+| `skipMulticastMac`      | `bool`                         | `true`      | Reject MACs with multicast bit set: `01:xx:xx` / `33:33:xx`          |
+| `skipMulticastIPv4`     | `bool`                         | `true`      | Reject IPv4 multicast range `224.0.0.0/4`                            |
+| `skipMulticastIPv6`     | `bool`                         | `true`      | Reject IPv6 multicast range `ff00::/8`                               |
+| `skipIeeeReservedMac`   | `bool`                         | `true`      | Reject IEEE reserved MAC range `01:80:c2:xx:xx:xx`                   |
+| `skipLoopbackInterface` | `bool`                         | `true`      | Reject observations on loopback interface `lo`                       |
+| `emitDeviceIfIpOnly`    | `bool`                         | `false`     | If `true`, emit device events for IP-only entries with no FDB        |
+| `candidateAgeout`       | `seconds`                      | `60`        | Interval after which a candidate is marked `Aged`                    |
+| `candidateExpire`       | `seconds`                      | `300`       | Interval after which a candidate is marked `Expired`                 |
+| `interfacePolicy`       | `unique_ptr<IInterfacePolicy>` | `null`      | Custom interface filter policy; defaults to `DefaultInterfacePolicy` |
+| `classifierConfig`      | `ClassifierFactoryConfig`      | `RuleBased` | Classifier kind selection (`RuleBased` or `Scoring`)                 |
 
 ### Advanced — Custom Model Implementation
 
@@ -307,31 +308,31 @@ NetlinkLldpObservationRuntime adapter(std::move(config));
 
 ### RemoteCandidate Fields
 
-| Field | Description |
-|---|---|
-| `mac` | MAC address (primary key) |
-| `ipv4` | Set of IPv4 addresses seen in neighbor entries |
-| `ipv6` | Set of IPv6 addresses seen in neighbor entries |
-| `bridgePort` | Bridge port from FDB (e.g. `"eth1"`) |
-| `neighborIfaces` | Interfaces where this MAC was seen in ARP/NDP |
-| `seenInFdb` | Evidence from bridge FDB |
-| `seenInNeigh` | Evidence from ARP/NDP neighbor table |
-| `seenInLldp` | Evidence from LLDP (future) |
-| `classification` | `Artifact`, `LocalSelf`, `WeakCandidate`, `RemoteEndpoint`, `GatewayLike`, `TopologyPeer`, `Unknown` |
-| `status` | `Provisional`, `Confirmed`, `Aged`, `Expired`, `Removed` |
-| `firstSeen` / `lastSeen` | Timestamps |
+| Field                    | Description                                                                                          |
+|--------------------------|------------------------------------------------------------------------------------------------------|
+| `mac`                    | MAC address (primary key)                                                                            |
+| `ipv4`                   | Set of IPv4 addresses seen in neighbor entries                                                       |
+| `ipv6`                   | Set of IPv6 addresses seen in neighbor entries                                                       |
+| `bridgePort`             | Bridge port from FDB (e.g. `"eth1"`)                                                                 |
+| `neighborIfaces`         | Interfaces where this MAC was seen in ARP/NDP                                                        |
+| `seenInFdb`              | Evidence from bridge FDB                                                                             |
+| `seenInNeigh`            | Evidence from ARP/NDP neighbor table                                                                 |
+| `seenInLldp`             | Evidence from LLDP (future)                                                                          |
+| `classification`         | `Artifact`, `LocalSelf`, `WeakCandidate`, `RemoteEndpoint`, `GatewayLike`, `TopologyPeer`, `Unknown` |
+| `status`                 | `Provisional`, `Confirmed`, `Aged`, `Expired`, `Removed`                                             |
+| `firstSeen` / `lastSeen` | Timestamps                                                                                           |
 
 ### CandidateClassification
 
-| Value | Meaning |
-|---|---|
-| `Artifact` | Multicast, control-plane MAC — not a device |
-| `LocalSelf` | MAC or IP belongs to a local interface |
-| `WeakCandidate` | Insufficient evidence to confidently classify |
+| Value            | Meaning                                       |
+|------------------|-----------------------------------------------|
+| `Artifact`       | Multicast, control-plane MAC — not a device   |
+| `LocalSelf`      | MAC or IP belongs to a local interface        |
+| `WeakCandidate`  | Insufficient evidence to confidently classify |
 | `RemoteEndpoint` | Neighbor + FDB evidence, behind a bridge port |
-| `GatewayLike` | Also matches default gateway IP |
-| `TopologyPeer` | LLDP-confirmed physical peer |
-| `Unknown` | Not yet classified |
+| `GatewayLike`    | Also matches default gateway IP               |
+| `TopologyPeer`   | LLDP-confirmed physical peer                  |
+| `Unknown`        | Not yet classified                            |
 
 ### Build
 
@@ -346,15 +347,15 @@ target_link_libraries(your_app netlink-monitor observation-model)
 
 With default `ModelConfig`, the following are automatically rejected:
 
-| Artifact Type | Examples |
-|---|---|
-| Null MAC | `00:00:00:00:00:00` |
-| Loopback | `127.0.0.1`, `::1` on `lo` |
-| IPv4 multicast | `224.0.0.251` (mDNS), `224.0.0.1` (All-Hosts) |
-| IPv6 multicast | `ff02::1`, `ff02::2`, `ff02::16`, `ff02::fb`, `ff02::1:ffxx:xxxx` |
-| Multicast MACs | `01:00:5e:xx:xx:xx` (IPv4-mapped), `33:33:xx:xx:xx:xx` (IPv6-mapped) |
-| IEEE reserved | `01:80:c2:00:00:00` (STP), `01:80:c2:00:00:03` (STP), `01:80:c2:00:00:0e` (LLDP) |
-| Local MACs/IPs | Any MAC or IP belonging to the host's own interfaces |
+| Artifact Type  | Examples                                                                         |
+|----------------|----------------------------------------------------------------------------------|
+| Null MAC       | `00:00:00:00:00:00`                                                              |
+| Loopback       | `127.0.0.1`, `::1` on `lo`                                                       |
+| IPv4 multicast | `224.0.0.251` (mDNS), `224.0.0.1` (All-Hosts)                                    |
+| IPv6 multicast | `ff02::1`, `ff02::2`, `ff02::16`, `ff02::fb`, `ff02::1:ffxx:xxxx`                |
+| Multicast MACs | `01:00:5e:xx:xx:xx` (IPv4-mapped), `33:33:xx:xx:xx:xx` (IPv6-mapped)             |
+| IEEE reserved  | `01:80:c2:00:00:00` (STP), `01:80:c2:00:00:03` (STP), `01:80:c2:00:00:0e` (LLDP) |
+| Local MACs/IPs | Any MAC or IP belonging to the host's own interfaces                             |
 
 ## Deployment: Buildroot + SystemV + Monit
 
@@ -525,7 +526,8 @@ A system-bus policy file must be installed to allow the service to own its bus n
 /etc/dbus-1/system.d/org.rsc.NetworkObservation.conf
 ```
 
-This deployment does **not** require D-Bus activation. The daemon is expected to be started explicitly by Monit, not lazily by the bus.
+This deployment does **not** require D-Bus activation. The daemon is expected to be started explicitly by Monit, not
+lazily by the bus.
 
 ### Why this model
 

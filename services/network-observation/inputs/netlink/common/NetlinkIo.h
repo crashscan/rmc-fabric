@@ -13,7 +13,6 @@
 #include <span>
 
 namespace RSCGroup {
-
 /**
  * Owns or borrows a NETLINK_ROUTE socket.
  *
@@ -51,29 +50,28 @@ public:
 
     ~NetlinkRouteSocket() = default;
 
-    NetlinkRouteSocket(const NetlinkRouteSocket&) = delete;
-    NetlinkRouteSocket& operator=(
-        const NetlinkRouteSocket&) = delete;
+    NetlinkRouteSocket(const NetlinkRouteSocket &) = delete;
+
+    NetlinkRouteSocket &operator=(
+        const NetlinkRouteSocket &) = delete;
 
     NetlinkRouteSocket(
-        NetlinkRouteSocket&& other) noexcept;
+        NetlinkRouteSocket &&other) noexcept;
 
-    NetlinkRouteSocket& operator=(
-        NetlinkRouteSocket&& other) noexcept;
+    NetlinkRouteSocket &operator=(
+        NetlinkRouteSocket &&other) noexcept;
 
-    [[nodiscard]] int fd() const noexcept
-    {
+    [[nodiscard]] int fd() const noexcept {
         return fd_;
     }
 
-    [[nodiscard]] bool ownsDescriptor() const noexcept
-    {
+    [[nodiscard]] bool ownsDescriptor() const noexcept {
         return ownedFd_.valid();
     }
 
 private:
     explicit NetlinkRouteSocket(
-        UniqueFd&& ownedFd) noexcept;
+        UniqueFd &&ownedFd) noexcept;
 
     UniqueFd ownedFd_;
     int fd_{-1};
@@ -90,17 +88,16 @@ enum class NetlinkWaitStatus {
 
 struct NetlinkWaitResult {
     NetlinkWaitStatus status{
-        NetlinkWaitStatus::data_ready};
+        NetlinkWaitStatus::data_ready
+    };
 
     int error{0};
 
-    [[nodiscard]] bool dataReady() const noexcept
-    {
+    [[nodiscard]] bool dataReady() const noexcept {
         return status == NetlinkWaitStatus::data_ready;
     }
 
-    [[nodiscard]] bool stopped() const noexcept
-    {
+    [[nodiscard]] bool stopped() const noexcept {
         return status == NetlinkWaitStatus::stopped;
     }
 };
@@ -114,7 +111,7 @@ struct NetlinkWaitResult {
 [[nodiscard]] NetlinkWaitResult
 waitForNetlinkDataOrStop(
     int dataFd,
-    EventFdSignal& stopSignal);
+    EventFdSignal &stopSignal);
 
 enum class NetlinkReceiveStatus {
     received,
@@ -125,13 +122,13 @@ enum class NetlinkReceiveStatus {
 
 struct NetlinkReceiveResult {
     NetlinkReceiveStatus status{
-        NetlinkReceiveStatus::received};
+        NetlinkReceiveStatus::received
+    };
 
     std::size_t size{0};
     int error{0};
 
-    [[nodiscard]] bool received() const noexcept
-    {
+    [[nodiscard]] bool received() const noexcept {
         return status == NetlinkReceiveStatus::received;
     }
 };
@@ -145,5 +142,4 @@ struct NetlinkReceiveResult {
 receiveNetlinkDatagram(
     int fd,
     std::span<char> buffer);
-
 } // namespace RSCGroup

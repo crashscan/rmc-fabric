@@ -36,7 +36,7 @@ target_link_libraries(
         glog
 )
 
-if(BUILD_TESTING)
+if (BUILD_TESTING)
     add_executable(
             network_observation_service_tests
             tests/ObservationServiceTests.cpp
@@ -66,4 +66,4 @@ if(BUILD_TESTING)
             TIMEOUT 15
             LABELS "unit;resilience"
     )
-endif()
+endif ()

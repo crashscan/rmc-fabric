@@ -162,20 +162,17 @@ SourceStateMap DefaultInventoryManager::getSourceStates() const {
     return sourceStates_;
 }
 
-bool DefaultInventoryManager::isReady() const
-{
+bool DefaultInventoryManager::isReady() const {
     std::scoped_lock lock(mutex_);
     return snapshot_.ready;
 }
 
-std::string DefaultInventoryManager::getPhase() const
-{
+std::string DefaultInventoryManager::getPhase() const {
     std::scoped_lock lock(mutex_);
     return snapshot_.phase;
 }
 
-uint64_t DefaultInventoryManager::getVersion() const
-{
+uint64_t DefaultInventoryManager::getVersion() const {
     std::scoped_lock lock(mutex_);
     return snapshot_.version;
 }
@@ -190,8 +187,9 @@ void DefaultInventoryManager::validateSourceRegistration(const std::shared_ptr<I
     }
     const auto ownedFields = source->getOwnedFields();
     for (const auto &field: ownedFields) {
-        if (field.empty()) throw std::runtime_error(
-            "Inventory source '" + sourceName + "' declares an empty owned field");
+        if (field.empty())
+            throw std::runtime_error(
+                "Inventory source '" + sourceName + "' declares an empty owned field");
         if (interop_contract::inventory::is_metadata_field(field)) {
             throw std::runtime_error(
                 "Inventory source '" + sourceName + "' attempts to own reserved metadata field '" + field + "'");
@@ -216,9 +214,10 @@ InventoryDiff DefaultInventoryManager::diffSourceOwnedFields(const InventoryFiel
         }
         if (!fieldValuesEqual(oldIt->second, newValue)) diff.changedFields.push_back(field);
     }
-    for (const auto &field: oldFields | std::views::keys ) {
-        if (newFields.find(field) == newFields.end()) diff.removedFields.
-            push_back(field);
+    for (const auto &field: oldFields | std::views::keys) {
+        if (newFields.find(field) == newFields.end())
+            diff.removedFields.
+                    push_back(field);
     }
     return diff;
 }

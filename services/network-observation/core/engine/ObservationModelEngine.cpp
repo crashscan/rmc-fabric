@@ -12,73 +12,66 @@
 
 
 namespace RSCGroup {
-
 namespace {
+    std::string extractIpFromCidr(const std::string &cidr) {
+        auto pos = cidr.find('/');
+        if (pos == std::string::npos) return {};
+        return cidr.substr(0, pos);
+    }
 
-std::string extractIpFromCidr(const std::string& cidr)
-{
-    auto pos = cidr.find('/');
-    if (pos == std::string::npos) return {};
-    return cidr.substr(0, pos);
-}
-
-/// Candidate events collected under lock, delivered after unlock.
+    /// Candidate events collected under lock, delivered after unlock.
 /// Sets dedupe and give deterministic (sorted) emission order.
-struct PendingEvents {
-    std::set<std::string> changed;   // publishable and may have changed
-    std::set<std::string> removed;   // was publishable, now gone or hidden
+    struct PendingEvents {
+        std::set<std::string> changed; // publishable and may have changed
+        std::set<std::string> removed; // was publishable, now gone or hidden
 
-    void record(const std::string& mac, bool wasPublishable, bool nowPublishable) {
-        if (nowPublishable)      changed.insert(mac);
-        else if (wasPublishable) removed.insert(mac);
+        void record(const std::string &mac, bool wasPublishable, bool nowPublishable) {
+            if (nowPublishable) changed.insert(mac);
+            else if (wasPublishable) removed.insert(mac);
+        }
+
+        void recordErased(const std::string &mac, bool wasPublishable) {
+            if (wasPublishable) removed.insert(mac);
+        }
+    };
+
+    void deliverPending(IModelEventSink *sink, const PendingEvents &p) {
+        if (!sink) return;
+        const auto now = std::chrono::steady_clock::now();
+        for (const auto &mac: p.changed)
+            sink->onModelEvent({ModelEventKind::CandidateUpdated, now, std::nullopt, mac});
+        for (const auto &mac: p.removed)
+            sink->onModelEvent({ModelEventKind::CandidateRemoved, now, std::nullopt, mac});
     }
-    void recordErased(const std::string& mac, bool wasPublishable) {
-        if (wasPublishable) removed.insert(mac);
+
+    /// Classifications that justify Provisional -> Confirmed promotion.
+    bool isConfirmedWorthy(CandidateClassification cls) {
+        using enum CandidateClassification;
+        switch (cls) {
+            case RemoteEndpoint:
+            case GatewayLike:
+            case TopologyPeer: return true;
+            default: return false;
+        }
     }
-};
 
-void deliverPending(IModelEventSink* sink, const PendingEvents& p)
-{
-    if (!sink) return;
-    const auto now = std::chrono::steady_clock::now();
-    for (const auto& mac : p.changed)
-        sink->onModelEvent({ModelEventKind::CandidateUpdated, now, std::nullopt, mac});
-    for (const auto& mac : p.removed)
-        sink->onModelEvent({ModelEventKind::CandidateRemoved, now, std::nullopt, mac});
-}
-
-/// Classifications that justify Provisional -> Confirmed promotion.
-bool isConfirmedWorthy(CandidateClassification cls)
-{
-    using enum CandidateClassification;
-    switch (cls) {
-        case RemoteEndpoint:
-        case GatewayLike:
-        case TopologyPeer:  return true;
-        default:            return false;
+    /// True when no source evidence remains (bridgePort counts as FDB residue).
+    bool hasNoEvidence(const RemoteCandidate &c) {
+        return !c.seenInNeigh && !c.seenInFdb && !c.seenInLldp &&
+               c.ipv4.empty() && c.ipv6.empty() && !c.bridgePort;
     }
-}
-
-/// True when no source evidence remains (bridgePort counts as FDB residue).
-bool hasNoEvidence(const RemoteCandidate& c)
-{
-    return !c.seenInNeigh && !c.seenInFdb && !c.seenInLldp &&
-           c.ipv4.empty() && c.ipv6.empty() && !c.bridgePort;
-}
-
 } // namespace
 
 ObservationModelEngine::ObservationModelEngine(ModelConfig config)
     : config_(std::move(config))
-    , hardFilter_(config_)
-{
+      , hardFilter_(config_) {
     classifier_ = createClassifier(config_.classifierConfig);
     interfacePolicy_ = config_.interfacePolicy
-        ? std::move(config_.interfacePolicy)
-        : std::make_unique<DefaultInterfacePolicy>();
+                           ? std::move(config_.interfacePolicy)
+                           : std::make_unique<DefaultInterfacePolicy>();
 }
 
-void ObservationModelEngine::setEventSink(IModelEventSink* sink) {
+void ObservationModelEngine::setEventSink(IModelEventSink *sink) {
     std::scoped_lock lock(mutex_);
     sink_ = sink;
 }
@@ -87,8 +80,8 @@ void ObservationModelEngine::setEventSink(IModelEventSink* sink) {
 // Local observations
 // ---------------------------------------------------------------------------
 
-void ObservationModelEngine::onLinkObservation(const LinkObservation& obs) {
-    IModelEventSink* sink = nullptr;
+void ObservationModelEngine::onLinkObservation(const LinkObservation &obs) {
+    IModelEventSink *sink = nullptr;
     ModelEvent event;
     bool macChanged = false;
     PendingEvents pending;
@@ -99,8 +92,8 @@ void ObservationModelEngine::onLinkObservation(const LinkObservation& obs) {
 
         macChanged = localState_.onLinkObservation(obs);
         event.kind = (obs.event == ObservationEvent::Removed)
-            ? ModelEventKind::LocalInterfaceRemoved
-            : ModelEventKind::LocalInterfaceChanged;
+                         ? ModelEventKind::LocalInterfaceRemoved
+                         : ModelEventKind::LocalInterfaceChanged;
         event.timestamp = obs.observedAt;
         event.ifname = obs.ifname;
         sink = sink_;
@@ -121,8 +114,8 @@ void ObservationModelEngine::onLinkObservation(const LinkObservation& obs) {
     }
 }
 
-void ObservationModelEngine::onAddressObservation(const AddressObservation& obs) {
-    IModelEventSink* sink = nullptr;
+void ObservationModelEngine::onAddressObservation(const AddressObservation &obs) {
+    IModelEventSink *sink = nullptr;
     ModelEvent event;
     std::string ip;
     PendingEvents pending;
@@ -142,7 +135,7 @@ void ObservationModelEngine::onAddressObservation(const AddressObservation& obs)
         // may legitimately belong to a remote host again.
         if (obs.event == ObservationEvent::Present) {
             // Check publishability before reconciliation for each affected candidate
-            for (auto& [mac, c] : candidates_) {
+            for (auto &[mac, c]: candidates_) {
                 if (c.ipv4.contains(ip) || c.ipv6.contains(ip)) {
                     if (isPublishable(c))
                         pending.removed.insert(mac);
@@ -162,18 +155,18 @@ void ObservationModelEngine::onAddressObservation(const AddressObservation& obs)
 // Remote-candidate observations
 // ---------------------------------------------------------------------------
 
-void ObservationModelEngine::onNeighborObservation(const NeighborObservation& obs) {
-    IModelEventSink* sink = nullptr;
+void ObservationModelEngine::onNeighborObservation(const NeighborObservation &obs) {
+    IModelEventSink *sink = nullptr;
     PendingEvents pending;
     {
         std::scoped_lock lock(mutex_);
         if (!interfacePolicy_->allowRemoteNeighborEvidence(obs.ifname)) return;
 
         const bool isLocalMac = localState_.isLocalMac(obs.mac);
-        const bool isLocalIp  = localState_.isLocalIp(obs.ip);
+        const bool isLocalIp = localState_.isLocalIp(obs.ip);
         if (!hardFilter_.passes(obs, isLocalMac, isLocalIp)) return;
 
-        auto& c = getOrCreateCandidate(obs.mac);
+        auto &c = getOrCreateCandidate(obs.mac);
         const bool wasPublishable = isPublishable(c);
 
         const NeighborEvidenceKey nkey{obs.ifname, obs.family, obs.ip};
@@ -182,12 +175,12 @@ void ObservationModelEngine::onNeighborObservation(const NeighborObservation& ob
             c.neighborIfaces.insert(obs.ifname);
             c.lastSeen = obs.observedAt;
             if (obs.family == AF_INET) c.ipv4.insert(obs.ip);
-            else                       c.ipv6.insert(obs.ip);
+            else c.ipv6.insert(obs.ip);
         } else {
             c.neighborEvidence.erase(nkey);
             c.neighborIfaces.erase(obs.ifname);
             if (obs.family == AF_INET) c.ipv4.erase(obs.ip);
-            else                       c.ipv6.erase(obs.ip);
+            else c.ipv6.erase(obs.ip);
         }
         c.seenInNeigh = !c.neighborEvidence.empty();
 
@@ -204,8 +197,8 @@ void ObservationModelEngine::onNeighborObservation(const NeighborObservation& ob
     deliverPending(sink, pending);
 }
 
-void ObservationModelEngine::onFdbObservation(const FdbObservation& obs) {
-    IModelEventSink* sink = nullptr;
+void ObservationModelEngine::onFdbObservation(const FdbObservation &obs) {
+    IModelEventSink *sink = nullptr;
     PendingEvents pending;
     {
         std::scoped_lock lock(mutex_);
@@ -214,7 +207,7 @@ void ObservationModelEngine::onFdbObservation(const FdbObservation& obs) {
         const bool isLocalMac = localState_.isLocalMac(obs.mac);
         if (!hardFilter_.passes(obs, isLocalMac)) return;
 
-        auto& c = getOrCreateCandidate(obs.mac);
+        auto &c = getOrCreateCandidate(obs.mac);
         const bool wasPublishable = isPublishable(c);
 
         const FdbEvidenceKey fkey{obs.portIfname, obs.mac};
@@ -241,8 +234,8 @@ void ObservationModelEngine::onFdbObservation(const FdbObservation& obs) {
     deliverPending(sink, pending);
 }
 
-void ObservationModelEngine::onLldpObservation(const LldpObservation& obs) {
-    IModelEventSink* sink = nullptr;
+void ObservationModelEngine::onLldpObservation(const LldpObservation &obs) {
+    IModelEventSink *sink = nullptr;
     PendingEvents pending;
     {
         std::scoped_lock lock(mutex_);
@@ -261,18 +254,18 @@ void ObservationModelEngine::onLldpObservation(const LldpObservation& obs) {
                 return;
             }
         }
-        auto& c = (it != candidates_.end()) ? it->second: getOrCreateCandidate(candidateKey);
+        auto &c = (it != candidates_.end()) ? it->second : getOrCreateCandidate(candidateKey);
         const bool wasPublishable = isPublishable(c);
 
         if (obs.event == ObservationEvent::Present) {
-            c.seenInLldp        = true;
-            c.remoteChassisId   = obs.remoteChassisId;
-            c.remotePortId      = obs.remotePortId;
-            c.remoteSystemName  = obs.remoteSystemName;
-            c.lastSeen          = obs.observedAt;
+            c.seenInLldp = true;
+            c.remoteChassisId = obs.remoteChassisId;
+            c.remotePortId = obs.remotePortId;
+            c.remoteSystemName = obs.remoteSystemName;
+            c.lastSeen = obs.observedAt;
             c.neighborIfaces.insert(obs.localIfname);
         } else {
-            c.seenInLldp        = false;
+            c.seenInLldp = false;
             c.remoteChassisId.reset();
             c.remotePortId.reset();
             c.remoteSystemName.reset();
@@ -286,7 +279,7 @@ void ObservationModelEngine::onLldpObservation(const LldpObservation& obs) {
             // Refresh lastSeen and revive Aged/Expired. Emit an event only
             // on a real status/classification change — a re-assert of
             // unchanged state must not produce a CandidateChanged storm.
-            const auto oldStatus         = c.status;
+            const auto oldStatus = c.status;
             const auto oldClassification = c.classification;
 
             updateClassification(c);
@@ -319,12 +312,12 @@ LocalNetworkSnapshot ObservationModelEngine::localSnapshot() const {
 std::vector<RemoteCandidate> ObservationModelEngine::remoteCandidates() const {
     std::scoped_lock lock(mutex_);
     std::vector<RemoteCandidate> out;
-    for (const auto& [_, c] : candidates_)
+    for (const auto &[_, c]: candidates_)
         if (isPublishable(c)) out.push_back(c);
     return out;
 }
 
-std::optional<RemoteCandidate> ObservationModelEngine::findCandidateByMac(const std::string& mac) const {
+std::optional<RemoteCandidate> ObservationModelEngine::findCandidateByMac(const std::string &mac) const {
     std::scoped_lock lock(mutex_);
     auto it = candidates_.find(mac);
     if (it != candidates_.end() && isPublishable(it->second)) return it->second;
@@ -336,21 +329,22 @@ std::optional<RemoteCandidate> ObservationModelEngine::findCandidateByMac(const 
 // ---------------------------------------------------------------------------
 
 void ObservationModelEngine::age(std::chrono::steady_clock::time_point now) {
-    IModelEventSink* sink = nullptr;
+    IModelEventSink *sink = nullptr;
     PendingEvents pending;
     {
         std::scoped_lock lock(mutex_);
-        for (auto& [mac, c] : candidates_) {
+        for (auto &[mac, c]: candidates_) {
             // Skip Provisional: restart window between prepareForRestart and
             // markLive must not flip preserved-lastSeen candidates to Aged.
             if (c.status == CandidateStatus::Removed ||
-                c.status == CandidateStatus::Provisional) continue;
+                c.status == CandidateStatus::Provisional)
+                continue;
 
-            const auto oldStatus      = c.status;
+            const auto oldStatus = c.status;
             const bool wasPublishable = isPublishable(c);
 
             const auto elapsed = now - c.lastSeen;
-            if (elapsed > config_.candidateExpire)      c.status = CandidateStatus::Expired;
+            if (elapsed > config_.candidateExpire) c.status = CandidateStatus::Expired;
             else if (elapsed > config_.candidateAgeout) c.status = CandidateStatus::Aged;
 
             if (c.status == oldStatus) continue;
@@ -362,14 +356,14 @@ void ObservationModelEngine::age(std::chrono::steady_clock::time_point now) {
 }
 
 void ObservationModelEngine::prepareForRestart() {
-    IModelEventSink* sink = nullptr;
+    IModelEventSink *sink = nullptr;
     PendingEvents pending;
     {
         std::scoped_lock lock(mutex_);
         phase_ = ModelPhase::Initializing;
         localState_.clear();
 
-        for (auto& [mac, c] : candidates_) {
+        for (auto &[mac, c]: candidates_) {
             pending.recordErased(mac, isPublishable(c));
 
             c.neighborEvidence.clear();
@@ -393,14 +387,17 @@ void ObservationModelEngine::prepareForRestart() {
 }
 
 void ObservationModelEngine::markLive() {
-    IModelEventSink* sink = nullptr;
+    IModelEventSink *sink = nullptr;
     PendingEvents pending;
     {
         std::scoped_lock lock(mutex_);
         phase_ = ModelPhase::Live;
         for (auto it = candidates_.begin(); it != candidates_.end();) {
-            auto& [mac, c] = *it;
-            if (c.status != CandidateStatus::Provisional) { ++it; continue; }
+            auto &[mac, c] = *it;
+            if (c.status != CandidateStatus::Provisional) {
+                ++it;
+                continue;
+            }
 
             updateClassification(c);
             if (isConfirmedWorthy(c.classification)) {
@@ -430,7 +427,7 @@ void ObservationModelEngine::setInterfacePolicy(std::unique_ptr<IInterfacePolicy
 void ObservationModelEngine::setClassifier(std::unique_ptr<ICandidateClassifier> classifier) {
     std::scoped_lock lock(mutex_);
     classifier_ = std::move(classifier);
-    for (auto& [_, c] : candidates_) {
+    for (auto &[_, c]: candidates_) {
         updateClassification(c);
     }
 }
@@ -443,8 +440,8 @@ void ObservationModelEngine::reconcileAffectedByLocalMac(std::string_view mac) {
     reconcileByKey(mac);
 }
 
-void ObservationModelEngine::reconcileAffectedByLocalIp(const std::string& ip) {
-    for (auto& [_, c] : candidates_) {
+void ObservationModelEngine::reconcileAffectedByLocalIp(const std::string &ip) {
+    for (auto &[_, c]: candidates_) {
         if (c.ipv4.contains(ip) || c.ipv6.contains(ip)) {
             c.classification = CandidateClassification::LocalSelf;
             c.status = CandidateStatus::Removed;
@@ -460,7 +457,7 @@ void ObservationModelEngine::reconcileByKey(std::string_view mac) {
     }
 }
 
-RemoteCandidate& ObservationModelEngine::getOrCreateCandidate(const std::string& mac) {
+RemoteCandidate &ObservationModelEngine::getOrCreateCandidate(const std::string &mac) {
     auto [it, inserted] = candidates_.try_emplace(mac);
     if (inserted) {
         it->second.mac = mac;
@@ -469,7 +466,7 @@ RemoteCandidate& ObservationModelEngine::getOrCreateCandidate(const std::string&
     return it->second;
 }
 
-bool ObservationModelEngine::isPublishable(const RemoteCandidate& c) {
+bool ObservationModelEngine::isPublishable(const RemoteCandidate &c) {
     if (c.status != CandidateStatus::Confirmed && c.status != CandidateStatus::Aged)
         return false;
     switch (c.classification) {
@@ -480,16 +477,16 @@ bool ObservationModelEngine::isPublishable(const RemoteCandidate& c) {
     }
 }
 
-void ObservationModelEngine::updateClassification(RemoteCandidate& c) {
+void ObservationModelEngine::updateClassification(RemoteCandidate &c) {
     c.classification = classifier_->classify(c);
 }
 
-void ObservationModelEngine::reconcileStatusLocked(RemoteCandidate& c, ObservationEvent event) {
+void ObservationModelEngine::reconcileStatusLocked(RemoteCandidate &c, ObservationEvent event) {
     if (event == ObservationEvent::Present) {
         if (c.status == CandidateStatus::Aged || c.status == CandidateStatus::Expired) {
-            c.status = CandidateStatus::Confirmed;     // revival
+            c.status = CandidateStatus::Confirmed; // revival
         } else if (c.status == CandidateStatus::Removed) {
-            c.status = CandidateStatus::Provisional;   // tombstone revival: re-validate
+            c.status = CandidateStatus::Provisional; // tombstone revival: re-validate
         }
     }
 
@@ -498,8 +495,7 @@ void ObservationModelEngine::reconcileStatusLocked(RemoteCandidate& c, Observati
             c.status = CandidateStatus::Provisional;
     } else if (c.status == CandidateStatus::Provisional &&
                isConfirmedWorthy(c.classification)) {
-        c.status = CandidateStatus::Confirmed;         // live-phase promotion
+        c.status = CandidateStatus::Confirmed; // live-phase promotion
     }
 }
-
 } // namespace RSCGroup

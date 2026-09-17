@@ -25,14 +25,12 @@
 #include <vector>
 
 namespace {
-
 using namespace std::chrono_literals;
 using namespace RSCGroup;
 
 namespace contract = interop_contract::network_observation;
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr << message << '\n';
         std::exit(EXIT_FAILURE);
@@ -40,18 +38,17 @@ void expect(bool condition, const std::string& message)
 }
 
 template<typename Function>
-void expectContained(Function&& function, const std::string& message)
-{
+void expectContained(Function &&function, const std::string &message) {
     try {
         std::forward<Function>(function)();
-    } catch (const std::exception& error) {
+    } catch (const std::exception &error) {
         std::cerr << message
-                  << ": escaped std::exception: "
-                  << error.what() << '\n';
+                << ": escaped std::exception: "
+                << error.what() << '\n';
         std::exit(EXIT_FAILURE);
     } catch (...) {
         std::cerr << message
-                  << ": escaped non-standard exception\n";
+                << ": escaped non-standard exception\n";
         std::exit(EXIT_FAILURE);
     }
 }
@@ -59,8 +56,7 @@ void expectContained(Function&& function, const std::string& message)
 template<typename Predicate>
 bool waitFor(
     Predicate predicate,
-    std::chrono::milliseconds timeout = 500ms)
-{
+    std::chrono::milliseconds timeout = 500ms) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
 
     while (std::chrono::steady_clock::now() < deadline) {
@@ -81,8 +77,7 @@ public:
         nonStandard,
     };
 
-    LocalNetworkSnapshot localSnapshot() const override
-    {
+    LocalNetworkSnapshot localSnapshot() const override {
         ++localSnapshotCalls_;
         maybeThrow();
 
@@ -101,8 +96,7 @@ public:
     }
 
     std::optional<LocalInterfaceState>
-    getInterface(const std::string& ifname) const override
-    {
+    getInterface(const std::string &ifname) const override {
         ++interfaceCalls_;
         maybeThrow();
 
@@ -113,20 +107,18 @@ public:
         return std::nullopt;
     }
 
-    std::vector<RemoteCandidate> remoteCandidates() const override
-    {
+    std::vector<RemoteCandidate> remoteCandidates() const override {
         ++remoteCandidateCalls_;
         maybeThrow();
         return candidates_;
     }
 
     std::optional<RemoteCandidate>
-    getCandidateByMac(const std::string& mac) const override
-    {
+    getCandidateByMac(const std::string &mac) const override {
         ++candidateByMacCalls_;
         maybeThrow();
 
-        for (const auto& candidate : candidates_) {
+        for (const auto &candidate: candidates_) {
             if (candidate.mac == mac) {
                 return candidate;
             }
@@ -135,67 +127,56 @@ public:
         return std::nullopt;
     }
 
-    contract::ObservationIssues getIssues() const override
-    {
+    contract::ObservationIssues getIssues() const override {
         ++issueCalls_;
         maybeThrow();
         return issues_;
     }
 
-    bool isReady() const override
-    {
+    bool isReady() const override {
         ++readyCalls_;
         maybeThrow();
         return ready_;
     }
 
-    std::string getPhase() const override
-    {
+    std::string getPhase() const override {
         ++phaseCalls_;
         maybeThrow();
         return phase_;
     }
 
-    void setFailure(Failure failure) noexcept
-    {
+    void setFailure(Failure failure) noexcept {
         failure_.store(failure, std::memory_order_release);
     }
 
-    void setReady(bool ready) noexcept
-    {
+    void setReady(bool ready) noexcept {
         ready_.store(ready, std::memory_order_release);
     }
 
-    void setPhase(std::string phase)
-    {
+    void setPhase(std::string phase) {
         phase_ = std::move(phase);
     }
 
-    void setInterface(LocalInterfaceState interface)
-    {
+    void setInterface(LocalInterfaceState interface) {
         interface_ = std::move(interface);
         snapshot_.interfaces[interface_->ifname] = *interface_;
     }
 
-    void setCandidate(RemoteCandidate candidate)
-    {
+    void setCandidate(RemoteCandidate candidate) {
         candidates_.clear();
         candidates_.push_back(std::move(candidate));
     }
 
-    void setCandidates(std::vector<RemoteCandidate> candidates)
-    {
+    void setCandidates(std::vector<RemoteCandidate> candidates) {
         candidates_ = std::move(candidates);
     }
 
-    void setSnapshot(LocalNetworkSnapshot snapshot)
-    {
+    void setSnapshot(LocalNetworkSnapshot snapshot) {
         snapshot_ = std::move(snapshot);
     }
 
 
-    void setBlockSnapshot(bool value)
-    {
+    void setBlockSnapshot(bool value) {
         std::scoped_lock lock(snapshotMutex_);
 
         blockSnapshot_ = value;
@@ -203,14 +184,12 @@ public:
         snapshotReleased_ = !value;
     }
 
-    [[nodiscard]] bool waitUntilSnapshotEntered(std::chrono::milliseconds timeout = 500ms) const
-    {
+    [[nodiscard]] bool waitUntilSnapshotEntered(std::chrono::milliseconds timeout = 500ms) const {
         std::unique_lock lock(snapshotMutex_);
         return snapshotEnteredCv_.wait_for(lock, timeout, [this] { return snapshotEntered_; });
     }
 
-    void releaseSnapshot() const
-    {
+    void releaseSnapshot() const {
         {
             std::scoped_lock lock(snapshotMutex_);
             snapshotReleased_ = true;
@@ -220,8 +199,7 @@ public:
     }
 
 private:
-    void maybeThrow() const
-    {
+    void maybeThrow() const {
         switch (failure_.load(std::memory_order_acquire)) {
             case Failure::none:
                 return;
@@ -262,9 +240,8 @@ private:
 };
 
 void expectFallbacks(
-    NetworkObservationQueryHandler& handler,
-    const std::string& context)
-{
+    NetworkObservationQueryHandler &handler,
+    const std::string &context) {
     expect(
         handler.getLocalSnapshot().empty(),
         context + ": local-snapshot fallback must be empty");
@@ -294,16 +271,14 @@ void expectFallbacks(
         context + ": phase fallback must be stopped");
 }
 
-void testFallbacksBeforeBind()
-{
+void testFallbacksBeforeBind() {
     ServiceBinding<IObservationQueryService> binding;
     NetworkObservationQueryHandler handler(binding);
 
     expectFallbacks(handler, "before bind");
 }
 
-void testBoundQueriesReachService()
-{
+void testBoundQueriesReachService() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService service;
     NetworkObservationQueryHandler handler(binding);
@@ -320,7 +295,7 @@ void testBoundQueriesReachService()
     RemoteCandidate candidate;
     candidate.mac = "00:11:22:33:44:55";
     candidate.classification =
-        CandidateClassification::RemoteEndpoint;
+            CandidateClassification::RemoteEndpoint;
     candidate.status = CandidateStatus::Confirmed;
     service.setCandidate(candidate);
 
@@ -341,7 +316,7 @@ void testBoundQueriesReachService()
     const auto macs = handler.getRemoteCandidateMacs();
     expect(
         macs.size() == 1 &&
-            macs.front() == "00:11:22:33:44:55",
+        macs.front() == "00:11:22:33:44:55",
         "bound candidate-MAC query should reach the service");
 
     expect(
@@ -360,8 +335,7 @@ void testBoundQueriesReachService()
     binding.detach();
 }
 
-void testFallbacksAfterDetach()
-{
+void testFallbacksAfterDetach() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService service;
     NetworkObservationQueryHandler handler(binding);
@@ -377,8 +351,7 @@ void testFallbacksAfterDetach()
     expectFallbacks(handler, "after detach");
 }
 
-void testStandardExceptionsAreContained()
-{
+void testStandardExceptionsAreContained() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService service;
     NetworkObservationQueryHandler handler(binding);
@@ -396,8 +369,7 @@ void testStandardExceptionsAreContained()
     binding.detach();
 }
 
-void testNonStandardExceptionsAreContained()
-{
+void testNonStandardExceptionsAreContained() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService service;
     NetworkObservationQueryHandler handler(binding);
@@ -414,8 +386,8 @@ void testNonStandardExceptionsAreContained()
 
     binding.detach();
 }
-void testEncodingExceptionsAreContained()
-{
+
+void testEncodingExceptionsAreContained() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService service;
     NetworkObservationQueryHandler handler(binding);
@@ -427,13 +399,14 @@ void testEncodingExceptionsAreContained()
     service.setInterface(interface);
     binding.bind(&service);
 
-    expectContained([&] { expect(handler.getInterface(interface.ifname).empty(), "encoding failure should return the interface fallback"); }, "interface encoding exception must be contained");
+    expectContained([&] {
+        expect(handler.getInterface(interface.ifname).empty(), "encoding failure should return the interface fallback");
+    }, "interface encoding exception must be contained");
 
     binding.detach();
 }
 
-void testDetachWaitsForAdmittedQueryAndRejectsNewQueries()
-{
+void testDetachWaitsForAdmittedQueryAndRejectsNewQueries() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService service;
     NetworkObservationQueryHandler handler(binding);
@@ -472,8 +445,7 @@ void testDetachWaitsForAdmittedQueryAndRejectsNewQueries()
     expectFallbacks(handler, "after completed detach");
 }
 
-void testBindAfterDetachReopensAdmission()
-{
+void testBindAfterDetachReopensAdmission() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService first;
     FakeObservationQueryService second;
@@ -514,8 +486,7 @@ void testBindAfterDetachReopensAdmission()
     binding.detach();
 }
 
-void testOversizedSnapshotReturnsFallback()
-{
+void testOversizedSnapshotReturnsFallback() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService service;
     NetworkObservationQueryHandler handler(binding);
@@ -538,8 +509,7 @@ void testOversizedSnapshotReturnsFallback()
     binding.detach();
 }
 
-void testOversizedCandidateListReturnsFallback()
-{
+void testOversizedCandidateListReturnsFallback() {
     ServiceBinding<IObservationQueryService> binding;
     FakeObservationQueryService service;
     NetworkObservationQueryHandler handler(binding);
@@ -560,11 +530,9 @@ void testOversizedCandidateListReturnsFallback()
 
     binding.detach();
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testFallbacksBeforeBind();
     testBoundQueriesReachService();
     testFallbacksAfterDetach();

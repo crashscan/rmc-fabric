@@ -6,7 +6,6 @@
 #include <string>
 
 namespace interop_contract::inventory {
-
 struct InventorySnapshot {
     uint64_t version{0};
     int64_t timestamp{0};
@@ -14,5 +13,4 @@ struct InventorySnapshot {
     std::string phase;
     InventoryFields fields;
 };
-
 } // namespace interop_contract::inventory

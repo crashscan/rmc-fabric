@@ -8,74 +8,63 @@
 
 namespace RSCGroup {
 namespace {
-
-std::string fieldValueToString(const interop_contract::inventory::FieldValue& v)
-{
-    return std::visit([](const auto& x) -> std::string {
-        using T = std::decay_t<decltype(x)>;
-        if constexpr (std::is_same_v<T, bool>) {
-            return x ? "true" : "false";
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            return x;
-        } else if constexpr (std::is_same_v<T, int64_t>) {
-            return std::to_string(x);
-        } else if constexpr (std::is_same_v<T, uint64_t>) {
-            return std::to_string(x);
-        } else {
-            static_assert(!sizeof(T*), "Unhandled FieldValue alternative");
-        }
-        return {};
-    }, v);
-}
-
+    std::string fieldValueToString(const interop_contract::inventory::FieldValue &v) {
+        return std::visit([](const auto &x) -> std::string {
+            using T = std::decay_t<decltype(x)>;
+            if constexpr (std::is_same_v<T, bool>) {
+                return x ? "true" : "false";
+            } else if constexpr (std::is_same_v<T, std::string>) {
+                return x;
+            } else if constexpr (std::is_same_v<T, int64_t>) {
+                return std::to_string(x);
+            } else if constexpr (std::is_same_v<T, uint64_t>) {
+                return std::to_string(x);
+            } else {
+                static_assert(!sizeof(T *), "Unhandled FieldValue alternative");
+            }
+            return {};
+        }, v);
+    }
 } // namespace
 
-void StdoutInventoryTransport::bindQueryService(IInventoryQueryService& queryService)
-{
+void StdoutInventoryTransport::bindQueryService(IInventoryQueryService &queryService) {
     query_ = &queryService;
 }
 
-bool StdoutInventoryTransport::start()
-{
+bool StdoutInventoryTransport::start() {
     running_.store(true, std::memory_order_release);
     std::cout << "[transport] StdoutInventoryTransport started" << std::endl;
     return true;
 }
 
-void StdoutInventoryTransport::stop()
-{
+void StdoutInventoryTransport::stop() {
     running_.store(false, std::memory_order_release);
     query_ = nullptr;
     std::cout << "[transport] StdoutInventoryTransport stopped" << std::endl;
 }
 
-std::string StdoutInventoryTransport::name() const
-{
+std::string StdoutInventoryTransport::name() const {
     return "stdout";
 }
 
-void StdoutInventoryTransport::publishInventoryChanged(const std::string& fieldPath)
-{
+void StdoutInventoryTransport::publishInventoryChanged(const std::string &fieldPath) {
     if (!running_.load(std::memory_order_acquire)) return;
     std::cout << "[event] InventoryChanged: " << fieldPath;
     printField(fieldPath);
     std::cout << std::endl;
 }
 
-void StdoutInventoryTransport::publishSourceStateChanged(const std::string& sourceName)
-{
+void StdoutInventoryTransport::publishSourceStateChanged(const std::string &sourceName) {
     if (!running_.load(std::memory_order_acquire)) return;
     std::cout << "[event] SourceStateChanged: " << sourceName << std::endl;
 }
 
-void StdoutInventoryTransport::publishReadyChanged(bool ready)
-{
+void StdoutInventoryTransport::publishReadyChanged(bool ready) {
     if (!running_.load(std::memory_order_acquire)) return;
     std::cout << "[event] ReadyChanged: " << (ready ? "true" : "false") << std::endl;
 }
 
-void StdoutInventoryTransport::printField(const std::string& fieldPath) const
-{
+void StdoutInventoryTransport::printField(const std::string &fieldPath) const {
     if (!query_) return;
     const auto fields = query_->getField(fieldPath);
     if (fields.empty()) {
@@ -84,5 +73,4 @@ void StdoutInventoryTransport::printField(const std::string& fieldPath) const
     }
     std::cout << " = " << fieldValueToString(fields.begin()->second);
 }
-
 } // namespace RSCGroup

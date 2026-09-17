@@ -15,7 +15,6 @@
 struct nlmsghdr;
 
 namespace RSCGroup {
-
 /**
  * Owns and runs the subscribed NETLINK_ROUTE live-event socket.
  *
@@ -41,20 +40,19 @@ public:
         Status status{Status::stopped};
         int error{0};
 
-        [[nodiscard]] bool stopped() const noexcept
-        {
+        [[nodiscard]] bool stopped() const noexcept {
             return status == Status::stopped;
         }
     };
 
     using MessageHandler =
-        std::function<void(const nlmsghdr*)>;
+    std::function<void(const nlmsghdr *)>;
 
     /**
      * Creates, binds, subscribes, and owns a NETLINK_ROUTE socket.
      */
     NetlinkEventLoop(
-        EventFdSignal& stopSignal,
+        EventFdSignal &stopSignal,
         MessageHandler messageHandler);
 
     /**
@@ -62,22 +60,22 @@ public:
      */
     NetlinkEventLoop(
         int liveFd,
-        EventFdSignal& stopSignal,
+        EventFdSignal &stopSignal,
         MessageHandler messageHandler);
 
     ~NetlinkEventLoop() = default;
 
     NetlinkEventLoop(
-        const NetlinkEventLoop&) = delete;
+        const NetlinkEventLoop &) = delete;
 
-    NetlinkEventLoop& operator=(
-        const NetlinkEventLoop&) = delete;
+    NetlinkEventLoop &operator=(
+        const NetlinkEventLoop &) = delete;
 
     NetlinkEventLoop(
-        NetlinkEventLoop&&) = delete;
+        NetlinkEventLoop &&) = delete;
 
-    NetlinkEventLoop& operator=(
-        NetlinkEventLoop&&) = delete;
+    NetlinkEventLoop &operator=(
+        NetlinkEventLoop &&) = delete;
 
     /**
      * Runs until stop is requested or an I/O/protocol failure occurs.
@@ -88,22 +86,21 @@ public:
     [[nodiscard]] Result run(
         std::stop_token stopToken);
 
-    [[nodiscard]] static const char* statusName(
+    [[nodiscard]] static const char *statusName(
         Status status) noexcept;
 
 private:
     [[nodiscard]] Result mapWaitFailure(
-        const NetlinkWaitResult& result) const noexcept;
+        const NetlinkWaitResult &result) const noexcept;
 
     [[nodiscard]] bool receiveAndDispatch(
         std::span<char> buffer,
-        Result& terminalResult);
+        Result &terminalResult);
 
     void validateHandler() const;
 
     NetlinkRouteSocket socket_;
-    EventFdSignal& stopSignal_;
+    EventFdSignal &stopSignal_;
     MessageHandler messageHandler_;
 };
-
 } // namespace RSCGroup

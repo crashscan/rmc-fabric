@@ -5,7 +5,6 @@
 #include <string>
 
 namespace RSCGroup {
-
 bool DefaultInterfacePolicy::isExcluded(std::string_view ifname) {
     if (ifname == "lo") return true;
     if (ifname.starts_with("can")) return true;
@@ -34,5 +33,4 @@ bool DefaultInterfacePolicy::allowLldpEvidence(std::string_view ifname) const {
     if (ifname.starts_with("br-")) return false;
     return true;
 }
-
 } // namespace RSCGroup

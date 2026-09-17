@@ -16,63 +16,53 @@
 #include <vector>
 
 namespace RSCGroup {
-
 namespace {
+    constexpr std::size_t dumpReceiveBufferSize = 16 * 1024;
 
-constexpr std::size_t dumpReceiveBufferSize = 16 * 1024;
+    void setFamily(
+        ifinfomsg &message,
+        std::uint8_t family) noexcept {
+        message.ifi_family = family;
+    }
 
-void setFamily(
-    ifinfomsg& message,
-    std::uint8_t family) noexcept
-{
-    message.ifi_family = family;
-}
+    void setFamily(
+        ifaddrmsg &message,
+        std::uint8_t family) noexcept {
+        message.ifa_family = family;
+    }
 
-void setFamily(
-    ifaddrmsg& message,
-    std::uint8_t family) noexcept
-{
-    message.ifa_family = family;
-}
+    void setFamily(
+        ndmsg &message,
+        std::uint8_t family) noexcept {
+        message.ndm_family = family;
+    }
 
-void setFamily(
-    ndmsg& message,
-    std::uint8_t family) noexcept
-{
-    message.ndm_family = family;
-}
-
-[[nodiscard]] int positiveKernelError(
-    int error) noexcept
-{
-    return error < 0 ? -error : error;
-}
-
+    [[nodiscard]] int positiveKernelError(
+        int error) noexcept {
+        return error < 0 ? -error : error;
+    }
 } // namespace
 
 NetlinkInitialDump::NetlinkInitialDump(
-    EventFdSignal& stopSignal,
+    EventFdSignal &stopSignal,
     MessageHandler messageHandler)
     : socket_(NetlinkRouteSocket::open())
-    , stopSignal_(stopSignal)
-    , messageHandler_(std::move(messageHandler))
-{
+      , stopSignal_(stopSignal)
+      , messageHandler_(std::move(messageHandler)) {
     validateHandler();
 }
 
 NetlinkInitialDump::NetlinkInitialDump(
     int dumpFd,
-    EventFdSignal& stopSignal,
+    EventFdSignal &stopSignal,
     MessageHandler messageHandler)
     : socket_(dumpFd)
-    , stopSignal_(stopSignal)
-    , messageHandler_(std::move(messageHandler))
-{
+      , stopSignal_(stopSignal)
+      , messageHandler_(std::move(messageHandler)) {
     validateHandler();
 }
 
-void NetlinkInitialDump::validateHandler() const
-{
+void NetlinkInitialDump::validateHandler() const {
     if (!messageHandler_) {
         throw std::invalid_argument(
             "NetlinkInitialDump: message handler is empty");
@@ -80,8 +70,7 @@ void NetlinkInitialDump::validateHandler() const
 }
 
 NetlinkInitialDump::Result
-NetlinkInitialDump::run()
-{
+NetlinkInitialDump::run() {
     auto result = requestDump<ifinfomsg>(
         RTM_GETLINK,
         AF_PACKET);
@@ -123,22 +112,21 @@ template<typename Message>
 NetlinkInitialDump::Result
 NetlinkInitialDump::requestDump(
     std::uint16_t type,
-    std::uint8_t family)
-{
+    std::uint8_t family) {
     struct Request {
         nlmsghdr header;
         Message message;
     };
 
     const std::uint32_t sequence =
-        nextSequence_++;
+            nextSequence_++;
 
     Request request{};
     request.header.nlmsg_len =
-        NLMSG_LENGTH(sizeof(Message));
+            NLMSG_LENGTH(sizeof(Message));
     request.header.nlmsg_type = type;
     request.header.nlmsg_flags =
-        NLM_F_REQUEST | NLM_F_DUMP;
+            NLM_F_REQUEST | NLM_F_DUMP;
     request.header.nlmsg_seq = sequence;
 
     setFamily(request.message, family);
@@ -179,16 +167,15 @@ NetlinkInitialDump::requestDump(
 
 NetlinkInitialDump::Result
 NetlinkInitialDump::readDumpResponses(
-    std::uint32_t sequence)
-{
+    std::uint32_t sequence) {
     std::vector<char> buffer(
         dumpReceiveBufferSize);
 
     for (;;) {
         const NetlinkWaitResult waitResult =
-            waitForNetlinkDataOrStop(
-                socket_.fd(),
-                stopSignal_);
+                waitForNetlinkDataOrStop(
+                    socket_.fd(),
+                    stopSignal_);
 
         switch (waitResult.status) {
             case NetlinkWaitStatus::data_ready:
@@ -216,12 +203,12 @@ NetlinkInitialDump::readDumpResponses(
         }
 
         const NetlinkReceiveResult receiveResult =
-            receiveNetlinkDatagram(
-                socket_.fd(),
-                std::span<char>{
-                    buffer.data(),
-                    buffer.size(),
-                });
+                receiveNetlinkDatagram(
+                    socket_.fd(),
+                    std::span<char>{
+                        buffer.data(),
+                        buffer.size(),
+                    });
 
         switch (receiveResult.status) {
             case NetlinkReceiveStatus::received:
@@ -242,14 +229,14 @@ NetlinkInitialDump::readDumpResponses(
         }
 
         int remaining =
-            static_cast<int>(receiveResult.size);
+                static_cast<int>(receiveResult.size);
 
-        for (auto* header =
-                 reinterpret_cast<nlmsghdr*>(
-                     buffer.data());
+        for (auto *header =
+                     reinterpret_cast<nlmsghdr *>(
+                         buffer.data());
              NLMSG_OK(header, remaining);
              header =
-                 NLMSG_NEXT(header, remaining)) {
+             NLMSG_NEXT(header, remaining)) {
             if (header->nlmsg_seq != sequence) {
                 continue;
             }
@@ -279,10 +266,10 @@ NetlinkInitialDump::readDumpResponses(
                     };
                 }
 
-                const auto* netlinkError =
-                    reinterpret_cast<
-                        const nlmsgerr*>(
-                        NLMSG_DATA(header));
+                const auto *netlinkError =
+                        reinterpret_cast<
+                            const nlmsgerr *>(
+                            NLMSG_DATA(header));
 
                 // error == 0 is a successful ACK.
                 if (netlinkError->error == 0) {
@@ -316,9 +303,8 @@ NetlinkInitialDump::readDumpResponses(
     }
 }
 
-const char* NetlinkInitialDump::statusName(
-    Status status) noexcept
-{
+const char *NetlinkInitialDump::statusName(
+    Status status) noexcept {
     switch (status) {
         case Status::completed:
             return "completed";
@@ -350,5 +336,4 @@ const char* NetlinkInitialDump::statusName(
 
     return "unknown";
 }
-
 } // namespace RSCGroup

@@ -19,7 +19,6 @@
 #include <unordered_map>
 
 namespace RSCGroup {
-
 using interop_contract::network_observation::LocalInterfaceState;
 
 /// Extended snapshot used internally by the observation model.
@@ -30,5 +29,4 @@ struct LocalNetworkSnapshot {
     std::set<std::string> localMacs;
     std::set<std::string> localIps;
 };
-
 } // namespace RSCGroup

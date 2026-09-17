@@ -8,11 +8,11 @@
 
 namespace DBus {
 class Object;
-template<typename...> class Signal;
+template<typename...>
+class Signal;
 }
 
 namespace RSCGroup {
-
 class IInventoryQueryService;
 class InventoryQueryHandler;
 
@@ -20,12 +20,13 @@ class InventoryDbusAdapter : public DbusServiceAdapter {
 public:
     InventoryDbusAdapter();
 
-    InventoryDbusAdapter(const InventoryDbusAdapter&) = delete;
-    InventoryDbusAdapter& operator=(const InventoryDbusAdapter&) = delete;
+    InventoryDbusAdapter(const InventoryDbusAdapter &) = delete;
 
-    void setService(IInventoryQueryService* service);
+    InventoryDbusAdapter &operator=(const InventoryDbusAdapter &) = delete;
 
-    void bind(const std::shared_ptr<DBus::Object>& object, const std::string& interfaceName) override;
+    void setService(IInventoryQueryService *service);
+
+    void bind(const std::shared_ptr<DBus::Object> &object, const std::string &interfaceName) override;
 
     /**
      * @brief Closes query admission and waits for in-flight D-Bus handler
@@ -47,8 +48,10 @@ public:
      */
     void onTransportStopping() override;
 
-    void publishInventoryChanged(const std::string& fieldPath);
-    void publishSourceStateChanged(const std::string& sourceName);
+    void publishInventoryChanged(const std::string &fieldPath);
+
+    void publishSourceStateChanged(const std::string &sourceName);
+
     void publishReadyChanged(bool ready);
 
 private:
@@ -58,12 +61,12 @@ private:
 
     std::shared_ptr<InventoryQueryHandler> handler_;
 
-    std::shared_ptr<DBus::Signal<void(std::string)>> signalInventoryChanged_;
-    std::shared_ptr<DBus::Signal<void(std::string)>> signalSourceStateChanged_;
-    std::shared_ptr<DBus::Signal<void(bool)>> signalReadyChanged_;
+    std::shared_ptr<DBus::Signal<void(std::string)> > signalInventoryChanged_;
+    std::shared_ptr<DBus::Signal<void(std::string)> > signalSourceStateChanged_;
+    std::shared_ptr<DBus::Signal<void(bool)> > signalReadyChanged_;
 
-    void createSignals(const std::shared_ptr<DBus::Object>& object, const std::string& interfaceName);
-    void bindMethods(const std::shared_ptr<DBus::Object>& object, const std::string& interfaceName);
+    void createSignals(const std::shared_ptr<DBus::Object> &object, const std::string &interfaceName);
+
+    void bindMethods(const std::shared_ptr<DBus::Object> &object, const std::string &interfaceName);
 };
-
 } // namespace RSCGroup

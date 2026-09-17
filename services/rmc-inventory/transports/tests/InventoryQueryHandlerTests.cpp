@@ -22,13 +22,11 @@
 #include <thread>
 
 namespace {
-
 using namespace std::chrono_literals;
 using namespace RSCGroup;
 using namespace interop_contract::inventory;
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr << message << '\n';
         std::exit(EXIT_FAILURE);
@@ -36,13 +34,12 @@ void expect(bool condition, const std::string& message)
 }
 
 template<typename Function>
-void expectContained(Function&& function, const std::string& message)
-{
+void expectContained(Function &&function, const std::string &message) {
     try {
         std::forward<Function>(function)();
-    } catch (const std::exception& error) {
+    } catch (const std::exception &error) {
         std::cerr << message << ": escaped std::exception: "
-                  << error.what() << '\n';
+                << error.what() << '\n';
         std::exit(EXIT_FAILURE);
     } catch (...) {
         std::cerr << message << ": escaped non-standard exception\n";
@@ -52,9 +49,8 @@ void expectContained(Function&& function, const std::string& message)
 
 template<typename Predicate>
 bool waitFor(
-    Predicate&& predicate,
-    std::chrono::milliseconds timeout = 500ms)
-{
+    Predicate &&predicate,
+    std::chrono::milliseconds timeout = 500ms) {
     const auto deadline = std::chrono::steady_clock::now() + timeout;
 
     while (std::chrono::steady_clock::now() < deadline) {
@@ -75,40 +71,35 @@ public:
         nonStandard,
     };
 
-    InventorySnapshot getIdentity() const override
-    {
+    InventorySnapshot getIdentity() const override {
         ++identityCalls_;
         maybeThrow();
         InventorySnapshot snapshot;
         if (invalidIdentityEncoding_.load(std::memory_order_acquire)) {
             snapshot.fields.emplace(std::string(FIELD_VERSION), std::uint64_t{1});
-            }
+        }
         return snapshot;
     }
 
-    InventoryFields getField(const std::string&) const override
-    {
+    InventoryFields getField(const std::string &) const override {
         ++fieldCalls_;
         maybeThrow();
         return {};
     }
 
-    SourceStateMap getSourceStates() const override
-    {
+    SourceStateMap getSourceStates() const override {
         ++sourceStateCalls_;
         maybeThrow();
         return {};
     }
 
-    InventoryIssues getIssues() const override
-    {
+    InventoryIssues getIssues() const override {
         ++issueCalls_;
         maybeThrow();
         return {};
     }
 
-    bool getReady() const override
-    {
+    bool getReady() const override {
         ++readyCalls_;
         maybeThrow();
 
@@ -125,58 +116,49 @@ public:
         return readyValue_;
     }
 
-    std::string getPhase() const override
-    {
+    std::string getPhase() const override {
         ++phaseCalls_;
         maybeThrow();
         return phase_;
     }
 
-    std::uint64_t getVersion() const override
-    {
+    std::uint64_t getVersion() const override {
         ++versionCalls_;
         maybeThrow();
         return version_;
     }
 
-    void refresh() override
-    {
+    void refresh() override {
         ++refreshCalls_;
         maybeThrow();
     }
 
-    void setFailure(Failure failure)
-    {
+    void setFailure(Failure failure) {
         failure_.store(failure, std::memory_order_release);
     }
 
-    void setInvalidIdentityEncoding(bool value) noexcept
-    {
-            invalidIdentityEncoding_.store(value, std::memory_order_release);
+    void setInvalidIdentityEncoding(bool value) noexcept {
+        invalidIdentityEncoding_.store(value, std::memory_order_release);
     }
 
-    void setReadyValue(bool value)
-    {
+    void setReadyValue(bool value) {
         std::scoped_lock lock(readyMutex_);
         readyValue_ = value;
     }
 
-    void setBlockReady(bool value)
-    {
+    void setBlockReady(bool value) {
         std::scoped_lock lock(readyMutex_);
         blockReady_ = value;
         readyEntered_ = false;
         readyReleased_ = !value;
     }
 
-    [[nodiscard]] bool waitUntilReadyEntered(std::chrono::milliseconds timeout = 500ms)
-    {
+    [[nodiscard]] bool waitUntilReadyEntered(std::chrono::milliseconds timeout = 500ms) {
         std::unique_lock lock(readyMutex_);
         return readyEnteredCv_.wait_for(lock, timeout, [this] { return readyEntered_; });
     }
 
-    void releaseReady() const
-    {
+    void releaseReady() const {
         {
             std::scoped_lock lock(readyMutex_);
             readyReleased_ = true;
@@ -184,19 +166,16 @@ public:
         readyReleaseCv_.notify_all();
     }
 
-    [[nodiscard]] int refreshCalls() const
-    {
+    [[nodiscard]] int refreshCalls() const {
         return refreshCalls_.load(std::memory_order_acquire);
     }
 
-    [[nodiscard]] int identityCalls() const
-    {
+    [[nodiscard]] int identityCalls() const {
         return identityCalls_.load(std::memory_order_acquire);
     }
 
 private:
-    void maybeThrow() const
-    {
+    void maybeThrow() const {
         switch (failure_.load(std::memory_order_acquire)) {
             case Failure::none:
                 return;
@@ -234,9 +213,8 @@ private:
 };
 
 void expectFallbacks(
-    InventoryQueryHandler& handler,
-    const std::string& context)
-{
+    InventoryQueryHandler &handler,
+    const std::string &context) {
     expect(
         handler.getIdentity().empty(),
         context + ": identity fallback must be empty");
@@ -266,8 +244,7 @@ void expectFallbacks(
         context + ": version fallback must be zero");
 }
 
-void testFallbacksWhenNotBound()
-{
+void testFallbacksWhenNotBound() {
     ServiceBinding<IInventoryQueryService> binding;
     InventoryQueryHandler handler(binding);
 
@@ -276,8 +253,7 @@ void testFallbacksWhenNotBound()
     handler.refresh();
 }
 
-void testFallbacksAfterDetach()
-{
+void testFallbacksAfterDetach() {
     ServiceBinding<IInventoryQueryService> binding;
     FakeInventoryQueryService service;
     InventoryQueryHandler handler(binding);
@@ -301,8 +277,7 @@ void testFallbacksAfterDetach()
         "refresh after detach must not reach service");
 }
 
-void testStandardExceptionsAreContained()
-{
+void testStandardExceptionsAreContained() {
     ServiceBinding<IInventoryQueryService> binding;
     FakeInventoryQueryService service;
     InventoryQueryHandler handler(binding);
@@ -325,8 +300,7 @@ void testStandardExceptionsAreContained()
     binding.detach();
 }
 
-void testNonStandardExceptionsAreContained()
-{
+void testNonStandardExceptionsAreContained() {
     ServiceBinding<IInventoryQueryService> binding;
     FakeInventoryQueryService service;
     InventoryQueryHandler handler(binding);
@@ -349,8 +323,7 @@ void testNonStandardExceptionsAreContained()
     binding.detach();
 }
 
-void testEncodingExceptionsAreContained()
-{
+void testEncodingExceptionsAreContained() {
     ServiceBinding<IInventoryQueryService> binding;
     FakeInventoryQueryService service;
     InventoryQueryHandler handler(binding);
@@ -358,14 +331,15 @@ void testEncodingExceptionsAreContained()
     service.setInvalidIdentityEncoding(true);
     binding.bind(&service);
 
-    expectContained([&] { expect(handler.getIdentity().empty(), "encoding failure should return the identity fallback"); }, "identity encoding exception must be contained");
+    expectContained([&] {
+        expect(handler.getIdentity().empty(), "encoding failure should return the identity fallback");
+    }, "identity encoding exception must be contained");
     expect(service.identityCalls() == 1, "encoding-failure test must reach the service");
 
     binding.detach();
 }
 
-void testDetachWaitsForAdmittedQueryAndRejectsNewQueries()
-{
+void testDetachWaitsForAdmittedQueryAndRejectsNewQueries() {
     ServiceBinding<IInventoryQueryService> binding;
     FakeInventoryQueryService service;
     InventoryQueryHandler handler(binding);
@@ -406,8 +380,7 @@ void testDetachWaitsForAdmittedQueryAndRejectsNewQueries()
     expect(!handler.getReady(), "queries after completed detach must receive fallback values");
 }
 
-void testBindAfterDetachReopensAdmission()
-{
+void testBindAfterDetachReopensAdmission() {
     ServiceBinding<IInventoryQueryService> binding;
     FakeInventoryQueryService first;
     FakeInventoryQueryService second;
@@ -433,11 +406,9 @@ void testBindAfterDetachReopensAdmission()
 
     binding.detach();
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testFallbacksWhenNotBound();
     testFallbacksAfterDetach();
     testStandardExceptionsAreContained();

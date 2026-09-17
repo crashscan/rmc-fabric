@@ -8,8 +8,8 @@ target_link_libraries(lldp-dump lldp-observer
 )
 
 target_include_directories(lldp-dump PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/..
-    ${CMAKE_CURRENT_SOURCE_DIR}/../public
-    ${CMAKE_CURRENT_SOURCE_DIR}/../lldpd
-    ${CMAKE_CURRENT_SOURCE_DIR}/../../../core/public
+        ${CMAKE_CURRENT_SOURCE_DIR}/..
+        ${CMAKE_CURRENT_SOURCE_DIR}/../public
+        ${CMAKE_CURRENT_SOURCE_DIR}/../lldpd
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../core/public
 )

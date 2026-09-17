@@ -18,6 +18,7 @@
 #include <cstdint>
 
 #include "BoundedLldpConnection.h"
+#include "BoundedLldpWatch.h"
 
 namespace RSCGroup {
 namespace {
@@ -610,31 +611,32 @@ private:
         std::weak_ptr<CallbackState> weakState = callbackState_;
 
         try {
-            watch_ = std::make_unique<lldpcli::LldpWatch<void, void> >(
-                std::make_optional<lldpcli::LldpWatch<void, void>::ChangeCallback<void> >(
-                    [weakState](std::string_view ifname,
-                                lldpctl_change_t change,
-                                const lldpcli::LldpAtom & /*interface*/,
-                                const lldpcli::LldpAtom &neighbor,
-                                void * /*ctx*/) {
-                        // Lock weak_ptr — if Impl is destroyed this is a no-op
-                        auto state = weakState.lock();
-                        if (!state) return;
+            // BoundedLldpWatch, not lldpcli::LldpWatch: the latter builds its
+            // own unbounded connection, and its subscribe round-trip would hang
+            // this thread (start(), or refreshAll() on the supervision thread)
+            // against a wedged lldpd.
+            watch_ = std::make_unique<BoundedLldpWatch>(
+                resolvedCtlPath(), kProbeConnectTimeout, kProbeIoTimeout,
+                [weakState](std::string_view ifname,
+                            lldpctl_change_t change,
+                            const lldpcli::LldpAtom & /*interface*/,
+                            const lldpcli::LldpAtom &neighbor) {
+                    // Lock weak_ptr — if Impl is destroyed this is a no-op
+                    auto state = weakState.lock();
+                    if (!state) return;
 
-                        auto lease = tryAcquireLease(state);
-                        if (!lease) return; // admission closed
+                    auto lease = tryAcquireLease(state);
+                    if (!lease) return; // admission closed
 
-                        try {
-                            dispatchChange(*state, ifname, change, neighbor);
-                        } catch (const std::exception &e) {
-                            LOG(ERROR) << "LldpdSource: watch callback exception: " << e.what();
-                        } catch (...) {
-                            LOG(ERROR) << "LldpdSource: watch callback unknown exception";
-                        }
-                        // lease released here, decrementing activeCount
+                    try {
+                        dispatchChange(*state, ifname, change, neighbor);
+                    } catch (const std::exception &e) {
+                        LOG(ERROR) << "LldpdSource: watch callback exception: " << e.what();
+                    } catch (...) {
+                        LOG(ERROR) << "LldpdSource: watch callback unknown exception";
                     }
-                )
-            );
+                    // lease released here, decrementing activeCount
+                });
             return true;
         } catch (const std::exception &e) {
             LOG(ERROR) << "Lldpd watch creation failed: " << e.what();
@@ -652,15 +654,19 @@ private:
         try {
             BoundedLldpConnection bounded(resolvedCtlPath(),
                                           kProbeConnectTimeout, kProbeIoTimeout);
-            for (const auto &iface: getInterfacesBounded(bounded)) {
+
+            bool aborted = false;
+            forEachInterfaceBounded(bounded, [&](const lldpcli::LldpAtom &iface) {
+                if (aborted) return;
+
                 auto ifname = iface.GetValue<std::string>(lldpctl_k_interface_name);
-                if (!ifname) continue;
+                if (!ifname) return;
 
                 if (!callbackState_->config.watchedInterfaces.empty()) {
                     auto it = std::find(callbackState_->config.watchedInterfaces.begin(),
                                         callbackState_->config.watchedInterfaces.end(),
                                         *ifname);
-                    if (it == callbackState_->config.watchedInterfaces.end()) continue;
+                    if (it == callbackState_->config.watchedInterfaces.end()) return;
                 }
 
                 auto port = iface.GetPort();
@@ -668,18 +674,31 @@ private:
 
                 for (const auto &nb: neighbors) {
                     auto lease = tryAcquireLease(callbackState_);
-                    if (!lease) return; // stop/refresh began during enumeration
+                    if (!lease) {
+                        // stop/refresh began during enumeration — stop the
+                        // whole walk, not just this interface.
+                        aborted = true;
+                        return;
+                    }
                     try {
                         dispatchChange(*callbackState_, *ifname, lldpctl_c_added, nb);
                     } catch (const std::exception &e) {
                         LOG(ERROR) << "LLDP initial enumeration dispatch error: " << e.what();
                     }
                 }
+            });
+
+            if (aborted) {
+                VLOG(1) << "LLDP initial enumeration aborted (admission closed)";
+                return;
             }
+
             VLOG(1) << "LLDP initial enumeration complete";
             // A completed enumeration proves backend connectivity even when
             // zero neighbors were found (dispatchChange stamps per neighbor).
-            callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(), std::memory_order_release);
+            // Only stamp on a full walk: an aborted one proves nothing.
+            callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(),
+                                                   std::memory_order_release);
         } catch (const std::exception &e) {
             LOG(ERROR) << "LLDP initial enumeration failed: " << e.what();
         }
@@ -730,7 +749,7 @@ private:
     enum class State { Stopped, Starting, Running, Refreshing, Stopping };
 
     std::shared_ptr<CallbackState> callbackState_;
-    std::unique_ptr<lldpcli::LldpWatch<void, void> > watch_;
+    std::unique_ptr<BoundedLldpWatch> watch_;
 
     mutable std::mutex lifecycleMutex_;
     std::condition_variable lifecycleCv_;

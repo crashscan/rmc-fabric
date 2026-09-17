@@ -4,15 +4,14 @@
 #pragma once
 
 namespace RSCGroup {
-
 struct ScoringWeights {
     int unicastMac = 20;
     int ipv4 = 15;
     int ipv6 = 10;
     int neighbor = 15;
     int fdb = 25;
-    int lldp = 40;   // INERT: seenInLldp short-circuits to TopologyPeer;
-                     // kept for v2 non-MAC LLDP identity scoring
+    int lldp = 40; // INERT: seenInLldp short-circuits to TopologyPeer;
+    // kept for v2 non-MAC LLDP identity scoring
     int temporalBonus = 10;
     int agingPenalty = -15;
 };
@@ -30,5 +29,4 @@ struct ClassifierConfig {
     ScoringWeights weights = {};
     ScoringThresholds thresholds = {};
 };
-
 } // namespace RSCGroup

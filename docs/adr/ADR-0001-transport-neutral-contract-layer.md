@@ -33,71 +33,71 @@ This layer is separate from:
 The architecture is explicitly three layers:
 
 1. **Domain layer**
-   - strong domain types
-   - behavioral logic
-   - lifecycle/runtime state
+    - strong domain types
+    - behavioral logic
+    - lifecycle/runtime state
 
 2. **Contract/port layer**
-   - wire-facing DTOs
-   - contract constants
-   - neutral value model
-   - schema-directed codecs and validation
-   - neutral error/result model
+    - wire-facing DTOs
+    - contract constants
+    - neutral value model
+    - schema-directed codecs and validation
+    - neutral error/result model
 
 3. **Transport adapter layer**
-   - mapping between the neutral contract layer and concrete transport/library
-     types
-   - D-Bus library bindings, MQTT payload mapping, RPC/protobuf mapping, etc.
+    - mapping between the neutral contract layer and concrete transport/library
+      types
+    - D-Bus library bindings, MQTT payload mapping, RPC/protobuf mapping, etc.
 
 ## Rules
 
 1. **Three-layer rule**
-   - The architecture is domain -> contract -> adapter/wire for data flow;
-     dependencies point inward per Rule 4.
-   - Domain logic must not depend directly on transport-library types.
+    - The architecture is domain -> contract -> adapter/wire for data flow;
+      dependencies point inward per Rule 4.
+    - Domain logic must not depend directly on transport-library types.
 
 2. **Domain working-model rule**
-   - Domain code uses strong domain types as its working model.
-   - The neutral value/object model is not the internal representation of domain
-     logic.
-   - Neutral DTO/value types exist only at the port boundary between codecs and
-     transport adapters.
+    - Domain code uses strong domain types as its working model.
+    - The neutral value/object model is not the internal representation of domain
+      logic.
+    - Neutral DTO/value types exist only at the port boundary between codecs and
+      transport adapters.
 
 3. **Residency rule**
-   - A type lives in the contract layer if and only if it appears on the wire.
-   - Wire-facing types and their codecs live in the contract layer.
-   - Behavioral/runtime state stays in the service/domain layer.
+    - A type lives in the contract layer if and only if it appears on the wire.
+    - Wire-facing types and their codecs live in the contract layer.
+    - Behavioral/runtime state stays in the service/domain layer.
 
 4. **Dependency-direction rule**
-   - Dependency direction is `service -> interop_contract <- adapter`.
-   - The contract library depends on nothing above it.
+    - Dependency direction is `service -> interop_contract <- adapter`.
+    - The contract library depends on nothing above it.
 
 5. **Transport-isolation rule**
-   - The contract layer must not expose third-party transport/library types.
-   - D-Bus, MQTT, gRPC, REST, or other transport-specific types are confined to
-     adapter layers.
+    - The contract layer must not expose third-party transport/library types.
+    - D-Bus, MQTT, gRPC, REST, or other transport-specific types are confined to
+      adapter layers.
 
 6. **Error-boundary rule**
-   - No transport-specific exception or error type may cross an adapter
-     boundary.
-   - Adapters map transport/library failures into a neutral error/result model.
-   - Error codes are stable API; error messages are diagnostic text.
+    - No transport-specific exception or error type may cross an adapter
+      boundary.
+    - Adapters map transport/library failures into a neutral error/result model.
+    - Error codes are stable API; error messages are diagnostic text.
 
 7. **Schema-directed fidelity rule**
-   - The neutral contract model preserves semantic values, not every
-     transport-native width/detail.
-   - Exact wire-format fidelity for arbitrary foreign payloads is a non-goal.
-   - Integer width, null/absence handling, and similar wire details are
-     re-encoded from schema rules, not inferred solely from the neutral value.
+    - The neutral contract model preserves semantic values, not every
+      transport-native width/detail.
+    - Exact wire-format fidelity for arbitrary foreign payloads is a non-goal.
+    - Integer width, null/absence handling, and similar wire details are
+      re-encoded from schema rules, not inferred solely from the neutral value.
 
 8. **Determinism rule**
-   - Encoders produce canonical output for a given contract object.
-   - Canonical ordering of maps/sets is part of the contract-layer behavior and
-     supports characterization/golden tests.
+    - Encoders produce canonical output for a given contract object.
+    - Canonical ordering of maps/sets is part of the contract-layer behavior and
+      supports characterization/golden tests.
 
 9. **Bounded-ingress rule**
-   - Contract decoding and validation must apply bounded recursion depth and
-     bounded collection/object sizes on ingress.
+    - Contract decoding and validation must apply bounded recursion depth and
+      bounded collection/object sizes on ingress.
 
 10. **Build-enforcement rule**
     - Neutrality must be enforced first by the build target graph, then by CI

@@ -8,34 +8,32 @@
 
 namespace RSCGroup {
 namespace {
+    namespace C = interop_contract::inventory;
 
-namespace C = interop_contract::inventory;
-
-void addStringField(InventoryFields& out,
-                    const Json::Value& root,
-                    const char* jsonKey,
-                    std::string_view contractField)
-{
-    if (!root.isMember(jsonKey)) return;
-    const auto& v = root[jsonKey];
-    if (!v.isString() || v.asString().empty()) {
-        throw std::runtime_error(std::string("device-meta-file: key '") + jsonKey +
-                                 "' is not a non-empty string");
+    void addStringField(InventoryFields &out,
+                        const Json::Value &root,
+                        const char *jsonKey,
+                        std::string_view contractField) {
+        if (!root.isMember(jsonKey)) return;
+        const auto &v = root[jsonKey];
+        if (!v.isString() || v.asString().empty()) {
+            throw std::runtime_error(std::string("device-meta-file: key '") + jsonKey +
+                                     "' is not a non-empty string");
+        }
+        out.emplace(std::string(contractField), v.asString());
     }
-    out.emplace(std::string(contractField), v.asString());
-}
-
 } // namespace
 
 DeviceMetaFileSource::DeviceMetaFileSource(std::string filePath, bool required)
     : FileBackedInventorySource("device-meta-file", required, std::move(filePath),
-          {std::string(C::FIELD_DEVICE_CLASS),
-           std::string(C::FIELD_DEVICE_MODEL_ID),
-           std::string(C::FIELD_DEVICE_PROJECT)})
-{}
+                                {
+                                    std::string(C::FIELD_DEVICE_CLASS),
+                                    std::string(C::FIELD_DEVICE_MODEL_ID),
+                                    std::string(C::FIELD_DEVICE_PROJECT)
+                                }) {
+}
 
-InventoryFields DeviceMetaFileSource::fieldsFromContents(const std::string& contents) const
-{
+InventoryFields DeviceMetaFileSource::fieldsFromContents(const std::string &contents) const {
     Json::CharReaderBuilder builder;
     Json::Value root;
     std::string errs;
@@ -48,10 +46,9 @@ InventoryFields DeviceMetaFileSource::fieldsFromContents(const std::string& cont
     }
 
     InventoryFields out;
-    addStringField(out, root, "device_class",    C::FIELD_DEVICE_CLASS);
+    addStringField(out, root, "device_class", C::FIELD_DEVICE_CLASS);
     addStringField(out, root, "device_model_id", C::FIELD_DEVICE_MODEL_ID);
-    addStringField(out, root, "device_project",  C::FIELD_DEVICE_PROJECT);
+    addStringField(out, root, "device_project", C::FIELD_DEVICE_PROJECT);
     return out;
 }
-
 } // namespace RSCGroup

@@ -7,7 +7,6 @@
 #include <unordered_map>
 
 namespace interop_contract::network_observation {
-
 enum class CandidateClassification {
     Artifact,
     LocalSelf,
@@ -50,9 +49,9 @@ struct RemoteCandidate {
     std::string mac;
     CandidateClassification classification = CandidateClassification::Unknown;
     CandidateStatus status = CandidateStatus::Provisional;
-    bool seenInFdb   = false;
+    bool seenInFdb = false;
     bool seenInNeigh = false;
-    bool seenInLldp  = false;
+    bool seenInLldp = false;
     std::optional<std::string> bridgePort;
     std::optional<std::string> remoteChassisId;
     std::optional<std::string> remotePortId;
@@ -64,5 +63,4 @@ struct RemoteCandidate {
 
 using ObservationIssueFields = std::map<std::string, std::string>;
 using ObservationIssues = std::map<std::string, ObservationIssueFields>;
-
 } // namespace interop_contract::network_observation

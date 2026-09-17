@@ -9,89 +9,76 @@
 
 namespace RSCGroup {
 namespace {
-using namespace interop_contract::network_observation;
+    using namespace interop_contract::network_observation;
 } // namespace
 
-DbusTransport::DbusTransport(const std::string& busType)
+DbusTransport::DbusTransport(const std::string &busType)
     : DbusTransportBase(busType,
                         std::make_unique<NetworkObservationDbusAdapter>(),
                         std::string(SERVICE_NAME),
                         std::string(OBJECT_PATH),
-                        std::string(INTERFACE))
-{
+                        std::string(INTERFACE)) {
 }
 
-NetworkObservationDbusAdapter* DbusTransport::obsAdapter() const
-{
+NetworkObservationDbusAdapter *DbusTransport::obsAdapter() const {
     return getTypedAdapter<NetworkObservationDbusAdapter>();
 }
 
-void DbusTransport::bindQueryService(IObservationQueryService& provider)
-{
+void DbusTransport::bindQueryService(IObservationQueryService &provider) {
     obsAdapter()->setService(&provider);
 }
 
-bool DbusTransport::start()
-{
+bool DbusTransport::start() {
     try {
         DbusTransportBase::start();
         return true;
-    } catch (const std::exception& e) {
-        diagnostics::logError("observation-service", "transport.dbus", "start", "transport_start_failed", name(), e.what());
+    } catch (const std::exception &e) {
+        diagnostics::logError("observation-service", "transport.dbus", "start", "transport_start_failed", name(),
+                              e.what());
         obsAdapter()->setService(nullptr);
         return false;
     }
 }
 
-void DbusTransport::stop()
-{
+void DbusTransport::stop() {
     DbusTransportBase::stop();
 }
 
-void DbusTransport::quiesceQueries() noexcept
-{
+void DbusTransport::quiesceQueries() noexcept {
     DbusTransportBase::quiesceQueries();
 }
 
-std::string DbusTransport::name() const
-{
+std::string DbusTransport::name() const {
     return "dbus";
 }
 
-void DbusTransport::publishLocalStateChanged()
-{
+void DbusTransport::publishLocalStateChanged() {
     if (!isRunning()) return;
     obsAdapter()->publishLocalStateChanged();
 }
 
-void DbusTransport::publishInterfaceChanged(const std::string& ifname)
-{
+void DbusTransport::publishInterfaceChanged(const std::string &ifname) {
     if (!isRunning()) return;
     obsAdapter()->publishInterfaceChanged(ifname);
 }
 
-void DbusTransport::publishInterfaceRemoved(const std::string& ifname)
-{
+void DbusTransport::publishInterfaceRemoved(const std::string &ifname) {
     if (!isRunning()) return;
     obsAdapter()->publishInterfaceRemoved(ifname);
 }
 
-void DbusTransport::publishCandidateChanged(const std::string& mac)
-{
+void DbusTransport::publishCandidateChanged(const std::string &mac) {
     if (!isRunning()) return;
     obsAdapter()->publishCandidateChanged(mac);
 }
 
-void DbusTransport::publishCandidateRemoved(const std::string& mac)
-{
+void DbusTransport::publishCandidateRemoved(const std::string &mac) {
     if (!isRunning()) return;
     obsAdapter()->publishCandidateRemoved(mac);
 }
 
-void DbusTransport::publishReadyChanged(bool ready)
-{
+void DbusTransport::publishReadyChanged(bool ready) {
     if (!isRunning()) return;
     obsAdapter()->publishReadyChanged(ready);
 }
-
 } // namespace RSCGroup

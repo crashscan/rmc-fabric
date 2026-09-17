@@ -29,4 +29,4 @@ Do not use an ADR for:
 ## Current ADRs
 
 - [Transport-neutral contract layer](ADR-0001-transport-neutral-contract-layer.md)
-  - Approved on 2026-08-06
+    - Approved on 2026-08-06

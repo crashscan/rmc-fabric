@@ -9,7 +9,6 @@
 #include <memory>
 
 namespace RSCGroup {
-
 class INetworkObservationModel;
 
 /**
@@ -18,5 +17,4 @@ class INetworkObservationModel;
  * Callers depend on the model interface, not ObservationModelEngine.
  */
 [[nodiscard]] std::unique_ptr<INetworkObservationModel> createNetworkObservationModel(ModelConfig config);
-
 } // namespace RSCGroup

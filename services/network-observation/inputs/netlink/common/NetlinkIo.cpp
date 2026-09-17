@@ -17,10 +17,8 @@
 #include <utility>
 
 namespace RSCGroup {
-
 NetlinkRouteSocket::NetlinkRouteSocket(int fd)
-    : fd_(fd)
-{
+    : fd_(fd) {
     if (fd_ < 0) {
         throw std::invalid_argument(
             "NetlinkRouteSocket: invalid borrowed descriptor");
@@ -28,23 +26,20 @@ NetlinkRouteSocket::NetlinkRouteSocket(int fd)
 }
 
 NetlinkRouteSocket::NetlinkRouteSocket(
-    UniqueFd&& ownedFd) noexcept
+    UniqueFd &&ownedFd) noexcept
     : ownedFd_(std::move(ownedFd))
-    , fd_(ownedFd_.get())
-{
+      , fd_(ownedFd_.get()) {
 }
 
 NetlinkRouteSocket::NetlinkRouteSocket(
-    NetlinkRouteSocket&& other) noexcept
+    NetlinkRouteSocket &&other) noexcept
     : ownedFd_(std::move(other.ownedFd_))
-    , fd_(other.fd_)
-{
+      , fd_(other.fd_) {
     other.fd_ = -1;
 }
 
-NetlinkRouteSocket& NetlinkRouteSocket::operator=(
-    NetlinkRouteSocket&& other) noexcept
-{
+NetlinkRouteSocket &NetlinkRouteSocket::operator=(
+    NetlinkRouteSocket &&other) noexcept {
     if (this != &other) {
         ownedFd_ = std::move(other.ownedFd_);
         fd_ = other.fd_;
@@ -54,14 +49,12 @@ NetlinkRouteSocket& NetlinkRouteSocket::operator=(
     return *this;
 }
 
-NetlinkRouteSocket NetlinkRouteSocket::open()
-{
+NetlinkRouteSocket NetlinkRouteSocket::open() {
     return open(OpenOptions{});
 }
 
 NetlinkRouteSocket NetlinkRouteSocket::open(
-    OpenOptions options)
-{
+    OpenOptions options) {
     UniqueFd fd(::socket(
         AF_NETLINK,
         SOCK_RAW | SOCK_CLOEXEC,
@@ -78,7 +71,7 @@ NetlinkRouteSocket NetlinkRouteSocket::open(
 
     if (options.receiveBufferBytes) {
         const int receiveBufferBytes =
-            *options.receiveBufferBytes;
+                *options.receiveBufferBytes;
 
         if (::setsockopt(
                 fd.get(),
@@ -87,8 +80,8 @@ NetlinkRouteSocket NetlinkRouteSocket::open(
                 &receiveBufferBytes,
                 sizeof(receiveBufferBytes)) < 0) {
             PLOG(WARNING)
-                << "NetlinkRouteSocket: "
-                   "setsockopt(SO_RCVBUF) failed";
+                    << "NetlinkRouteSocket: "
+                    "setsockopt(SO_RCVBUF) failed";
         }
     }
 
@@ -98,7 +91,7 @@ NetlinkRouteSocket NetlinkRouteSocket::open(
 
     if (::bind(
             fd.get(),
-            reinterpret_cast<sockaddr*>(&address),
+            reinterpret_cast<sockaddr *>(&address),
             sizeof(address)) < 0) {
         const int error = errno;
 
@@ -111,10 +104,9 @@ NetlinkRouteSocket NetlinkRouteSocket::open(
     return NetlinkRouteSocket(std::move(fd));
 }
 
-NetlinkWaitResult waitForNetlinkDataOrStop(int dataFd, EventFdSignal& stopSignal )
-{
+NetlinkWaitResult waitForNetlinkDataOrStop(int dataFd, EventFdSignal &stopSignal) {
     if (dataFd < 0) {
-        return { NetlinkWaitStatus::data_fd_failed,EBADF,};
+        return {NetlinkWaitStatus::data_fd_failed, EBADF,};
     }
     pollfd descriptors[2]{};
 
@@ -188,8 +180,7 @@ NetlinkWaitResult waitForNetlinkDataOrStop(int dataFd, EventFdSignal& stopSignal
 
 NetlinkReceiveResult receiveNetlinkDatagram(
     int fd,
-    std::span<char> buffer)
-{
+    std::span<char> buffer) {
     if (buffer.empty()) {
         return {
             NetlinkReceiveStatus::failed,
@@ -253,5 +244,4 @@ NetlinkReceiveResult receiveNetlinkDatagram(
         0,
     };
 }
-
 } // namespace RSCGroup

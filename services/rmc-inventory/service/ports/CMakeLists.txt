@@ -2,13 +2,13 @@ add_library(inventory_service_ports INTERFACE)
 target_compile_features(inventory_service_ports INTERFACE cxx_std_20)
 
 target_include_directories(inventory_service_ports
-    INTERFACE
+        INTERFACE
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
 )
 
 target_link_libraries(
-    inventory_service_ports
-    INTERFACE
+        inventory_service_ports
+        INTERFACE
         interop_contract
         inventory_core
         rsc_util::service_runtime

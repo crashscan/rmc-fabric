@@ -5,11 +5,10 @@
 #include "ICandidateClassifier.h"
 
 namespace RSCGroup {
-
 class RuleBasedClassifier : public ICandidateClassifier {
 public:
-    CandidateClassification classify(const RemoteCandidate& candidate) override;
+    CandidateClassification classify(const RemoteCandidate &candidate) override;
+
     std::string name() const override { return "rule-based"; }
 };
-
 } // namespace RSCGroup

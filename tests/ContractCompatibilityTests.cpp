@@ -24,7 +24,6 @@
 #include <vector>
 
 namespace {
-
 using interop_contract::ClientErrorCode;
 using interop_contract::DecodeError;
 using interop_contract::DecodeErrorCode;
@@ -63,38 +62,34 @@ static_assert(static_cast<int>(observation::CandidateStatus::Aged) == 2);
 static_assert(static_cast<int>(observation::CandidateStatus::Expired) == 3);
 static_assert(static_cast<int>(observation::CandidateStatus::Removed) == 4);
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr << message << '\n';
         std::exit(EXIT_FAILURE);
     }
 }
 
-std::string fixturePath(const std::string& name)
-{
+std::string fixturePath(const std::string &name) {
     return std::string(RMC_FABRIC_SOURCE_DIR) + "/tests/fixtures/" + name;
 }
 
-Json::Value loadFixture(const std::string& name)
-{
+Json::Value loadFixture(const std::string &name) {
     return test_support::loadJsonFile(fixturePath(name));
 }
 
-Json::Value canonicalJson(const Json::Value& value)
-{
+Json::Value canonicalJson(const Json::Value &value) {
     if (value.isObject()) {
         Json::Value out(Json::objectValue);
         auto members = value.getMemberNames();
         std::sort(members.begin(), members.end());
-        for (const auto& member : members) {
+        for (const auto &member: members) {
             out[member] = canonicalJson(value[member]);
         }
         return out;
     }
     if (value.isArray()) {
         Json::Value out(Json::arrayValue);
-        for (const auto& item : value) {
+        for (const auto &item: value) {
             out.append(canonicalJson(item));
         }
         return out;
@@ -102,8 +97,7 @@ Json::Value canonicalJson(const Json::Value& value)
     return value;
 }
 
-bool jsonSemanticallyEqual(const Json::Value& lhs, const Json::Value& rhs)
-{
+bool jsonSemanticallyEqual(const Json::Value &lhs, const Json::Value &rhs) {
     if (lhs.type() != rhs.type()) {
         if (lhs.isIntegral() && rhs.isIntegral()) {
             return lhs.asLargestInt() == rhs.asLargestInt();
@@ -119,7 +113,7 @@ bool jsonSemanticallyEqual(const Json::Value& lhs, const Json::Value& rhs)
         if (lhsMembers != rhsMembers) {
             return false;
         }
-        for (const auto& member : lhsMembers) {
+        for (const auto &member: lhsMembers) {
             if (!jsonSemanticallyEqual(lhs[member], rhs[member])) {
                 return false;
             }
@@ -142,26 +136,24 @@ bool jsonSemanticallyEqual(const Json::Value& lhs, const Json::Value& rhs)
     return lhs == rhs;
 }
 
-void expectJsonEquals(const Json::Value& actual,
-                      const Json::Value& expected,
-                      const std::string& label)
-{
+void expectJsonEquals(const Json::Value &actual,
+                      const Json::Value &expected,
+                      const std::string &label) {
     const auto canonicalActual = canonicalJson(actual);
     const auto canonicalExpected = canonicalJson(expected);
     if (!jsonSemanticallyEqual(canonicalActual, canonicalExpected)) {
         std::cerr << "JSON mismatch for " << label << '\n'
-                  << "actual: " << canonicalActual.toStyledString() << '\n'
-                  << "expected: " << canonicalExpected.toStyledString() << '\n';
+                << "actual: " << canonicalActual.toStyledString() << '\n'
+                << "expected: " << canonicalExpected.toStyledString() << '\n';
         std::exit(EXIT_FAILURE);
     }
 }
 
-template <typename Fn>
-void expectDecodeError(Fn&& fn, DecodeErrorCode code, const std::string& label)
-{
+template<typename Fn>
+void expectDecodeError(Fn &&fn, DecodeErrorCode code, const std::string &label) {
     try {
         fn();
-    } catch (const DecodeError& error) {
+    } catch (const DecodeError &error) {
         expect(error.code() == code, label + ": unexpected decode error code");
         return;
     }
@@ -169,8 +161,7 @@ void expectDecodeError(Fn&& fn, DecodeErrorCode code, const std::string& label)
     std::exit(EXIT_FAILURE);
 }
 
-void testApiContractSnapshot()
-{
+void testApiContractSnapshot() {
     const Json::Value root = loadFixture("api-contract-snapshot.json");
     expect(root["publicClientApiVersion"].asUInt() == interop_contract::PUBLIC_CLIENT_API_VERSION,
            "public client API version snapshot mismatch");
@@ -179,28 +170,27 @@ void testApiContractSnapshot()
     expect(root["networkObservation"]["contractVersion"].asUInt() == observation::CONTRACT_VERSION,
            "network observation contract version snapshot mismatch");
     expect(root["inventory"]["issueCodes"]["loopStopped"].asString() ==
-               std::string(inventory::ISSUE_CODE_LOOP_STOPPED),
+           std::string(inventory::ISSUE_CODE_LOOP_STOPPED),
            "inventory issue-code snapshot mismatch");
     expect(root["inventory"]["serviceName"].asString() == std::string(inventory::SERVICE_NAME),
            "inventory service name snapshot mismatch");
     expect(root["networkObservation"]["serviceName"].asString() == std::string(observation::SERVICE_NAME),
            "network observation service name snapshot mismatch");
     expect(root["networkObservation"]["issueCodes"]["runtimeStopped"].asString() ==
-               std::string(observation::ISSUE_CODE_RUNTIME_STOPPED),
+           std::string(observation::ISSUE_CODE_RUNTIME_STOPPED),
            "network observation runtime issue-code snapshot mismatch");
     expect(root["networkObservation"]["issueCodes"]["agingLoopStopped"].asString() ==
-               std::string(observation::ISSUE_CODE_AGING_LOOP_STOPPED),
+           std::string(observation::ISSUE_CODE_AGING_LOOP_STOPPED),
            "network observation aging issue-code snapshot mismatch");
     expect(root["networkObservation"]["issueCodes"]["lldpUnavailable"].asString() ==
-               std::string(observation::ISSUE_CODE_LLDP_UNAVAILABLE),
+           std::string(observation::ISSUE_CODE_LLDP_UNAVAILABLE),
            "network observation lldp issue-code snapshot mismatch");
     expect(root["clientErrorCode"]["invalid_response"].asInt() ==
-               static_cast<int>(ClientErrorCode::invalid_response),
+           static_cast<int>(ClientErrorCode::invalid_response),
            "client error code snapshot mismatch");
 }
 
-void testInventoryFixtureRoundTrip(const std::string& name)
-{
+void testInventoryFixtureRoundTrip(const std::string &name) {
     const Json::Value root = loadFixture(name);
     expect(root["contractVersion"].asUInt() == inventory::CONTRACT_VERSION,
            "inventory fixture contract version mismatch");
@@ -224,8 +214,7 @@ void testInventoryFixtureRoundTrip(const std::string& name)
                      name + ":issues");
 }
 
-void testNetworkFixtureRoundTrip(const std::string& name)
-{
+void testNetworkFixtureRoundTrip(const std::string &name) {
     const Json::Value root = loadFixture(name);
     expect(root["contractVersion"].asUInt() == observation::CONTRACT_VERSION,
            "network fixture contract version mismatch");
@@ -237,7 +226,7 @@ void testNetworkFixtureRoundTrip(const std::string& name)
     const auto decodedCandidate = observation_codec::fromVariantMapCandidate(candidateMap);
 
     test_support::VariantMap reencodedSnapshot;
-    for (const auto& [ifname, iface] : decodedSnapshot.interfaces) {
+    for (const auto &[ifname, iface]: decodedSnapshot.interfaces) {
         reencodedSnapshot.emplace(ifname, DBus::Variant(observation_codec::toVariantMap(iface)));
     }
 
@@ -249,35 +238,33 @@ void testNetworkFixtureRoundTrip(const std::string& name)
                      name + ":candidate");
 }
 
-void testInventoryEncodingIsCanonical()
-{
+void testInventoryEncodingIsCanonical() {
     inventory::InventoryIssues lhs;
     lhs.emplace("uuid-file", inventory::InventoryFields{
-        {std::string(inventory::ISSUE_MESSAGE), std::string("missing")},
-        {std::string(inventory::ISSUE_SEVERITY), std::string(inventory::SEVERITY_ERROR)},
-    });
+                    {std::string(inventory::ISSUE_MESSAGE), std::string("missing")},
+                    {std::string(inventory::ISSUE_SEVERITY), std::string(inventory::SEVERITY_ERROR)},
+                });
     lhs.emplace("firmware-file", inventory::InventoryFields{
-        {std::string(inventory::ISSUE_SEVERITY), std::string(inventory::SEVERITY_WARNING)},
-        {std::string(inventory::ISSUE_MESSAGE), std::string("stale")},
-    });
+                    {std::string(inventory::ISSUE_SEVERITY), std::string(inventory::SEVERITY_WARNING)},
+                    {std::string(inventory::ISSUE_MESSAGE), std::string("stale")},
+                });
 
     inventory::InventoryIssues rhs;
     rhs.emplace("firmware-file", inventory::InventoryFields{
-        {std::string(inventory::ISSUE_MESSAGE), std::string("stale")},
-        {std::string(inventory::ISSUE_SEVERITY), std::string(inventory::SEVERITY_WARNING)},
-    });
+                    {std::string(inventory::ISSUE_MESSAGE), std::string("stale")},
+                    {std::string(inventory::ISSUE_SEVERITY), std::string(inventory::SEVERITY_WARNING)},
+                });
     rhs.emplace("uuid-file", inventory::InventoryFields{
-        {std::string(inventory::ISSUE_SEVERITY), std::string(inventory::SEVERITY_ERROR)},
-        {std::string(inventory::ISSUE_MESSAGE), std::string("missing")},
-    });
+                    {std::string(inventory::ISSUE_SEVERITY), std::string(inventory::SEVERITY_ERROR)},
+                    {std::string(inventory::ISSUE_MESSAGE), std::string("missing")},
+                });
 
     expectJsonEquals(test_support::jsonFromNestedVariantMap(inventory_codec::encodeIssues(lhs)),
                      test_support::jsonFromNestedVariantMap(inventory_codec::encodeIssues(rhs)),
                      "inventory canonical issue encoding");
 }
 
-void testNetworkEncodingIsCanonical()
-{
+void testNetworkEncodingIsCanonical() {
     observation::RemoteCandidate lhs;
     lhs.mac = "00:11:22:33:44:55";
     lhs.classification = observation::CandidateClassification::RemoteEndpoint;
@@ -300,13 +287,12 @@ void testNetworkEncodingIsCanonical()
                      "network canonical candidate encoding");
 }
 
-void testInventoryIngressLimits()
-{
+void testInventoryIngressLimits() {
     inventory_codec::VariantMap fields;
     for (std::size_t index = 0; index < interop_contract::ingress::inventory::kMaxFields + 1; ++index) {
         fields.emplace("key-" + std::to_string(index), DBus::Variant(std::string("value")));
     }
-    expectDecodeError([&] { (void)inventory_codec::decodeFields(fields); },
+    expectDecodeError([&] { (void) inventory_codec::decodeFields(fields); },
                       DecodeErrorCode::limit_exceeded,
                       "inventory oversized field map");
 
@@ -315,19 +301,18 @@ void testInventoryIngressLimits()
     snapshot.emplace(std::string(inventory::FIELD_TIMESTAMP), DBus::Variant(std::numeric_limits<std::uint64_t>::max()));
     snapshot.emplace(std::string(inventory::FIELD_READY), DBus::Variant(true));
     snapshot.emplace(std::string(inventory::FIELD_PHASE), DBus::Variant(std::string("live")));
-    expectDecodeError([&] { (void)inventory_codec::decodeSnapshot(snapshot); },
+    expectDecodeError([&] { (void) inventory_codec::decodeSnapshot(snapshot); },
                       DecodeErrorCode::invalid_value,
                       "inventory timestamp overflow");
 
     snapshot[std::string(inventory::FIELD_TIMESTAMP)] = DBus::Variant(std::int64_t{1});
     snapshot["oversized"] = DBus::Variant(std::string(interop_contract::ingress::kMaxStringLength + 1, 'x'));
-    expectDecodeError([&] { (void)inventory_codec::decodeSnapshot(snapshot); },
+    expectDecodeError([&] { (void) inventory_codec::decodeSnapshot(snapshot); },
                       DecodeErrorCode::limit_exceeded,
                       "inventory oversized string");
 }
 
-void testNetworkIngressLimits()
-{
+void testNetworkIngressLimits() {
     std::map<std::string, DBus::Variant> iface;
     iface.emplace(std::string(observation::K_IFINDEX), DBus::Variant(std::int32_t{7}));
     iface.emplace(std::string(observation::K_IFNAME), DBus::Variant(std::string("eth0")));
@@ -336,12 +321,13 @@ void testNetworkIngressLimits()
     iface.emplace(std::string(observation::K_RUNNING), DBus::Variant(true));
     iface.emplace(std::string(observation::K_OPERSTATE), DBus::Variant(std::string("UP")));
     std::vector<DBus::Variant> ip4;
-    for (std::size_t index = 0; index < interop_contract::ingress::network_observation::kMaxStringSetEntries + 1; ++index) {
+    for (std::size_t index = 0; index < interop_contract::ingress::network_observation::kMaxStringSetEntries + 1; ++
+         index) {
         ip4.emplace_back(std::string("10.0.0.") + std::to_string(index) + "/24");
     }
     iface.emplace(std::string(observation::K_IPV4), DBus::Variant(ip4));
     iface.emplace(std::string(observation::K_IPV6), DBus::Variant(std::vector<DBus::Variant>{}));
-    expectDecodeError([&] { (void)observation_codec::fromVariantMapIface(iface); },
+    expectDecodeError([&] { (void) observation_codec::fromVariantMapIface(iface); },
                       DecodeErrorCode::limit_exceeded,
                       "network oversized string set");
 
@@ -355,13 +341,12 @@ void testNetworkIngressLimits()
     candidate.emplace(std::string(observation::K_NEIGHBOR_IFACES), DBus::Variant(std::vector<DBus::Variant>{}));
     candidate.emplace(std::string(observation::K_IPV4), DBus::Variant(std::vector<DBus::Variant>{}));
     candidate.emplace(std::string(observation::K_IPV6), DBus::Variant(std::vector<DBus::Variant>{}));
-    expectDecodeError([&] { (void)observation_codec::fromVariantMapCandidate(candidate); },
+    expectDecodeError([&] { (void) observation_codec::fromVariantMapCandidate(candidate); },
                       DecodeErrorCode::invalid_value,
                       "network unknown enum");
 }
 
-void testDecodeErrorsDoNotReturnPartialObjects()
-{
+void testDecodeErrorsDoNotReturnPartialObjects() {
     inventory_codec::VariantMap snapshot;
     snapshot.emplace(std::string(inventory::FIELD_VERSION), DBus::Variant(std::uint64_t{1}));
     snapshot.emplace(std::string(inventory::FIELD_TIMESTAMP), DBus::Variant(std::int64_t{1}));
@@ -371,9 +356,9 @@ void testDecodeErrorsDoNotReturnPartialObjects()
 
     bool returned = false;
     try {
-        (void)inventory_codec::decodeSnapshot(snapshot);
+        (void) inventory_codec::decodeSnapshot(snapshot);
         returned = true;
-    } catch (const DecodeError&) {
+    } catch (const DecodeError &) {
     }
     expect(!returned, "inventory decode should not return partial snapshot");
 
@@ -389,17 +374,15 @@ void testDecodeErrorsDoNotReturnPartialObjects()
 
     returned = false;
     try {
-        (void)observation_codec::fromVariantMapIface(iface);
+        (void) observation_codec::fromVariantMapIface(iface);
         returned = true;
-    } catch (const DecodeError&) {
+    } catch (const DecodeError &) {
     }
     expect(!returned, "network decode should not return partial interface");
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testApiContractSnapshot();
     testInventoryFixtureRoundTrip("inventory-v1-current.json");
     testInventoryFixtureRoundTrip("inventory-v1-historical.json");

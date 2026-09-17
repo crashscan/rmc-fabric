@@ -2,39 +2,39 @@ find_package(SigCxx REQUIRED MODULE)
 find_package(DBusCxx REQUIRED MODULE)
 
 add_library(network_observation_dbus_codec STATIC
-    dbus/NetworkObservationDbusCodec.cpp
+        dbus/NetworkObservationDbusCodec.cpp
 )
 target_compile_features(network_observation_dbus_codec PUBLIC cxx_std_20)
 target_include_directories(network_observation_dbus_codec
-    PUBLIC
+        PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dbus>
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}/rmc_fabric/network_observation>
 )
 target_link_libraries(network_observation_dbus_codec
-    PUBLIC
+        PUBLIC
         interop_contract
         DBusCxx::DBusCxx
 )
 
 add_library(network_observation_dbus_transport STATIC
-    dbus/NetworkObservationQueryHandler.cpp
-    dbus/DbusTransport.cpp
-    dbus/NetworkObservationDbusAdapter.cpp
+        dbus/NetworkObservationQueryHandler.cpp
+        dbus/DbusTransport.cpp
+        dbus/NetworkObservationDbusAdapter.cpp
 )
 target_compile_features(network_observation_dbus_transport PUBLIC cxx_std_20)
 target_include_directories(network_observation_dbus_transport
-    PUBLIC
+        PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/dbus>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../service/ports>
         $<INSTALL_INTERFACE:include/network-observation/transports>
 )
 target_link_libraries(network_observation_dbus_transport
-    PUBLIC
+        PUBLIC
         network_observation_service_ports
         network_observation_dbus_codec
         rsc_util::service_dbus
-    PRIVATE
+        PRIVATE
         rsc_util::service_dbus
         DBusCxx::DBusCxx
         SigCxx::SigCxx
@@ -42,45 +42,45 @@ target_link_libraries(network_observation_dbus_transport
 )
 
 add_library(network_observation_stdout_transport STATIC
-    stdout/StdoutTransport.cpp
+        stdout/StdoutTransport.cpp
 )
 target_compile_features(network_observation_stdout_transport PUBLIC cxx_std_20)
 target_include_directories(network_observation_stdout_transport
-    PUBLIC
+        PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/stdout>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../service/ports>
         $<INSTALL_INTERFACE:include/network-observation/transports/stdout>
 )
 target_link_libraries(network_observation_stdout_transport
-    PUBLIC
+        PUBLIC
         network_observation_service_ports
 )
 
 add_library(network_observation_transport_factory STATIC
-    TransportFactory.cpp
+        TransportFactory.cpp
 )
 target_compile_features(network_observation_transport_factory PUBLIC cxx_std_20)
 target_include_directories(network_observation_transport_factory
-    PUBLIC
+        PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}>
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../service/ports>
         $<INSTALL_INTERFACE:include/network-observation/transports>
 )
 target_link_libraries(network_observation_transport_factory
-    PUBLIC
+        PUBLIC
         network_observation_service_ports
         network_observation_dbus_transport
         network_observation_stdout_transport
 )
 
-if(BUILD_TESTING)
+if (BUILD_TESTING)
     add_executable(network_observation_dbus_codec_tests
-        dbus/tests/NetworkObservationDbusCodecTests.cpp
+            dbus/tests/NetworkObservationDbusCodecTests.cpp
     )
     target_compile_features(network_observation_dbus_codec_tests PRIVATE cxx_std_20)
     target_link_libraries(network_observation_dbus_codec_tests
-        PRIVATE
+            PRIVATE
             network_observation_dbus_codec
             DBusCxx::DBusCxx
     )
@@ -89,37 +89,37 @@ if(BUILD_TESTING)
 
 
     add_executable(network_observation_query_handler_tests
-        dbus/tests/NetworkObservationQueryHandlerTests.cpp
+            dbus/tests/NetworkObservationQueryHandlerTests.cpp
     )
 
     target_compile_features(
-        network_observation_query_handler_tests
-        PRIVATE cxx_std_20
+            network_observation_query_handler_tests
+            PRIVATE cxx_std_20
     )
 
     target_link_libraries(
-        network_observation_query_handler_tests
-        PRIVATE
+            network_observation_query_handler_tests
+            PRIVATE
             network_observation_dbus_transport
             DBusCxx::DBusCxx
             pthread
     )
 
     add_test(
-        NAME network_observation_query_handler_tests
-        COMMAND network_observation_query_handler_tests
+            NAME network_observation_query_handler_tests
+            COMMAND network_observation_query_handler_tests
     )
 
     set_tests_properties(
-        network_observation_query_handler_tests
-        PROPERTIES
+            network_observation_query_handler_tests
+            PROPERTIES
             TIMEOUT 10
             LABELS "unit;resilience"
     )
-endif()
+endif ()
 
 install(
-    TARGETS network_observation_dbus_codec
-    EXPORT  rmc_fabricTargets
-    ARCHIVE COMPONENT dev
+        TARGETS network_observation_dbus_codec
+        EXPORT rmc_fabricTargets
+        ARCHIVE COMPONENT dev
 )

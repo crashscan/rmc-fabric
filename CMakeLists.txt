@@ -13,36 +13,36 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 # ---------------------------------------------------------------------------
 # Developer/CI options (not exported to downstream consumers)
 # ---------------------------------------------------------------------------
-option(RMC_FABRIC_WERROR   "Treat warnings as errors (CI/developer builds)"   OFF)
-option(RMC_FABRIC_COVERAGE "Enable gcov/lcov coverage instrumentation"        OFF)
+option(RMC_FABRIC_WERROR "Treat warnings as errors (CI/developer builds)" OFF)
+option(RMC_FABRIC_COVERAGE "Enable gcov/lcov coverage instrumentation" OFF)
 option(RMC_FABRIC_BUILD_INTEGRATION_TESTS "Build hermetic D-Bus integration tests" OFF)
 option(RMC_FABRIC_BUILD_FUZZ_TARGETS "Build libFuzzer codec ingress targets when supported" OFF)
 option(RMC_FABRIC_BUILD_BENCHMARKS "Build benchmark-style performance executables" OFF)
 set(RMC_FABRIC_SANITIZE "" CACHE STRING "Comma-separated sanitizer list, e.g. address,undefined (passed to -fsanitize=)")
 
-if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
+if (CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang|AppleClang")
     add_compile_options(-Wall -Wextra -Wshadow -Wno-unused-parameter)
-    if(RMC_FABRIC_WERROR)
+    if (RMC_FABRIC_WERROR)
         add_compile_options(-Werror)
-    endif()
+    endif ()
 
-    if(RMC_FABRIC_SANITIZE)
+    if (RMC_FABRIC_SANITIZE)
         add_compile_options(-fsanitize=${RMC_FABRIC_SANITIZE} -fno-omit-frame-pointer)
         add_link_options(-fsanitize=${RMC_FABRIC_SANITIZE})
-    endif()
-endif()
+    endif ()
+endif ()
 
-if(RMC_FABRIC_COVERAGE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+if (RMC_FABRIC_COVERAGE AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_compile_options(--coverage)
     add_link_options(--coverage)
-endif()
+endif ()
 
 # Global compile flags: -g is intentionally omitted here; debug symbols are
 # controlled by CMAKE_BUILD_TYPE / CMAKE_C(XX)_FLAGS_DEBUG.
 # Position-independent code and thread support are set repository-wide because
 # all targets are either shared libs or executables that link shared libs.
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -fPIC -pthread")
-set(CMAKE_C_FLAGS   "${CMAKE_C_FLAGS}   -fPIC -pthread")
+set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS}   -fPIC -pthread")
 
 set(BASEPATH "${CMAKE_SOURCE_DIR}")
 set(LIBPATH "${CMAKE_SOURCE_DIR}/lib")
@@ -57,12 +57,12 @@ include_directories(
         ${PROJECT_BINARY_DIR}
         ${GLOG_INCLUDE_DIRS}
 )
-if(RSC_UTIL_INCLUDE_DIR)
+if (RSC_UTIL_INCLUDE_DIR)
     include_directories(
             ${RSC_UTIL_INCLUDE_DIR}/
             ${RSC_UTIL_INCLUDE_DIR}/rsc_util
     )
-endif()
+endif ()
 
 list(PREPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 
@@ -74,10 +74,10 @@ include(GNUInstallDirs)
 include(CMakePackageConfigHelpers)
 
 find_package(
-    rsc_util 2.1
-    CONFIG
-    REQUIRED
-    COMPONENTS
+        rsc_util 2.1
+        CONFIG
+        REQUIRED
+        COMPONENTS
         client_contract
         service_runtime
         service_dbus
@@ -90,7 +90,7 @@ option(
         ON
 )
 
-if(RMC_FABRIC_USE_EXTERNAL_CLIENT_CONTRACT)
+if (RMC_FABRIC_USE_EXTERNAL_CLIENT_CONTRACT)
     find_package(
             rsc_util 2.1
             CONFIG
@@ -98,51 +98,51 @@ if(RMC_FABRIC_USE_EXTERNAL_CLIENT_CONTRACT)
             COMPONENTS
             client_contract
     )
-endif()
+endif ()
 
 # ---------------------------------------------------------------------------
 # Testing — BUILD_TESTING is the CMake standard option; include(CTest) honours it.
 # ---------------------------------------------------------------------------
 include(CTest)
 
-if(BUILD_TESTING)
-  add_test(
-    NAME architecture_no_transport_in_interop_contract
-    COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check_no_transport_in_interop_contract.sh
-  )
-  set_tests_properties(architecture_no_transport_in_interop_contract PROPERTIES
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    LABELS "architecture"
-  )
+if (BUILD_TESTING)
+    add_test(
+            NAME architecture_no_transport_in_interop_contract
+            COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check_no_transport_in_interop_contract.sh
+    )
+    set_tests_properties(architecture_no_transport_in_interop_contract PROPERTIES
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            LABELS "architecture"
+    )
 
-  add_test(
-    NAME architecture_component_boundaries
-    COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check_component_boundaries.sh ${CMAKE_SOURCE_DIR}
-  )
-  set_tests_properties(architecture_component_boundaries PROPERTIES
-    WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
-    LABELS "architecture"
-  )
+    add_test(
+            NAME architecture_component_boundaries
+            COMMAND sh ${CMAKE_SOURCE_DIR}/tools/check_component_boundaries.sh ${CMAKE_SOURCE_DIR}
+    )
+    set_tests_properties(architecture_component_boundaries PROPERTIES
+            WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+            LABELS "architecture"
+    )
 
-  add_test(
-    NAME package_consumer_verification
-    COMMAND ${CMAKE_COMMAND}
-      -DVERIFY_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}
-      -DVERIFY_CONSUMER_BINARY_DIR=${CMAKE_BINARY_DIR}
-      -DVERIFY_CONSUMER_GENERATOR=${CMAKE_GENERATOR}
-      -DVERIFY_CONSUMER_BUILD_TYPE=${CMAKE_BUILD_TYPE}
-      -DVERIFY_CONSUMER_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
-      -P ${CMAKE_SOURCE_DIR}/cmake/VerifyPackageConsumers.cmake
-  )
-  set_tests_properties(package_consumer_verification PROPERTIES TIMEOUT 180 LABELS "package")
-endif()
+    add_test(
+            NAME package_consumer_verification
+            COMMAND ${CMAKE_COMMAND}
+            -DVERIFY_CONSUMER_SOURCE_DIR=${CMAKE_SOURCE_DIR}
+            -DVERIFY_CONSUMER_BINARY_DIR=${CMAKE_BINARY_DIR}
+            -DVERIFY_CONSUMER_GENERATOR=${CMAKE_GENERATOR}
+            -DVERIFY_CONSUMER_BUILD_TYPE=${CMAKE_BUILD_TYPE}
+            -DVERIFY_CONSUMER_MAKE_PROGRAM=${CMAKE_MAKE_PROGRAM}
+            -P ${CMAKE_SOURCE_DIR}/cmake/VerifyPackageConsumers.cmake
+    )
+    set_tests_properties(package_consumer_verification PROPERTIES TIMEOUT 180 LABELS "package")
+endif ()
 
 add_subdirectory(lib)
 add_subdirectory(services)
 
-if(BUILD_TESTING)
-  add_subdirectory(tests)
-endif()
+if (BUILD_TESTING)
+    add_subdirectory(tests)
+endif ()
 
 # ---------------------------------------------------------------------------
 # Install and CMake package export
@@ -153,59 +153,59 @@ endif()
 set(RMC_FABRIC_INSTALL_CMAKEDIR "${CMAKE_INSTALL_LIBDIR}/cmake/rmc_fabric")
 
 install(
-    EXPORT      rmc_fabricTargets
-    NAMESPACE   rmc_fabric::
-    DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
-    COMPONENT   dev
+        EXPORT rmc_fabricTargets
+        NAMESPACE rmc_fabric::
+        DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
+        COMPONENT dev
 )
 
 configure_package_config_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rmc_fabricConfig.cmake.in"
-    "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfig.cmake"
-    INSTALL_DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rmc_fabricConfig.cmake.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfig.cmake"
+        INSTALL_DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
 )
 
 configure_file(
-    "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindSigCxx.cmake"
-    "${CMAKE_CURRENT_BINARY_DIR}/FindSigCxx.cmake"
-    COPYONLY
+        "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindSigCxx.cmake"
+        "${CMAKE_CURRENT_BINARY_DIR}/FindSigCxx.cmake"
+        COPYONLY
 )
 
 export(
-    EXPORT rmc_fabricTargets
-    FILE "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricTargets.cmake"
-    NAMESPACE rmc_fabric::
+        EXPORT rmc_fabricTargets
+        FILE "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricTargets.cmake"
+        NAMESPACE rmc_fabric::
 )
 
 write_basic_package_version_file(
-    "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfigVersion.cmake"
-    VERSION       ${PROJECT_VERSION}
-    COMPATIBILITY SameMajorVersion
+        "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfigVersion.cmake"
+        VERSION ${PROJECT_VERSION}
+        COMPATIBILITY SameMajorVersion
 )
 
 install(
-    FILES
+        FILES
         "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfig.cmake"
         "${CMAKE_CURRENT_BINARY_DIR}/rmc_fabricConfigVersion.cmake"
         "${CMAKE_CURRENT_SOURCE_DIR}/cmake/FindSigCxx.cmake"
-    DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
-    COMPONENT   dev
+        DESTINATION "${RMC_FABRIC_INSTALL_CMAKEDIR}"
+        COMPONENT dev
 )
 
 # ---------------------------------------------------------------------------
 # Packaging — derive all version variables from the single project() declaration.
 # ---------------------------------------------------------------------------
-set(CPACK_PACKAGE_NAME                rmc-fabric)
+set(CPACK_PACKAGE_NAME rmc-fabric)
 set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "RSC RMC fabric services, provides basic inventory and discovery services.")
-set(CPACK_PACKAGE_CONTACT             "Vadim Vassiliev")
-set(CPACK_PACKAGE_VENDOR              "RSC Group")
-set(CPACK_PACKAGE_LICENSE             "GPL")
-set(CPACK_PACKAGE_GROUP               "Management/Util")
-set(CPACK_PACKAGE_RELEASE             1)
+set(CPACK_PACKAGE_CONTACT "Vadim Vassiliev")
+set(CPACK_PACKAGE_VENDOR "RSC Group")
+set(CPACK_PACKAGE_LICENSE "GPL")
+set(CPACK_PACKAGE_GROUP "Management/Util")
+set(CPACK_PACKAGE_RELEASE 1)
 set(CPACK_PACKAGE_VERSION_MAJOR ${PROJECT_VERSION_MAJOR})
 set(CPACK_PACKAGE_VERSION_MINOR ${PROJECT_VERSION_MINOR})
 set(CPACK_PACKAGE_VERSION_PATCH ${PROJECT_VERSION_PATCH})
-set(CPACK_PACKAGE_VERSION       ${PROJECT_VERSION})
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 
 set(CPACK_GENERATOR "DEB" "RPM" "TGZ")
 set(CPACK_PACKAGING_INSTALL_PREFIX ${CMAKE_INSTALL_PREFIX})

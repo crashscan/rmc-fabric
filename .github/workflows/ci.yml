@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main, "copilot/**"]
+    branches: [ main, "copilot/**" ]
   pull_request:
-    branches: [main]
+    branches: [ main ]
   schedule:
     - cron: "0 4 * * 1"
   workflow_dispatch:
@@ -27,7 +27,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        preset: [dev, asan]
+        preset: [ dev, asan ]
 
     steps:
       - uses: actions/checkout@v4

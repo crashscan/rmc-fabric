@@ -23,18 +23,16 @@
 #include <vector>
 
 namespace {
-
 using namespace RSCGroup;
 
 constexpr auto testTimeout = std::chrono::seconds(5);
 
-void expect(bool condition, const std::string& message)
-{
+void expect(bool condition, const std::string &message) {
     if (!condition) {
         std::cerr
-            << "NetlinkIoTests: "
-            << message
-            << '\n';
+                << "NetlinkIoTests: "
+                << message
+                << '\n';
 
         std::exit(EXIT_FAILURE);
     }
@@ -45,8 +43,7 @@ struct SocketPair {
     UniqueFd peer;
 };
 
-[[nodiscard]] SocketPair makeSocketPair(int type)
-{
+[[nodiscard]] SocketPair makeSocketPair(int type) {
     int descriptors[2]{-1, -1};
 
     const int result = ::socketpair(
@@ -57,9 +54,9 @@ struct SocketPair {
 
     if (result < 0) {
         std::cerr
-            << "NetlinkIoTests: socketpair failed: "
-            << std::strerror(errno)
-            << '\n';
+                << "NetlinkIoTests: socketpair failed: "
+                << std::strerror(errno)
+                << '\n';
 
         std::exit(EXIT_FAILURE);
     }
@@ -72,8 +69,7 @@ struct SocketPair {
 
 void sendDatagram(
     int fd,
-    std::span<const char> payload)
-{
+    std::span<const char> payload) {
     const ssize_t sent = ::send(
         fd,
         payload.data(),
@@ -87,8 +83,7 @@ void sendDatagram(
 
 void sendDatagram(
     int fd,
-    std::string_view payload)
-{
+    std::string_view payload) {
     sendDatagram(
         fd,
         std::span<const char>{
@@ -97,8 +92,7 @@ void sendDatagram(
         });
 }
 
-[[nodiscard]] bool isReadable(int fd)
-{
+[[nodiscard]] bool isReadable(int fd) {
     pollfd descriptor{};
     descriptor.fd = fd;
     descriptor.events = POLLIN;
@@ -110,9 +104,9 @@ void sendDatagram(
 
     if (result < 0) {
         std::cerr
-            << "NetlinkIoTests: poll failed: "
-            << std::strerror(errno)
-            << '\n';
+                << "NetlinkIoTests: poll failed: "
+                << std::strerror(errno)
+                << '\n';
 
         std::exit(EXIT_FAILURE);
     }
@@ -121,8 +115,7 @@ void sendDatagram(
            (descriptor.revents & POLLIN) != 0;
 }
 
-void testBorrowedSocketDoesNotCloseDescriptor()
-{
+void testBorrowedSocketDoesNotCloseDescriptor() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
 
     const int borrowedFd = pair.tested.get();
@@ -147,12 +140,12 @@ void testBorrowedSocketDoesNotCloseDescriptor()
 
     sendDatagram(pair.peer.get(), payload);
 
-    std::array<char, 64> buffer{};
+    std::array < char, 64 > buffer{};
 
     const NetlinkReceiveResult result =
-        receiveNetlinkDatagram(
-            pair.tested.get(),
-            buffer);
+            receiveNetlinkDatagram(
+                pair.tested.get(),
+                buffer);
 
     expect(
         result.status == NetlinkReceiveStatus::received,
@@ -167,8 +160,7 @@ void testBorrowedSocketDoesNotCloseDescriptor()
         "borrowed descriptor should receive the expected payload");
 }
 
-void testBorrowedSocketMovePreservesDescriptor()
-{
+void testBorrowedSocketMovePreservesDescriptor() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
 
     const int borrowedFd = pair.tested.get();
@@ -190,26 +182,25 @@ void testBorrowedSocketMovePreservesDescriptor()
 
     sendDatagram(pair.peer.get(), payload);
 
-    std::array<char, 32> buffer{};
+    std::array < char, 32 > buffer{};
 
     const auto result =
-        receiveNetlinkDatagram(
-            pair.tested.get(),
-            buffer);
+            receiveNetlinkDatagram(
+                pair.tested.get(),
+                buffer);
 
     expect(
         result.received(),
         "moved borrowed wrapper must not close the descriptor");
 }
 
-void testInvalidBorrowedDescriptorIsRejected()
-{
+void testInvalidBorrowedDescriptorIsRejected() {
     bool threw = false;
 
     try {
         NetlinkRouteSocket socket(-1);
-        (void)socket;
-    } catch (const std::invalid_argument&) {
+        (void) socket;
+    } catch (const std::invalid_argument &) {
         threw = true;
     }
 
@@ -218,8 +209,7 @@ void testInvalidBorrowedDescriptorIsRejected()
         "negative borrowed descriptor should throw invalid_argument");
 }
 
-void testWaitReturnsDataReady()
-{
+void testWaitReturnsDataReady() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
     EventFdSignal stopSignal;
 
@@ -228,9 +218,9 @@ void testWaitReturnsDataReady()
     sendDatagram(pair.peer.get(), payload);
 
     const NetlinkWaitResult result =
-        waitForNetlinkDataOrStop(
-            pair.tested.get(),
-            stopSignal);
+            waitForNetlinkDataOrStop(
+                pair.tested.get(),
+                stopSignal);
 
     expect(
         result.status == NetlinkWaitStatus::data_ready,
@@ -244,20 +234,19 @@ void testWaitReturnsDataReady()
         !isReadable(stopSignal.fd()),
         "data readiness must not alter the stop signal");
 
-    std::array<char, 32> buffer{};
+    std::array < char, 32 > buffer{};
 
     const auto receiveResult =
-        receiveNetlinkDatagram(
-            pair.tested.get(),
-            buffer);
+            receiveNetlinkDatagram(
+                pair.tested.get(),
+                buffer);
 
     expect(
         receiveResult.received(),
         "queued data should remain available after wait returns");
 }
 
-void testWaitReturnsStoppedAndDrainsSignal()
-{
+void testWaitReturnsStoppedAndDrainsSignal() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
     EventFdSignal stopSignal;
 
@@ -277,7 +266,7 @@ void testWaitReturnsStoppedAndDrainsSignal()
 
     expect(
         waiter.wait_for(testTimeout) ==
-            std::future_status::ready,
+        std::future_status::ready,
         "waitForNetlinkDataOrStop did not wake after stop signal");
 
     const NetlinkWaitResult result = waiter.get();
@@ -295,8 +284,7 @@ void testWaitReturnsStoppedAndDrainsSignal()
         "wait helper should drain the stop signal");
 }
 
-void testStopTakesPriorityOverData()
-{
+void testStopTakesPriorityOverData() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
     EventFdSignal stopSignal;
 
@@ -311,9 +299,9 @@ void testStopTakesPriorityOverData()
         "failed to signal stop eventfd");
 
     const NetlinkWaitResult result =
-        waitForNetlinkDataOrStop(
-            pair.tested.get(),
-            stopSignal);
+            waitForNetlinkDataOrStop(
+                pair.tested.get(),
+                stopSignal);
 
     expect(
         result.status == NetlinkWaitStatus::stopped,
@@ -331,26 +319,24 @@ void testStopTakesPriorityOverData()
         "prioritized stop signal should be drained");
 }
 
-void testInvalidDataDescriptorReportsFailure()
-{
+void testInvalidDataDescriptorReportsFailure() {
     EventFdSignal stopSignal;
 
     const NetlinkWaitResult result =
-        waitForNetlinkDataOrStop(
-            -1,
-            stopSignal);
+            waitForNetlinkDataOrStop(
+                -1,
+                stopSignal);
 
-        expect(
-            result.status == NetlinkWaitStatus::data_fd_failed,
-            "negative descriptor should return data_fd_failed");
+    expect(
+        result.status == NetlinkWaitStatus::data_fd_failed,
+        "negative descriptor should return data_fd_failed");
 
-        expect(
-            result.error == EBADF,
-            "negative descriptor should report EBADF");
+    expect(
+        result.error == EBADF,
+        "negative descriptor should report EBADF");
 }
 
-void testClosedDataDescriptorReportsPollFailure()
-{
+void testClosedDataDescriptorReportsPollFailure() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
     EventFdSignal stopSignal;
 
@@ -361,9 +347,9 @@ void testClosedDataDescriptorReportsPollFailure()
         "failed to close test data descriptor");
 
     const NetlinkWaitResult result =
-        waitForNetlinkDataOrStop(
-            closedFd,
-            stopSignal);
+            waitForNetlinkDataOrStop(
+                closedFd,
+                stopSignal);
 
     expect(
         result.status == NetlinkWaitStatus::data_fd_failed,
@@ -374,21 +360,21 @@ void testClosedDataDescriptorReportsPollFailure()
         "data descriptor poll failure should report EIO");
 }
 
-void testReceiveCompleteDatagram()
-{
+void testReceiveCompleteDatagram() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
 
     constexpr std::string_view payload{
-        "complete-netlink-test-datagram"};
+        "complete-netlink-test-datagram"
+    };
 
     sendDatagram(pair.peer.get(), payload);
 
-    std::array<char, 128> buffer{};
+    std::array < char, 128 > buffer{};
 
     const NetlinkReceiveResult result =
-        receiveNetlinkDatagram(
-            pair.tested.get(),
-            buffer);
+            receiveNetlinkDatagram(
+                pair.tested.get(),
+                buffer);
 
     expect(
         result.status == NetlinkReceiveStatus::received,
@@ -407,8 +393,7 @@ void testReceiveCompleteDatagram()
         "received datagram contents should match");
 }
 
-void testReceiveReportsTruncation()
-{
+void testReceiveReportsTruncation() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
 
     std::vector<char> payload(1024, 'x');
@@ -420,12 +405,12 @@ void testReceiveReportsTruncation()
             payload.size(),
         });
 
-    std::array<char, 16> buffer{};
+    std::array < char, 16 > buffer{};
 
     const NetlinkReceiveResult result =
-        receiveNetlinkDatagram(
-            pair.tested.get(),
-            buffer);
+            receiveNetlinkDatagram(
+                pair.tested.get(),
+                buffer);
 
     expect(
         result.status == NetlinkReceiveStatus::truncated,
@@ -440,8 +425,7 @@ void testReceiveReportsTruncation()
         "truncated datagram should report EMSGSIZE");
 }
 
-void testReceiveReportsClosedSocket()
-{
+void testReceiveReportsClosedSocket() {
     /*
      * SOCK_STREAM provides EOF when the peer closes. A connected datagram
      * socket does not generally report peer closure as a zero-length receive.
@@ -450,12 +434,12 @@ void testReceiveReportsClosedSocket()
 
     pair.peer.reset();
 
-    std::array<char, 32> buffer{};
+    std::array < char, 32 > buffer{};
 
     const NetlinkReceiveResult result =
-        receiveNetlinkDatagram(
-            pair.tested.get(),
-            buffer);
+            receiveNetlinkDatagram(
+                pair.tested.get(),
+                buffer);
 
     expect(
         result.status == NetlinkReceiveStatus::closed,
@@ -470,14 +454,13 @@ void testReceiveReportsClosedSocket()
         "closed socket should report ECONNRESET");
 }
 
-void testReceiveRejectsEmptyBuffer()
-{
+void testReceiveRejectsEmptyBuffer() {
     SocketPair pair = makeSocketPair(SOCK_DGRAM);
 
     const NetlinkReceiveResult result =
-        receiveNetlinkDatagram(
-            pair.tested.get(),
-            std::span<char>{});
+            receiveNetlinkDatagram(
+                pair.tested.get(),
+                std::span<char>{});
 
     expect(
         result.status == NetlinkReceiveStatus::failed,
@@ -492,14 +475,13 @@ void testReceiveRejectsEmptyBuffer()
         "empty buffer should report EINVAL");
 }
 
-void testReceiveReportsInvalidDescriptor()
-{
-    std::array<char, 32> buffer{};
+void testReceiveReportsInvalidDescriptor() {
+    std::array < char, 32 > buffer{};
 
     const NetlinkReceiveResult result =
-        receiveNetlinkDatagram(
-            -1,
-            buffer);
+            receiveNetlinkDatagram(
+                -1,
+                buffer);
 
     expect(
         result.status == NetlinkReceiveStatus::failed,
@@ -513,11 +495,9 @@ void testReceiveReportsInvalidDescriptor()
         result.error == EBADF,
         "invalid descriptor should report EBADF");
 }
-
 } // namespace
 
-int main()
-{
+int main() {
     testBorrowedSocketDoesNotCloseDescriptor();
     testBorrowedSocketMovePreservesDescriptor();
     testInvalidBorrowedDescriptorIsRejected();

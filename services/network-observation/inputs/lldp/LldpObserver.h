@@ -16,21 +16,25 @@
 #include <string>
 
 namespace RSCGroup {
-
 class LldpObserver {
 public:
     explicit LldpObserver(std::unique_ptr<ILldpSource> source);
+
     ~LldpObserver();
 
-    LldpObserver(const LldpObserver&) = delete;
-    LldpObserver& operator=(const LldpObserver&) = delete;
+    LldpObserver(const LldpObserver &) = delete;
+
+    LldpObserver &operator=(const LldpObserver &) = delete;
 
     [[nodiscard]] bool start();
+
     void stop();
+
     [[nodiscard]] bool isRunning() const;
 
     void refreshAll();
-    void refreshInterface(const std::string& ifname);
+
+    void refreshInterface(const std::string &ifname);
 
     /**
      * @name Interface lifecycle hooks
@@ -40,9 +44,12 @@ public:
      * changes without coupling to netlink internals.
      * @{
      */
-    void onInterfaceUp(const std::string& ifname);
-    void onInterfaceDown(const std::string& ifname);
-    void onInterfaceRemoved(const std::string& ifname);
+    void onInterfaceUp(const std::string &ifname);
+
+    void onInterfaceDown(const std::string &ifname);
+
+    void onInterfaceRemoved(const std::string &ifname);
+
     /** @} */
 
     /// Re-emit all cached neighbors as keepalive Present observations.
@@ -53,9 +60,9 @@ public:
 
     /// Last backend-originated event time; see ILldpSource.
     [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const;
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
 };
-
 } // namespace RSCGroup

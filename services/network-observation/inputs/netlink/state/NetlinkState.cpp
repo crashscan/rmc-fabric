@@ -17,14 +17,12 @@
 #include <vector>
 
 namespace RSCGroup {
-
-std::optional<LinkEvent> NetlinkState::updateLink(const LinkEvent& event)
-{
+std::optional<LinkEvent> NetlinkState::updateLink(const LinkEvent &event) {
     std::scoped_lock lock(mutex_);
     if (!event.present) {
         const bool hadLink = linkStates_.contains(event.ifname);
         linkStates_.erase(event.ifname);
-        const auto removed = std::erase_if(interfaceAddresses_, [&](const auto& kv) {
+        const auto removed = std::erase_if(interfaceAddresses_, [&](const auto &kv) {
             return kv.first.ifname == event.ifname;
         });
         if (hadLink || removed > 0) return event;
@@ -39,8 +37,7 @@ std::optional<LinkEvent> NetlinkState::updateLink(const LinkEvent& event)
     return std::nullopt;
 }
 
-std::optional<InterfaceIpEvent> NetlinkState::updateAddress(const InterfaceIpEvent& event)
-{
+std::optional<InterfaceIpEvent> NetlinkState::updateAddress(const InterfaceIpEvent &event) {
     const InterfaceAddressKey key{
         event.ifname,
         event.family,
@@ -66,8 +63,7 @@ std::optional<InterfaceIpEvent> NetlinkState::updateAddress(const InterfaceIpEve
     return std::nullopt;
 }
 
-std::optional<FdbEvent> NetlinkState::updateFdb(const FdbEvent& event, DeviceEventCallback onDevice)
-{
+std::optional<FdbEvent> NetlinkState::updateFdb(const FdbEvent &event, DeviceEventCallback onDevice) {
     std::optional<FdbEvent> eventToEmit;
     std::optional<DeviceEvent> deviceEmit;
     {
@@ -75,7 +71,7 @@ std::optional<FdbEvent> NetlinkState::updateFdb(const FdbEvent& event, DeviceEve
         const auto it = fdbStatesByMac_.find(event.mac);
         const bool changed = (it == fdbStatesByMac_.end()) || (it->second != event);
 
-        auto& agg = macAggregates_[event.mac];
+        auto &agg = macAggregates_[event.mac];
         if (!event.present) {
             fdbStatesByMac_.erase(event.mac);
             agg.fdb.reset();
@@ -98,9 +94,8 @@ std::optional<FdbEvent> NetlinkState::updateFdb(const FdbEvent& event, DeviceEve
 }
 
 std::optional<NeighborEvent> NetlinkState::updateNeighbor(
-    const NeighborEvent& event,
-    DeviceEventCallback onDevice)
-{
+    const NeighborEvent &event,
+    DeviceEventCallback onDevice) {
     const std::string key = makeNeighborKey(event.ifname, event.mac, event.family, event.ip);
 
     std::optional<NeighborEvent> eventToEmit;
@@ -109,7 +104,7 @@ std::optional<NeighborEvent> NetlinkState::updateNeighbor(
         std::scoped_lock lock(mutex_);
 
         bool changed = false;
-        auto& agg = macAggregates_[event.mac];
+        auto &agg = macAggregates_[event.mac];
 
         if (!event.present) {
             if (auto it = neighborStatesByKey_.find(key); it != neighborStatesByKey_.end()) {
@@ -145,8 +140,7 @@ std::optional<NeighborEvent> NetlinkState::updateNeighbor(
     return eventToEmit;
 }
 
-std::optional<DeviceEvent> NetlinkState::refreshMergedDeviceLocked(const std::string& mac)
-{
+std::optional<DeviceEvent> NetlinkState::refreshMergedDeviceLocked(const std::string &mac) {
     auto aggIt = macAggregates_.find(mac);
     if (aggIt == macAggregates_.end()) {
         if (auto existing = deviceStatesByMac_.find(mac); existing != deviceStatesByMac_.end()) {
@@ -163,7 +157,7 @@ std::optional<DeviceEvent> NetlinkState::refreshMergedDeviceLocked(const std::st
         return std::nullopt;
     }
 
-    const MacAggregate& agg = aggIt->second;
+    const MacAggregate &agg = aggIt->second;
 
     DeviceEvent merged{};
     merged.mac = mac;
@@ -177,10 +171,10 @@ std::optional<DeviceEvent> NetlinkState::refreshMergedDeviceLocked(const std::st
     merged.ipv6Addrs = agg.ipv6Addrs;
 
     const bool hasAnyInfo =
-        merged.present
-        || !merged.ipv4Addrs.empty()
-        || !merged.ipv6Addrs.empty()
-        || !merged.ifname.empty();
+            merged.present
+            || !merged.ipv4Addrs.empty()
+            || !merged.ipv6Addrs.empty()
+            || !merged.ifname.empty();
 
     if (!hasAnyInfo) {
         macAggregates_.erase(aggIt);
@@ -207,29 +201,27 @@ std::optional<DeviceEvent> NetlinkState::refreshMergedDeviceLocked(const std::st
     return std::nullopt;
 }
 
-std::vector<DeviceEvent> NetlinkState::getDevicesSnapshot() const
-{
+std::vector<DeviceEvent> NetlinkState::getDevicesSnapshot() const {
     std::vector<DeviceEvent> out;
     {
         std::scoped_lock lock(mutex_);
         out.reserve(deviceStatesByMac_.size());
-        for (const auto& [_, device] : deviceStatesByMac_) {
+        for (const auto &[_, device]: deviceStatesByMac_) {
             out.push_back(device);
         }
     }
-    std::ranges::sort(out, {}, [](const DeviceEvent& d) {
+    std::ranges::sort(out, {}, [](const DeviceEvent &d) {
         return std::pair{d.ifname, d.mac};
     });
     return out;
 }
 
-std::vector<LinkEvent> NetlinkState::getLinksSnapshot() const
-{
+std::vector<LinkEvent> NetlinkState::getLinksSnapshot() const {
     std::vector<LinkEvent> out;
     {
         std::scoped_lock lock(mutex_);
         out.reserve(linkStates_.size());
-        for (const auto& [_, link] : linkStates_) {
+        for (const auto &[_, link]: linkStates_) {
             out.push_back(link);
         }
     }
@@ -237,8 +229,7 @@ std::vector<LinkEvent> NetlinkState::getLinksSnapshot() const
     return out;
 }
 
-void NetlinkState::clear()
-{
+void NetlinkState::clear() {
     std::scoped_lock lock(mutex_);
     linkStates_.clear();
     interfaceAddresses_.clear();
@@ -247,5 +238,4 @@ void NetlinkState::clear()
     macAggregates_.clear();
     deviceStatesByMac_.clear();
 }
-
 } // namespace RSCGroup

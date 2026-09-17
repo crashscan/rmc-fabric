@@ -12,7 +12,6 @@
 #include <memory>
 
 namespace RSCGroup {
-
 /**
  * @brief Configuration for the network observation model.
  *
@@ -32,10 +31,13 @@ struct ModelConfig {
     ClassifierConfig classifierConfig;
 
     ModelConfig() = default;
-    ModelConfig(ModelConfig&&) = default;
-    ModelConfig& operator=(ModelConfig&&) = default;
-    ModelConfig(const ModelConfig&) = delete;
-    ModelConfig& operator=(const ModelConfig&) = delete;
-};
 
+    ModelConfig(ModelConfig &&) = default;
+
+    ModelConfig &operator=(ModelConfig &&) = default;
+
+    ModelConfig(const ModelConfig &) = delete;
+
+    ModelConfig &operator=(const ModelConfig &) = delete;
+};
 } // namespace RSCGroup

@@ -34,34 +34,33 @@
 #include <vector>
 
 namespace RSCGroup {
-
 class NetlinkNetworkMonitor::Impl {
 public:
     explicit Impl(
         MonitorCallbacks callbacks,
         std::set<std::string> watchedInterfaces,
-         std::function<int()> liveFdProvider = {})
+        std::function<int()> liveFdProvider = {})
         : callbacks_(std::move(callbacks))
-        , watchedInterfaces_(std::move(watchedInterfaces))
-        , liveFdProvider_(std::move(liveFdProvider))
-        , onLinkHandler_([this](const LinkEvent& event) {
-            onLinkCallback(event);
-        })
-        , onIpHandler_([this](const InterfaceIpEvent& event) {
-            onIpCallback(event);
-        })
-        , onFdbHandler_([this](const FdbEvent& event) {
-            onFdbCallback(event);
-        })
-        , onNeighHandler_([this](const NeighborEvent& event) {
-            onNeighCallback(event);
-        })
-        , onDeviceHandler_([this](const DeviceEvent& event) {
-            if (callbacks_.onDeviceChanged) {
-                callbacks_.onDeviceChanged(event);
-            }
-        })
-        , worker_(
+          , watchedInterfaces_(std::move(watchedInterfaces))
+          , liveFdProvider_(std::move(liveFdProvider))
+          , onLinkHandler_([this](const LinkEvent &event) {
+              onLinkCallback(event);
+          })
+          , onIpHandler_([this](const InterfaceIpEvent &event) {
+              onIpCallback(event);
+          })
+          , onFdbHandler_([this](const FdbEvent &event) {
+              onFdbCallback(event);
+          })
+          , onNeighHandler_([this](const NeighborEvent &event) {
+              onNeighCallback(event);
+          })
+          , onDeviceHandler_([this](const DeviceEvent &event) {
+              if (callbacks_.onDeviceChanged) {
+                  callbacks_.onDeviceChanged(event);
+              }
+          })
+          , worker_(
               "netlink-monitor",
               [this](std::stop_token stopToken) {
                   runLiveLoop(std::move(stopToken));
@@ -69,10 +68,9 @@ public:
               [this] {
                   signalStop();
               },
-              [this](const ManagedWorker::Exit& exit) {
+              [this](const ManagedWorker::Exit &exit) {
                   onWorkerExit(exit);
-              })
-    {
+              }) {
     }
 
     ~Impl() {
@@ -97,14 +95,16 @@ public:
              * dump. Notifications arriving while the dump runs remain queued
              * and will be processed when the worker starts.
              */
-            NetlinkEventLoop::MessageHandler messageHandler = [this](const nlmsghdr* message) {processSingleMessage(message);};
+            NetlinkEventLoop::MessageHandler messageHandler = [this](const nlmsghdr *message) {
+                processSingleMessage(message);
+            };
             if (liveFdProvider_) {
                 const int liveFd = liveFdProvider_();
-                liveLoop_.emplace(liveFd,*stopSignal_, std::move(messageHandler));
+                liveLoop_.emplace(liveFd, *stopSignal_, std::move(messageHandler));
             } else {
-                liveLoop_.emplace(*stopSignal_,std::move(messageHandler));
+                liveLoop_.emplace(*stopSignal_, std::move(messageHandler));
             }
-        } catch (const std::exception& error) {
+        } catch (const std::exception &error) {
             LOG(ERROR) << "failed to initialize netlink monitoring: " << error.what();
             return rollbackStartup(transition);
         } catch (...) {
@@ -127,15 +127,15 @@ public:
              * any path calls closeResources(), so signalStop() cannot race
              * destruction of stopSignal_.
              */
-            std::stop_callback cancellationWake( transition.stopToken(), [this] { signalStop(); });
+            std::stop_callback cancellationWake(transition.stopToken(), [this] { signalStop(); });
             NetlinkInitialDump dump(
                 *stopSignal_,
-                [this](const nlmsghdr* message) {
+                [this](const nlmsghdr *message) {
                     processSingleMessage(message);
                 });
 
             dumpResult = dump.run();
-        } catch (const std::exception& error) {
+        } catch (const std::exception &error) {
             LOG(ERROR) << "initial netlink dump threw: " << error.what();
             return rollbackStartup(transition);
         } catch (...) {
@@ -146,9 +146,9 @@ public:
         if (!dumpResult.completed()) {
             if (!dumpResult.interrupted()) {
                 LOG(ERROR)
-                    << "initial netlink dump failed: status="
-                    << NetlinkInitialDump::statusName(dumpResult.status)
-                    << ", error=" << dumpResult.error;
+                        << "initial netlink dump failed: status="
+                        << NetlinkInitialDump::statusName(dumpResult.status)
+                        << ", error=" << dumpResult.error;
             }
             return rollbackStartup(transition);
         }
@@ -171,7 +171,7 @@ public:
                 LOG(ERROR) << "netlink worker was already running during startup";
                 return rollbackStartupWithWorker(transition);
             }
-        } catch (const std::exception& error) {
+        } catch (const std::exception &error) {
             LOG(ERROR) << "failed to start netlink monitor worker: " << error.what();
             return rollbackStartup(transition);
         } catch (...) {
@@ -220,9 +220,9 @@ public:
          * finish startup rollback.
          */
         const auto waitPolicy =
-            lifecycle_.isStartOwnerThread()
-                ? LifecycleCoordinator::WaitPolicy::no_wait
-                : LifecycleCoordinator::WaitPolicy::wait;
+                lifecycle_.isStartOwnerThread()
+                    ? LifecycleCoordinator::WaitPolicy::no_wait
+                    : LifecycleCoordinator::WaitPolicy::wait;
 
         auto transition = lifecycle_.beginStop(waitPolicy);
 
@@ -247,7 +247,7 @@ public:
              *  3. serializes and joins the worker.
              */
             worker_.stop();
-        } catch (const std::exception& error) {
+        } catch (const std::exception &error) {
             /*
              * Self-stop was rejected above. Any remaining join failure is a
              * structural ownership violation: resources cannot safely be
@@ -289,7 +289,7 @@ public:
 private:
     using StartTransition = LifecycleCoordinator::CancellableStart;
 
-    [[nodiscard]] bool rollbackStartup(StartTransition& transition) {
+    [[nodiscard]] bool rollbackStartup(StartTransition &transition) {
         closeResources();
         netlinkState_.clear();
         workerFailed_.store(false, std::memory_order_release);
@@ -298,7 +298,7 @@ private:
         return false;
     }
 
-    [[nodiscard]] bool rollbackStartupWithWorker(StartTransition& transition) {
+    [[nodiscard]] bool rollbackStartupWithWorker(StartTransition &transition) {
         stopWorkerDuringStartupRollback();
         return rollbackStartup(transition);
     }
@@ -345,14 +345,14 @@ private:
     void stopWorkerDuringStartupRollback() noexcept {
         try {
             worker_.stop();
-        } catch (const std::exception& error) {
+        } catch (const std::exception &error) {
             LOG(FATAL)
-                << "failed to stop netlink worker during startup rollback: "
-                << error.what();
+                    << "failed to stop netlink worker during startup rollback: "
+                    << error.what();
         } catch (...) {
             LOG(FATAL)
-                << "failed to stop netlink worker during startup rollback: "
-                   "unknown exception";
+                    << "failed to stop netlink worker during startup rollback: "
+                    "unknown exception";
         }
     }
 
@@ -369,22 +369,22 @@ private:
             result.error != 0 ? result.error : EIO,
             std::generic_category(),
             std::string("NetlinkEventLoop: ") +
-                NetlinkEventLoop::statusName(result.status));
+            NetlinkEventLoop::statusName(result.status));
     }
 
-    void onWorkerExit( const ManagedWorker::Exit& exit) noexcept {
+    void onWorkerExit(const ManagedWorker::Exit &exit) noexcept {
         /*
          * This callback runs on the worker thread. It must not call start(),
          * stop(), join(), closeResources(), or otherwise drive lifecycle.
          */
         if (exit.reason == ManagedWorker::ExitReason::exception) {
-            workerFailed_.store( true, std::memory_order_release);
+            workerFailed_.store(true, std::memory_order_release);
             std::string detail{"unknown exception"};
             try {
                 if (exit.exception) {
                     std::rethrow_exception(exit.exception);
                 }
-            } catch (const std::exception& error) {
+            } catch (const std::exception &error) {
                 detail = error.what();
             } catch (...) {
             }
@@ -401,47 +401,47 @@ private:
         const auto lifecycleState = lifecycle_.state();
         if (exit.reason == ManagedWorker::ExitReason::returned &&
             (lifecycleState == LifecycleCoordinator::State::starting ||
-                lifecycleState == LifecycleCoordinator::State::running)) {
-            workerFailed_.store(true,std::memory_order_release);
+             lifecycleState == LifecycleCoordinator::State::running)) {
+            workerFailed_.store(true, std::memory_order_release);
             LOG(ERROR) << "netlink monitor worker returned unexpectedly while " << "lifecycle was starting or running";
         }
     }
 
-    void onLinkCallback(const LinkEvent& event) {
+    void onLinkCallback(const LinkEvent &event) {
         auto changed = netlinkState_.updateLink(event);
         if (changed && callbacks_.onLinkChanged) {
             callbacks_.onLinkChanged(*changed);
         }
     }
 
-    void onIpCallback(const InterfaceIpEvent& event) {
+    void onIpCallback(const InterfaceIpEvent &event) {
         auto changed = netlinkState_.updateAddress(event);
         if (changed && callbacks_.onInterfaceIpChanged) {
             callbacks_.onInterfaceIpChanged(*changed);
         }
     }
 
-    void onFdbCallback(const FdbEvent& event) {
+    void onFdbCallback(const FdbEvent &event) {
         if (!watchedInterfaces_.empty() && !watchedInterfaces_.contains(event.ifname)) {
             return;
         }
-        auto changed = netlinkState_.updateFdb( event,onDeviceHandler_);
+        auto changed = netlinkState_.updateFdb(event, onDeviceHandler_);
         if (changed && callbacks_.onFdbChanged) {
             callbacks_.onFdbChanged(*changed);
         }
     }
 
-    void onNeighCallback(const NeighborEvent& event) {
+    void onNeighCallback(const NeighborEvent &event) {
         if (!watchedInterfaces_.empty() && !watchedInterfaces_.contains(event.ifname)) {
             return;
         }
-        auto changed = netlinkState_.updateNeighbor(event,onDeviceHandler_);
+        auto changed = netlinkState_.updateNeighbor(event, onDeviceHandler_);
         if (changed && callbacks_.onNeighborChanged) {
             callbacks_.onNeighborChanged(*changed);
         }
     }
 
-    void processSingleMessage(const nlmsghdr* message) {
+    void processSingleMessage(const nlmsghdr *message) {
         processMessage(
             message,
             onLinkHandler_,
@@ -475,11 +475,11 @@ private:
     std::atomic<bool> workerFailed_{false};
 
     // Pre-bound handlers: constructed once, no per-message binding.
-    std::function<void(const LinkEvent&)> onLinkHandler_;
-    std::function<void(const InterfaceIpEvent&)> onIpHandler_;
-    std::function<void(const FdbEvent&)> onFdbHandler_;
-    std::function<void(const NeighborEvent&)> onNeighHandler_;
-    std::function<void(const DeviceEvent&)> onDeviceHandler_;
+    std::function<void(const LinkEvent &)> onLinkHandler_;
+    std::function<void(const InterfaceIpEvent &)> onIpHandler_;
+    std::function<void(const FdbEvent &)> onFdbHandler_;
+    std::function<void(const NeighborEvent &)> onNeighHandler_;
+    std::function<void(const DeviceEvent &)> onDeviceHandler_;
 
     /*
      * Must remain last. Its work, wake, and exit callbacks capture this and
@@ -492,8 +492,7 @@ private:
 NetlinkNetworkMonitor::NetlinkNetworkMonitor(
     MonitorCallbacks callbacks,
     std::set<std::string> watchedInterfaces)
-    : impl_(std::make_unique<Impl>(std::move(callbacks),std::move(watchedInterfaces)))
-{
+    : impl_(std::make_unique<Impl>(std::move(callbacks), std::move(watchedInterfaces))) {
 }
 
 NetlinkNetworkMonitor::NetlinkNetworkMonitor(
@@ -501,11 +500,10 @@ NetlinkNetworkMonitor::NetlinkNetworkMonitor(
     MonitorCallbacks callbacks,
     std::set<std::string> watchedInterfaces)
     : impl_(
-          std::make_unique<Impl>(
-              std::move(callbacks),
-              std::move(watchedInterfaces),
-              std::move(liveFdProvider)))
-{
+        std::make_unique<Impl>(
+            std::move(callbacks),
+            std::move(watchedInterfaces),
+            std::move(liveFdProvider))) {
 }
 
 NetlinkNetworkMonitor::~NetlinkNetworkMonitor() = default;
@@ -529,5 +527,4 @@ std::vector<DeviceEvent> NetlinkNetworkMonitor::getDevicesSnapshot() const {
 std::vector<LinkEvent> NetlinkNetworkMonitor::getLinksSnapshot() const {
     return impl_->getLinksSnapshot();
 }
-
 } // namespace RSCGroup

@@ -42,7 +42,7 @@ install(
         PATTERN "CMakeFiles" EXCLUDE
 )
 
-if(BUILD_TESTING)
+if (BUILD_TESTING)
     add_executable(
             interop_contract_tests
             tests/InteropContractUmbrellaTests.cpp
@@ -86,4 +86,4 @@ if(BUILD_TESTING)
             PROPERTIES
             LABELS "unit"
     )
-endif()
+endif ()

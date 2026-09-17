@@ -105,6 +105,5 @@ public:
      *        time_point::min() when no backend event has been observed.
      */
     [[nodiscard]] virtual std::chrono::steady_clock::time_point lastEventAt() const = 0;
-
 };
 } // namespace RSCGroup

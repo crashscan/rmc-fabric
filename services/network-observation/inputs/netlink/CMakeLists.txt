@@ -68,7 +68,7 @@ target_include_directories(netlink-monitor
 )
 
 target_link_libraries(netlink-monitor
-    PRIVATE
+        PRIVATE
         pthread
         glog
         rsc_util::service_runtime
@@ -77,32 +77,32 @@ target_link_libraries(netlink-monitor
         netlink-initial-dump
 )
 
-if(BUILD_TESTING)
+if (BUILD_TESTING)
     add_executable(netlink_io_tests
-        tests/NetlinkIoTests.cpp
+            tests/NetlinkIoTests.cpp
     )
 
     target_compile_features(
-        netlink_io_tests
-        PRIVATE
+            netlink_io_tests
+            PRIVATE
             cxx_std_20
     )
 
     target_link_libraries(
-        netlink_io_tests
-        PRIVATE
+            netlink_io_tests
+            PRIVATE
             netlink-io
             pthread
     )
 
     add_test(
-        NAME netlink_io_tests
-        COMMAND netlink_io_tests
+            NAME netlink_io_tests
+            COMMAND netlink_io_tests
     )
 
     set_tests_properties(
-        netlink_io_tests
-        PROPERTIES
+            netlink_io_tests
+            PROPERTIES
             TIMEOUT 10
             LABELS "unit;netlink"
     )
@@ -143,4 +143,4 @@ if(BUILD_TESTING)
             LABELS "unit;netlink;resilience"
     )
 
-endif()
+endif ()

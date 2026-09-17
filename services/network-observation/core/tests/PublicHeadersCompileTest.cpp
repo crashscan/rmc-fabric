@@ -15,40 +15,33 @@
 #include <memory>
 
 namespace {
-
 class TestPolicy final : public RSCGroup::IInterfacePolicy {
 public:
-    bool includeInLocalState(std::string_view) const override
-    {
+    bool includeInLocalState(std::string_view) const override {
         return true;
     }
 
-    bool allowRemoteNeighborEvidence(std::string_view) const override
-    {
+    bool allowRemoteNeighborEvidence(std::string_view) const override {
         return true;
     }
 
-    bool allowRemoteFdbEvidence(std::string_view) const override
-    {
+    bool allowRemoteFdbEvidence(std::string_view) const override {
         return true;
     }
 
-    bool allowLldpEvidence(std::string_view) const override
-    {
+    bool allowLldpEvidence(std::string_view) const override {
         return true;
     }
 };
-
 } // namespace
 
-int main()
-{
+int main() {
     RSCGroup::ModelConfig config;
     config.interfacePolicy = std::make_unique<TestPolicy>();
     config.classifierConfig.kind = RSCGroup::ClassifierKind::Scoring;
 
     auto model =
-        RSCGroup::createNetworkObservationModel(std::move(config));
+            RSCGroup::createNetworkObservationModel(std::move(config));
 
     return model ? 0 : 1;
 }

@@ -17,36 +17,31 @@
 #include <vector>
 
 namespace RSCGroup {
-
 namespace {
-namespace contract = interop_contract::network_observation;
-using dbus_client_support::invokeQuery;
+    namespace contract = interop_contract::network_observation;
+    using dbus_client_support::invokeQuery;
 
-DBus::BusType toBusType(const std::string& busType)
-{
-    return busType == "session" ? DBus::BusType::SESSION : DBus::BusType::SYSTEM;
-}
-
-void validateStringList(const std::vector<std::string>& values, const char* fieldName)
-{
-    if (values.size() > interop_contract::ingress::network_observation::kMaxCandidates) {
-        throw interop_contract::DecodeError(
-            interop_contract::DecodeErrorCode::limit_exceeded,
-            std::string(fieldName) + " exceeds ingress list limit");
+    DBus::BusType toBusType(const std::string &busType) {
+        return busType == "session" ? DBus::BusType::SESSION : DBus::BusType::SYSTEM;
     }
-    for (const auto& value : values) {
-        if (value.size() > interop_contract::ingress::kMaxStringLength) {
+
+    void validateStringList(const std::vector<std::string> &values, const char *fieldName) {
+        if (values.size() > interop_contract::ingress::network_observation::kMaxCandidates) {
             throw interop_contract::DecodeError(
                 interop_contract::DecodeErrorCode::limit_exceeded,
-                std::string(fieldName) + " contains an oversized string");
+                std::string(fieldName) + " exceeds ingress list limit");
+        }
+        for (const auto &value: values) {
+            if (value.size() > interop_contract::ingress::kMaxStringLength) {
+                throw interop_contract::DecodeError(
+                    interop_contract::DecodeErrorCode::limit_exceeded,
+                    std::string(fieldName) + " contains an oversized string");
+            }
         }
     }
-}
-
 } // anonymous namespace
 
-struct DbusClient::Impl
-{
+struct DbusClient::Impl {
     std::string busType;
     std::shared_ptr<DBus::StandaloneDispatcher> dispatcher;
     std::shared_ptr<DBus::Connection> connection;
@@ -54,14 +49,14 @@ struct DbusClient::Impl
     std::shared_ptr<DBus::InterfaceProxy> iface;
     bool connected = false;
 
-    std::shared_ptr<DBus::SignalProxy<void()>> sigLocalStateChanged;
-    std::shared_ptr<DBus::SignalProxy<void(std::string)>> sigInterfaceChanged;
-    std::shared_ptr<DBus::SignalProxy<void(std::string)>> sigCandidateChanged;
-    std::shared_ptr<DBus::SignalProxy<void(std::string)>> sigInterfaceRemoved;
-    std::shared_ptr<DBus::SignalProxy<void(std::string)>> sigCandidateRemoved;
-    std::shared_ptr<DBus::SignalProxy<void(bool)>> sigReadyChanged;
-    void reset()
-    {
+    std::shared_ptr<DBus::SignalProxy<void()> > sigLocalStateChanged;
+    std::shared_ptr<DBus::SignalProxy<void(std::string)> > sigInterfaceChanged;
+    std::shared_ptr<DBus::SignalProxy<void(std::string)> > sigCandidateChanged;
+    std::shared_ptr<DBus::SignalProxy<void(std::string)> > sigInterfaceRemoved;
+    std::shared_ptr<DBus::SignalProxy<void(std::string)> > sigCandidateRemoved;
+    std::shared_ptr<DBus::SignalProxy<void(bool)> > sigReadyChanged;
+
+    void reset() {
         sigLocalStateChanged.reset();
         sigInterfaceChanged.reset();
         sigCandidateChanged.reset();
@@ -76,16 +71,14 @@ struct DbusClient::Impl
     }
 };
 
-DbusClient::DbusClient(const std::string& busType)
-    : impl_(std::make_unique<Impl>())
-{
+DbusClient::DbusClient(const std::string &busType)
+    : impl_(std::make_unique<Impl>()) {
     impl_->busType = busType;
 }
 
 DbusClient::~DbusClient() = default;
 
-interop_contract::ClientResult<void> DbusClient::tryConnect()
-{
+interop_contract::ClientResult<void> DbusClient::tryConnect() {
     return invokeQuery<void>("DbusClient::tryConnect", [&] {
         impl_->reset();
         impl_->dispatcher = DBus::StandaloneDispatcher::create();
@@ -99,20 +92,19 @@ interop_contract::ClientResult<void> DbusClient::tryConnect()
                 interop_contract::ClientError{
                     interop_contract::ClientErrorCode::service_unavailable,
                     "network observation interface proxy is unavailable",
-                }};
+                }
+            };
         }
         LOG(INFO) << "DbusClient connected to bus: " << impl_->busType;
         return interop_contract::ClientResult<void>{};
     });
 }
 
-bool DbusClient::connect()
-{
+bool DbusClient::connect() {
     return static_cast<bool>(tryConnect());
 }
 
-interop_contract::ClientResult<contract::LocalNetworkSnapshot> DbusClient::tryGetLocalSnapshot()
-{
+interop_contract::ClientResult<contract::LocalNetworkSnapshot> DbusClient::tryGetLocalSnapshot() {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -121,15 +113,14 @@ interop_contract::ClientResult<contract::LocalNetworkSnapshot> DbusClient::tryGe
     }
 
     return invokeQuery<contract::LocalNetworkSnapshot>("DbusClient::tryGetLocalSnapshot", [&] {
-        auto method = impl_->iface->create_method<
-            std::map<std::string, DBus::Variant>()>(std::string(contract::METHOD_GET_LOCAL_SNAPSHOT));
+        auto method = impl_->iface->create_method <
+                      std::map<std::string, DBus::Variant>() > (std::string(contract::METHOD_GET_LOCAL_SNAPSHOT));
         return NetworkObservationDbusCodec::fromVariantMapLocalSnapshot((*method)());
     });
 }
 
-interop_contract::ClientResult<std::optional<contract::LocalInterfaceState>>
-DbusClient::tryGetInterface(const std::string& ifname)
-{
+interop_contract::ClientResult<std::optional<contract::LocalInterfaceState> >
+DbusClient::tryGetInterface(const std::string &ifname) {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -137,21 +128,22 @@ DbusClient::tryGetInterface(const std::string& ifname)
         };
     }
 
-    return invokeQuery<std::optional<contract::LocalInterfaceState>>(
+    return invokeQuery<std::optional<contract::LocalInterfaceState> >(
         "DbusClient::tryGetInterface", [&] {
-            auto method = impl_->iface->create_method<
-                std::map<std::string, DBus::Variant>(std::string)>(std::string(contract::METHOD_GET_INTERFACE));
+            auto method = impl_->iface->create_method <
+                          std::map<std::string, DBus::Variant>(std::string) > (std::string(
+                              contract::METHOD_GET_INTERFACE));
             auto raw = (*method)(ifname);
             if (raw.empty()) {
                 return std::optional<contract::LocalInterfaceState>{};
             }
             return std::optional<contract::LocalInterfaceState>{
-                NetworkObservationDbusCodec::fromVariantMapIface(raw)};
+                NetworkObservationDbusCodec::fromVariantMapIface(raw)
+            };
         });
 }
 
-interop_contract::ClientResult<std::vector<std::string>> DbusClient::tryGetRemoteCandidateMacs()
-{
+interop_contract::ClientResult<std::vector<std::string> > DbusClient::tryGetRemoteCandidateMacs() {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -159,18 +151,17 @@ interop_contract::ClientResult<std::vector<std::string>> DbusClient::tryGetRemot
         };
     }
 
-    return invokeQuery<std::vector<std::string>>("DbusClient::tryGetRemoteCandidateMacs", [&] {
-        auto method = impl_->iface->create_method<
-            std::vector<std::string>()>(std::string(contract::METHOD_GET_REMOTE_CANDIDATE_MACS));
+    return invokeQuery<std::vector<std::string> >("DbusClient::tryGetRemoteCandidateMacs", [&] {
+        auto method = impl_->iface->create_method <
+                      std::vector<std::string>() > (std::string(contract::METHOD_GET_REMOTE_CANDIDATE_MACS));
         auto raw = (*method)();
         validateStringList(raw, "remote candidate MAC list");
         return raw;
     });
 }
 
-interop_contract::ClientResult<std::optional<contract::RemoteCandidate>>
-DbusClient::tryGetCandidateByMac(const std::string& mac)
-{
+interop_contract::ClientResult<std::optional<contract::RemoteCandidate> >
+DbusClient::tryGetCandidateByMac(const std::string &mac) {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -178,22 +169,22 @@ DbusClient::tryGetCandidateByMac(const std::string& mac)
         };
     }
 
-    return invokeQuery<std::optional<contract::RemoteCandidate>>(
+    return invokeQuery<std::optional<contract::RemoteCandidate> >(
         "DbusClient::tryGetCandidateByMac", [&] {
-            auto method = impl_->iface->create_method<
-                std::map<std::string, DBus::Variant>(std::string)>(
-                    std::string(contract::METHOD_GET_CANDIDATE_BY_MAC));
+            auto method = impl_->iface->create_method <
+                          std::map<std::string, DBus::Variant>(std::string) > (
+                              std::string(contract::METHOD_GET_CANDIDATE_BY_MAC));
             auto raw = (*method)(mac);
             if (raw.empty()) {
                 return std::optional<contract::RemoteCandidate>{};
             }
             return std::optional<contract::RemoteCandidate>{
-                NetworkObservationDbusCodec::fromVariantMapCandidate(raw)};
+                NetworkObservationDbusCodec::fromVariantMapCandidate(raw)
+            };
         });
 }
 
-interop_contract::ClientResult<contract::ObservationIssues> DbusClient::tryGetIssues()
-{
+interop_contract::ClientResult<contract::ObservationIssues> DbusClient::tryGetIssues() {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -202,15 +193,14 @@ interop_contract::ClientResult<contract::ObservationIssues> DbusClient::tryGetIs
     }
 
     return invokeQuery<contract::ObservationIssues>("DbusClient::tryGetIssues", [&] {
-        auto method = impl_->iface->create_method<
-            std::map<std::string, std::map<std::string, DBus::Variant>>()>(
-                std::string(contract::METHOD_GET_ISSUES));
+        auto method = impl_->iface->create_method <
+                      std::map<std::string, std::map<std::string, DBus::Variant> >() > (
+                          std::string(contract::METHOD_GET_ISSUES));
         return NetworkObservationDbusCodec::decodeIssues((*method)());
     });
 }
 
-interop_contract::ClientResult<bool> DbusClient::tryGetReady()
-{
+interop_contract::ClientResult<bool> DbusClient::tryGetReady() {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -219,13 +209,12 @@ interop_contract::ClientResult<bool> DbusClient::tryGetReady()
     }
 
     return invokeQuery<bool>("DbusClient::tryGetReady", [&] {
-        auto method = impl_->iface->create_method<bool()>(std::string(contract::METHOD_GET_READY));
+        auto method = impl_->iface->create_method < bool() > (std::string(contract::METHOD_GET_READY));
         return (*method)();
     });
 }
 
-interop_contract::ClientResult<std::string> DbusClient::tryGetPhase()
-{
+interop_contract::ClientResult<std::string> DbusClient::tryGetPhase() {
     if (!impl_->iface) {
         return interop_contract::ClientError{
             interop_contract::ClientErrorCode::service_unavailable,
@@ -234,105 +223,91 @@ interop_contract::ClientResult<std::string> DbusClient::tryGetPhase()
     }
 
     return invokeQuery<std::string>("DbusClient::tryGetPhase", [&] {
-        auto method = impl_->iface->create_method<std::string()>(std::string(contract::METHOD_GET_PHASE));
+        auto method = impl_->iface->create_method < std::string() > (std::string(contract::METHOD_GET_PHASE));
         return (*method)();
     });
 }
 
-contract::LocalNetworkSnapshot DbusClient::getLocalSnapshot()
-{
+contract::LocalNetworkSnapshot DbusClient::getLocalSnapshot() {
     const auto result = tryGetLocalSnapshot();
     return result ? result.value() : contract::LocalNetworkSnapshot{};
 }
 
-std::optional<contract::LocalInterfaceState> DbusClient::getInterface(const std::string& ifname)
-{
+std::optional<contract::LocalInterfaceState> DbusClient::getInterface(const std::string &ifname) {
     const auto result = tryGetInterface(ifname);
     return result ? result.value() : std::nullopt;
 }
 
-std::vector<std::string> DbusClient::getRemoteCandidateMacs()
-{
+std::vector<std::string> DbusClient::getRemoteCandidateMacs() {
     const auto result = tryGetRemoteCandidateMacs();
     return result ? result.value() : std::vector<std::string>{};
 }
 
-std::optional<contract::RemoteCandidate> DbusClient::getCandidateByMac(const std::string& mac)
-{
+std::optional<contract::RemoteCandidate> DbusClient::getCandidateByMac(const std::string &mac) {
     const auto result = tryGetCandidateByMac(mac);
     return result ? result.value() : std::nullopt;
 }
 
-contract::ObservationIssues DbusClient::getIssues()
-{
+contract::ObservationIssues DbusClient::getIssues() {
     const auto result = tryGetIssues();
     return result ? result.value() : contract::ObservationIssues{};
 }
 
-bool DbusClient::getReady()
-{
+bool DbusClient::getReady() {
     const auto result = tryGetReady();
     return result ? result.value() : false;
 }
 
-std::string DbusClient::getPhase()
-{
+std::string DbusClient::getPhase() {
     const auto result = tryGetPhase();
     return result ? result.value() : "unknown";
 }
 
-void DbusClient::onLocalStateChanged(VoidCallback cb)
-{
+void DbusClient::onLocalStateChanged(VoidCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigLocalStateChanged)
-        impl_->sigLocalStateChanged = impl_->iface->create_signal<void()>(
-            std::string(contract::SIGNAL_LOCAL_STATE_CHANGED));
-    impl_->sigLocalStateChanged->connect(sigc::slot<void()>(cb));
+        impl_->sigLocalStateChanged = impl_->iface->create_signal < void() > (
+                                          std::string(contract::SIGNAL_LOCAL_STATE_CHANGED));
+    impl_->sigLocalStateChanged->connect(sigc::slot < void() > (cb));
 }
 
-void DbusClient::onInterfaceChanged(StringCallback cb)
-{
+void DbusClient::onInterfaceChanged(StringCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigInterfaceChanged)
-        impl_->sigInterfaceChanged = impl_->iface->create_signal<void(std::string)>(
-            std::string(contract::SIGNAL_INTERFACE_CHANGED));
-    impl_->sigInterfaceChanged->connect(sigc::slot<void(std::string)>(cb));
+        impl_->sigInterfaceChanged = impl_->iface->create_signal < void(std::string) > (
+                                         std::string(contract::SIGNAL_INTERFACE_CHANGED));
+    impl_->sigInterfaceChanged->connect(sigc::slot < void(std::string) > (cb));
 }
 
-void DbusClient::onCandidateChanged(StringCallback cb)
-{
+void DbusClient::onCandidateChanged(StringCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigCandidateChanged)
-        impl_->sigCandidateChanged = impl_->iface->create_signal<void(std::string)>(
-            std::string(contract::SIGNAL_CANDIDATE_CHANGED));
-    impl_->sigCandidateChanged->connect(sigc::slot<void(std::string)>(cb));
+        impl_->sigCandidateChanged = impl_->iface->create_signal < void(std::string) > (
+                                         std::string(contract::SIGNAL_CANDIDATE_CHANGED));
+    impl_->sigCandidateChanged->connect(sigc::slot < void(std::string) > (cb));
 }
 
-void DbusClient::onInterfaceRemoved(StringCallback cb)
-{
+void DbusClient::onInterfaceRemoved(StringCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigInterfaceRemoved)
-        impl_->sigInterfaceRemoved = impl_->iface->create_signal<void(std::string)>(
-            std::string(contract::SIGNAL_INTERFACE_REMOVED));
-    impl_->sigInterfaceRemoved->connect(sigc::slot<void(std::string)>(cb));
+        impl_->sigInterfaceRemoved = impl_->iface->create_signal < void(std::string) > (
+                                         std::string(contract::SIGNAL_INTERFACE_REMOVED));
+    impl_->sigInterfaceRemoved->connect(sigc::slot < void(std::string) > (cb));
 }
 
-void DbusClient::onCandidateRemoved(StringCallback cb)
-{
+void DbusClient::onCandidateRemoved(StringCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigCandidateRemoved)
-        impl_->sigCandidateRemoved = impl_->iface->create_signal<void(std::string)>(
-            std::string(contract::SIGNAL_CANDIDATE_REMOVED));
-    impl_->sigCandidateRemoved->connect(sigc::slot<void(std::string)>(cb));
+        impl_->sigCandidateRemoved = impl_->iface->create_signal < void(std::string) > (
+                                         std::string(contract::SIGNAL_CANDIDATE_REMOVED));
+    impl_->sigCandidateRemoved->connect(sigc::slot < void(std::string) > (cb));
 }
 
-void DbusClient::onReadyChanged(BoolCallback cb)
-{
+void DbusClient::onReadyChanged(BoolCallback cb) {
     if (!impl_->iface) return;
     if (!impl_->sigReadyChanged)
-        impl_->sigReadyChanged = impl_->iface->create_signal<void(bool)>(
-            std::string(contract::SIGNAL_READY_CHANGED));
-    impl_->sigReadyChanged->connect(sigc::slot<void(bool)>(cb));
+        impl_->sigReadyChanged = impl_->iface->create_signal < void(bool) > (
+                                     std::string(contract::SIGNAL_READY_CHANGED));
+    impl_->sigReadyChanged->connect(sigc::slot < void(bool) > (cb));
 }
-
 } // namespace RSCGroup

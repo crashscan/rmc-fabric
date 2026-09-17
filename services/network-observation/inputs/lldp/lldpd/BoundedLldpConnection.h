@@ -1,13 +1,10 @@
-//
-// Created by vvass on 17-Sep-26.
-//
-
 #pragma once
 
 #include <lldpctl.h>
 
 #include <sys/un.h>
 
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <string_view>
@@ -18,17 +15,32 @@ namespace RSCGroup {
  *
  * liblldpctl's default synchronous transport (nullptr callbacks) blocks
  * without any timeout and exposes no fd to configure one — a hung (not
- * dead) lldpd wedges the caller forever.  This class owns the unix socket
- * itself and drives the library through user-supplied send/recv callbacks,
- * so every blocking step is bounded by a timeout.
+ * dead) lldpd wedges the caller forever. This class owns the unix socket
+ * itself and drives the library through user-supplied send/recv callbacks.
+ *
+ * Two IO modes, because the two use sites need opposite things:
+ *
+ *  - Mode::Bounded (probe, enumeration): SO_RCVTIMEO/SO_SNDTIMEO. Every
+ *    blocking step returns within ioTimeout.
+ *
+ *  - Mode::Interruptible (watch): NO socket timeout — lldpctl_watch() is
+ *    meant to block until the next notification, and a recv timeout would
+ *    turn the watch loop into a busy-poll on an idle link. Instead recv
+ *    waits on poll(socket, wakeup-eventfd) with no deadline, and unblock()
+ *    releases it. Setup (connect + the lldpctl_watch_callback2 subscribe
+ *    round-trip) still runs Bounded, then switches.
  *
  * Non-copyable: liblldpctl forbids using one connection from several
  * threads, and the callbacks capture `this`.
  */
 class BoundedLldpConnection {
 public:
-    BoundedLldpConnection(std::string_view ctlname, std::chrono::milliseconds connectTimeout,
-                          std::chrono::milliseconds ioTimeout);
+    enum class Mode { Bounded, Interruptible };
+
+    BoundedLldpConnection(std::string_view ctlname,
+                          std::chrono::milliseconds connectTimeout,
+                          std::chrono::milliseconds ioTimeout,
+                          Mode mode = Mode::Bounded);
 
     ~BoundedLldpConnection();
     BoundedLldpConnection(const BoundedLldpConnection &) = delete;
@@ -40,16 +52,43 @@ public:
     /// including IO timeout (lldpd hung) and connect failure (lldpd dead).
     [[nodiscard]] bool QueryInterfacesOk() const;
 
-    /// Raw access for reuse by bounded enumerate/refresh paths.
+    /**
+     * @brief Leave setup mode: drop socket timeouts, recv now waits on
+     *        poll(socket, wakeupFd) instead.
+     *
+     * Call once, after every bounded setup round-trip has completed.
+     * No-op when constructed with Mode::Bounded.
+     */
+    void enterInterruptibleMode();
+
+    /**
+     * @brief Wake a recv blocked in interruptible mode; it returns
+     *        LLDPCTL_ERR_EOF so the caller's watch loop unwinds.
+     *
+     * Sticky and idempotent — once unblocked, subsequent recvs return
+     * immediately. Async-signal-safe (a single eventfd write).
+     */
+    void unblock() noexcept;
+
+    /// Raw access for reuse by bounded enumerate/refresh/watch paths.
+    /// Never outlive this object; prefer the callback-form helpers.
     [[nodiscard]] lldpctl_conn_t *connection() const { return conn_.get(); }
 
 private:
-    static void connectBounded(int fd, const sockaddr_un &addr, std::chrono::milliseconds timeout);
+    static void connectBounded(int fd, const sockaddr_un &addr,
+                               std::chrono::milliseconds timeout);
     static void setIoTimeouts(int fd, std::chrono::milliseconds timeout);
     static ssize_t sendCb(lldpctl_conn_t *, const uint8_t *data, size_t length, void *userData);
     static ssize_t recvCb(lldpctl_conn_t *, const uint8_t *data, size_t length, void *userData);
 
+    /// Blocks until the socket is readable or unblock() is called.
+    /// Returns false when woken by unblock() (or on poll error).
+    [[nodiscard]] bool waitReadable() const;
+
     int fd_ = -1;
+    int wakeupFd_ = -1;                 // eventfd, Interruptible mode only
+    Mode mode_ = Mode::Bounded;
+    std::atomic<bool> unblocked_{false};
     std::unique_ptr<lldpctl_conn_t, decltype(&lldpctl_release)> conn_{nullptr, &lldpctl_release};
 };
 } // namespace RSCGroup

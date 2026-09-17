@@ -14,14 +14,13 @@
 DEFINE_string(transport, "dbus", "Transport type: dbus, stdout");
 DEFINE_string(transport_config, "system", "Transport-specific config (e.g. D-Bus bus type)");
 
-int main(int argc, char* argv[])
-{
+int main(int argc, char *argv[]) {
     gflags::SetUsageMessage("Network Observation Daemon");
     gflags::ParseCommandLineFlags(&argc, &argv, true);
 
     RSCGroup::GflagsConfig cfg;
 
-    const std::string transportName   = cfg.getString("transport", "dbus");
+    const std::string transportName = cfg.getString("transport", "dbus");
     const std::string transportConfig = cfg.getString("transport_config", "system");
 
     auto transport = RSCGroup::createTransport(transportName, transportConfig);
