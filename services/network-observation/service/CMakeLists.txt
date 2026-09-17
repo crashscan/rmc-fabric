@@ -66,4 +66,22 @@ if (BUILD_TESTING)
             TIMEOUT 15
             LABELS "unit;resilience"
     )
+
+    add_executable(network_observation_bounded_queue_tests tests/BoundedObservationQueueTests.cpp)
+    target_compile_features(network_observation_bounded_queue_tests PRIVATE cxx_std_20)
+    target_link_libraries(network_observation_bounded_queue_tests
+            PRIVATE network_observation_service observation-model rsc_util pthread)
+    add_test(NAME network_observation_bounded_queue_tests COMMAND network_observation_bounded_queue_tests)
+    set_tests_properties(network_observation_bounded_queue_tests PROPERTIES TIMEOUT 15 LABELS "unit;resilience")
+
+    # service/CMakeLists.txt, inside if(BUILD_TESTING):
+    add_executable(network_observation_publication_queue_tests tests/PublicationQueueTests.cpp)
+    target_compile_features(network_observation_publication_queue_tests PRIVATE cxx_std_20)
+    target_link_libraries(network_observation_publication_queue_tests
+            PRIVATE network_observation_service rsc_util pthread)
+    add_test(NAME network_observation_publication_queue_tests
+            COMMAND network_observation_publication_queue_tests)
+    set_tests_properties(network_observation_publication_queue_tests
+            PROPERTIES TIMEOUT 15 LABELS "unit;resilience")
+
 endif ()
