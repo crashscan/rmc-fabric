@@ -9,6 +9,7 @@
 
 #include "ObservationTypes.h"
 
+#include <cassert>
 #include <chrono>
 #include <optional>
 #include <string>

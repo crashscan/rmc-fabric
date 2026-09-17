@@ -96,7 +96,7 @@ public:
      * liveness signal — lldpd only notifies on changes, so a stable network
      * is legitimately silent.
      */
-    [[nodiscard]] virtual bool isBackendAlive() = 0;
+    [[nodiscard]] virtual bool isBackendAlive() const = 0;
 
     /**
      * @brief Time of the last backend-originated event (watch callback or

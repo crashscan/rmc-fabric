@@ -44,7 +44,8 @@ BoundedLldpConnection::BoundedLldpConnection(std::string_view ctlname,
                                              std::chrono::milliseconds ioTimeout,
                                              Mode mode)
     : fd_(makeSocket())
-      , mode_(mode) {
+      ,wakeupSignal_(makeWakeupSignal(mode))
+      ,mode_(mode) {
     // Any throw below unwinds the already-constructed UniqueFd members,
     // so no manual descriptor cleanup is needed.
     sockaddr_un addr{};
@@ -125,7 +126,7 @@ ssize_t BoundedLldpConnection::recvCb(lldpctl_conn_t *, const uint8_t *data,
     // Interruptible mode only: park in poll() until readable or unblocked.
     // In Bounded mode SO_RCVTIMEO does the bounding and we fall straight
     // through to recv().
-    if (self->mode_ == Mode::Interruptible && self->wakeupFd_.valid()) {
+    if (self->mode_ == Mode::Interruptible && self->wakeupSignal_) {
         if (!self->waitReadable()) return LLDPCTL_ERR_EOF; // unwinds the loop
     }
 

@@ -35,12 +35,6 @@ namespace {
     // already stopped by then.
     constexpr auto kRefreshDrainTimeout = std::chrono::seconds{3};
 
-    struct CachedLldpNeighbor {
-        std::optional<std::string> rawChassisId;
-        std::optional<std::string> rawPortId;
-        std::optional<std::string> rawSystemName;
-    };
-
     using NeighborCache = std::unordered_map<std::string, std::unordered_map<std::string, CachedLldpNeighbor> >;
 
     /**
@@ -784,7 +778,7 @@ void LldpdSource::submitNeighborChangeForTest(std::string_view ifname,
 }
 
 void LldpdSource::reassertAll() { impl_->reassertAll(); }
-bool LldpdSource::isBackendAlive() { return impl_->isBackendAlive(); }
+bool LldpdSource::isBackendAlive() const { return impl_->isBackendAlive(); }
 std::chrono::steady_clock::time_point LldpdSource::lastEventAt() const { return impl_->lastEventAt(); }
 
 void LldpdSource::openAdmissionForTest() { impl_->openAdmissionForTest(); }
