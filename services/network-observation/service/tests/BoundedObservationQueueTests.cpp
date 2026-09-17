@@ -112,7 +112,43 @@ void testStatsPassThrough()
     expect(st.dropped == 1 && st.highWater == 2 && st.size == 2,
            "drop accounting and watermarks pass through");
 }
+void testDiscardAllDoesNotReRaiseResyncBits()
+{
+    BoundedObservationQueue q(2);
+    q.push(makeItem(ObservationSource::Netlink, 1));
+    q.push(makeItem(ObservationSource::Netlink, 2));
+    q.push(makeItem(ObservationSource::Lldp, 3));     // drops N1 -> Netlink bit
 
+    expect(q.takeResyncMask() == sourceBit(ObservationSource::Netlink),
+           "overflow raised, and take cleared, the Netlink bit");
+
+    // The consumer's repair sequence: take the mask, drop the stale backlog
+    // (it predates the repair), then re-read the source. discardAll must not
+    // re-raise what was just cleared, or every cycle resyncs again.
+    q.discardAll();
+
+    expect(q.size() == 0, "backlog discarded");
+    expect(q.resyncMask() == 0u, "discardAll must not re-raise resync bits");
+}
+
+void testStopTokenUnblocksWithoutClosing()
+{
+    BoundedObservationQueue q(4);
+    std::stop_source src;
+    std::atomic<bool> returned{false};
+    std::optional<QueuedItem> out;
+    std::thread consumer([&] { out = q.waitPop(src.get_token()); returned = true; });
+
+    std::this_thread::sleep_for(50ms);
+    expect(!returned.load(), "waitPop blocks while empty");
+
+    src.request_stop();
+    consumer.join();
+
+    expect(returned.load() && !out, "stop request yields nullopt");
+    expect(!q.closed(), "and must not close the queue");
+    expect(q.push(makeItem(ObservationSource::Lldp, 9)), "queue survives for restart");
+}
 } // namespace
 
 int main()
@@ -122,5 +158,7 @@ int main()
     testMaskAccumulatesAcrossSourcesAndTakeClears();
     testCloseDrainsAndIgnoredPushesRaiseNoBit();
     testStatsPassThrough();
+    testStopTokenUnblocksWithoutClosing();
+    testDiscardAllDoesNotReRaiseResyncBits();
     return EXIT_SUCCESS;
 }

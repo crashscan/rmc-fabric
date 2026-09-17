@@ -133,7 +133,29 @@ void testHighWaterTracksPeakKeys()
     q.tryTake();
     expect(q.stats().highWater == 2, "watermark survives the take");
 }
+void testEmissionOrderIsInterfacesThenLocalStateThenCandidates()
+{
+    PublicationQueue q;
+    // Marked in reverse of the expected emission order.
+    q.markCandidateChanged("m1");
+    q.markLocalStateChanged();
+    q.markInterfaceChanged("eth0");
 
+    const auto pending = q.tryTake();
+    expect(pending.has_value(), "generation taken");
+
+    std::vector<std::string> order;
+    dispatchPublication(*pending,
+        [&](const std::string&, PublicationIntent) { order.emplace_back("candidate"); },
+        [&](const std::string&, PublicationIntent) { order.emplace_back("interface"); },
+        [&]                                        { order.emplace_back("localState"); });
+
+    // Guards the PublicationKey variant declaration order, which IS the wire
+    // emission order. A "tidy-up" that alphabetises the alternatives would
+    // silently reorder D-Bus signals; this fails instead.
+    expect((order == std::vector<std::string>{"interface", "localState", "candidate"}),
+           "batches emit interfaces, then local state, then candidates");
+}
 } // namespace
 
 int main()
@@ -146,5 +168,6 @@ int main()
     testWaitAndTakeBlocksUntilMark();
     testCloseDrainsThenExhausts();
     testHighWaterTracksPeakKeys();
+    testEmissionOrderIsInterfacesThenLocalStateThenCandidates();
     return EXIT_SUCCESS;
 }

@@ -4,10 +4,14 @@
 
 #include <atomic>
 #include <chrono>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <string>
 #include <vector>
+
+#include "ILldpSource.h"
+#include "ObservationTypes.h"
 
 namespace RSCGroup {
 class INetworkObservationModel;
@@ -40,7 +44,21 @@ class NetlinkLldpObservationRuntime final : public IObservationRuntime {
 public:
     explicit NetlinkLldpObservationRuntime(ModelConfig config);
 
-    explicit NetlinkLldpObservationRuntime(std::unique_ptr<INetworkObservationModel> model);
+    /**
+     * @param model     Injected model.
+     * @param reassertInterval Keepalive period. Callers using this ctor must
+     *        pass a value consistent with their model's candidateAgeout — it
+     *        cannot be derived here because ModelConfig is not visible.
+     *        Defaults to the ModelConfig default (candidateAgeout 60s / 2).
+     */
+    explicit NetlinkLldpObservationRuntime(
+        std::unique_ptr<INetworkObservationModel> model,
+        std::chrono::steady_clock::duration reassertInterval = std::chrono::seconds{30});
+
+    /// Factory for LLDP sources; receives the model-bound downstream callback.
+    /// Spelled without inputs/lldp headers on purpose: lldp-observer is linked
+    /// PRIVATE into the service target and must not leak into this header.
+    using LldpSourceFactory = std::function<std::unique_ptr<ILldpSource>(std::function<void(const LldpObservation &)>)>;
 
     ~NetlinkLldpObservationRuntime() override;
 
@@ -71,6 +89,17 @@ public:
     void age(std::chrono::steady_clock::time_point now) override;
 
     void tick(std::chrono::steady_clock::time_point now) override;
+
+    /**
+     * @brief Test seam: replace the LLDP source factory.
+     *
+     * Precondition: the runtime is not started. Enforced, because
+     * createLldpObserver() runs on the supervision thread on every retry and
+     * a late assignment would be a data race.
+     *
+     * Applies to the initial observer and to every tick()-driven retry.
+     */
+    void setLldpSourceFactoryForTest(LldpSourceFactory factory);
 
 private:
     [[nodiscard]] std::shared_ptr<LldpObserver> createLldpObserver();
