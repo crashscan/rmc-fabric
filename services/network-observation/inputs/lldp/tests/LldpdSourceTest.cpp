@@ -171,5 +171,54 @@ TEST(LldpdSourceTest, ThrowingCallbackIsContained) {
     EXPECT_NO_THROW(source.stop());
 }
 
+// reassertAll is a no-op when admission is closed (source not started).
+TEST(LldpdSourceTest, ReassertAllWhenNotStartedIsNoOp) {
+    TestSink sink;
+    LldpdSource source({}, [&](const LldpObservation& o) { sink.onObservation(o); });
+    source.reassertAll();
+    EXPECT_EQ(sink.count(), 0);
+}
+
+// reassertAll after stop is a no-op and does not crash.
+TEST(LldpdSourceTest, ReassertAllAfterStopIsNoOp) {
+    TestSink sink;
+    LldpdSource source({}, [&](const LldpObservation& o) { sink.onObservation(o); });
+    source.stop();
+    source.reassertAll();
+    EXPECT_EQ(sink.count(), 0);
+}
+
+// Liveness stamp starts at min() — no backend contact yet.
+TEST(LldpdSourceTest, LastEventAtIsMinBeforeStart) {
+    LldpdSource source({}, [](const LldpObservation&) {});
+    EXPECT_EQ(source.lastEventAt(), std::chrono::steady_clock::time_point::min());
+}
+
+// The test seam is not backend contact and must not stamp liveness —
+// this is what keeps keepalive-style traffic from feeding the watchdog.
+TEST(LldpdSourceTest, TestSeamDoesNotStampLiveness) {
+    LldpdSource source({}, [](const LldpObservation&) {});
+    source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
+                                       "aa:bb:cc:dd:ee:ff", "p1", "h1");
+    EXPECT_EQ(source.lastEventAt(), std::chrono::steady_clock::time_point::min());
+}
+
+// Backend probe never throws; the boolean result is environment-dependent
+// (lldpd may or may not be present on the test host), so only smoke-test it.
+TEST(LldpdSourceTest, BackendProbeDoesNotThrow) {
+    LldpdSource source({}, [](const LldpObservation&) {});
+    EXPECT_NO_THROW((void)source.isBackendAlive());
+}
+
+// refreshAll when not running remains a no-op (regression guard after the
+// diff-reconciliation rework).
+TEST(LldpdSourceTest, RefreshWhenNotRunningStillNoOp) {
+    TestSink sink;
+    LldpdSource source({}, [&](const LldpObservation& o) { sink.onObservation(o); });
+    source.refreshAll();
+    EXPECT_EQ(sink.count(), 0);
+    EXPECT_EQ(source.lastEventAt(), std::chrono::steady_clock::time_point::min());
+}
+
 } // namespace
 } // namespace RSCGroup

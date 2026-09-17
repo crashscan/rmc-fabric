@@ -148,5 +148,116 @@ TEST(EngineLifecycleTest, TombstoneRevival) {
     EXPECT_EQ(c->status, CandidateStatus::Confirmed);
 }
 
+    // ---------------------------------------------------------------------------
+// Keepalive handling (LldpObservation::keepalive)
+// ---------------------------------------------------------------------------
+
+// Revival: Aged -> Confirmed on keepalive, with a CandidateUpdated event.
+TEST(EngineKeepaliveTest, RevivesAgedWithEvent) {
+    ModelConfig config;
+    config.candidateAgeout = std::chrono::seconds(1);
+    ObservationModelEngine engine(std::move(config));
+    RecordingSink sink;
+    engine.setEventSink(&sink);
+    engine.markLive();
+    engine.onLldpObservation(makeLldp("aa:bb:cc:dd:ee:ff"));
+    ASSERT_TRUE(engine.findCandidateByMac("aa:bb:cc:dd:ee:ff").has_value());
+
+    engine.age(std::chrono::steady_clock::now() + std::chrono::seconds(2));
+    ASSERT_EQ(engine.findCandidateByMac("aa:bb:cc:dd:ee:ff")->status,
+              CandidateStatus::Aged);
+    sink.events.clear();
+
+    auto ka = makeLldp("aa:bb:cc:dd:ee:ff");
+    ka.keepalive = true;
+    engine.onLldpObservation(ka);
+
+    auto c = engine.findCandidateByMac("aa:bb:cc:dd:ee:ff");
+    ASSERT_TRUE(c.has_value());
+    EXPECT_EQ(c->status, CandidateStatus::Confirmed);
+    EXPECT_EQ(sink.macsOf(ModelEventKind::CandidateUpdated),
+              std::vector<std::string>{"aa:bb:cc:dd:ee:ff"});
+}
+
+// No-op: unchanged keepalive emits zero events (signal-treadmill guard).
+TEST(EngineKeepaliveTest, NoOpEmitsNoEvent) {
+    ObservationModelEngine engine(ModelConfig{});
+    RecordingSink sink;
+    engine.setEventSink(&sink);
+    engine.markLive();
+    engine.onLldpObservation(makeLldp("aa:bb:cc:dd:ee:ff"));
+    ASSERT_TRUE(engine.findCandidateByMac("aa:bb:cc:dd:ee:ff").has_value());
+    sink.events.clear();
+
+    for (int i = 0; i < 10; ++i) {
+        auto ka = makeLldp("aa:bb:cc:dd:ee:ff");
+        ka.keepalive = true;
+        engine.onLldpObservation(ka);
+    }
+    EXPECT_TRUE(sink.events.empty());
+    EXPECT_EQ(engine.findCandidateByMac("aa:bb:cc:dd:ee:ff")->status,
+              CandidateStatus::Confirmed);
+}
+
+// Survival: periodic keepalives carry a stable LLDP-only candidate past
+// candidateExpire (the 5-minute data-loss regression guard).
+TEST(EngineKeepaliveTest, KeepalivesPreventExpiration) {
+    ModelConfig config;
+    config.candidateAgeout = std::chrono::seconds(30);
+    config.candidateExpire = std::chrono::seconds(60);
+    ObservationModelEngine engine(std::move(config));
+    engine.markLive();
+
+    const auto t0 = std::chrono::steady_clock::now();
+    auto initial = makeLldp("aa:bb:cc:dd:ee:ff");
+    initial.observedAt = t0;
+    engine.onLldpObservation(initial);
+
+    for (int t = 25; t <= 300; t += 25) {
+        auto ka = makeLldp("aa:bb:cc:dd:ee:ff");
+        ka.keepalive = true;
+        ka.observedAt = t0 + std::chrono::seconds(t);
+        engine.onLldpObservation(ka);
+        engine.age(t0 + std::chrono::seconds(t));
+    }
+
+    auto c = engine.findCandidateByMac("aa:bb:cc:dd:ee:ff");
+    ASSERT_TRUE(c.has_value());
+    EXPECT_EQ(c->status, CandidateStatus::Confirmed);
+}
+
+// Tombstone guard: keepalive must not resurrect a Removed/LocalSelf candidate.
+TEST(EngineKeepaliveTest, DoesNotResurrectRemoved) {
+    ObservationModelEngine engine(ModelConfig{});
+    engine.onLldpObservation(makeLldp("aa:bb:cc:dd:ee:ff"));
+    engine.markLive();
+    ASSERT_TRUE(engine.findCandidateByMac("aa:bb:cc:dd:ee:ff").has_value());
+
+    // MAC becomes local -> candidate reconciled to LocalSelf/Removed.
+    LinkObservation link;
+    link.kind = ObservationKind::Link;
+    link.ifname = "eth9";
+    link.mac = "aa:bb:cc:dd:ee:ff";
+    link.event = ObservationEvent::Present;
+    link.observedAt = std::chrono::steady_clock::now();
+    engine.onLinkObservation(link);
+    ASSERT_FALSE(engine.findCandidateByMac("aa:bb:cc:dd:ee:ff").has_value());
+
+    auto ka = makeLldp("aa:bb:cc:dd:ee:ff");
+    ka.keepalive = true;
+    engine.onLldpObservation(ka);
+    EXPECT_FALSE(engine.findCandidateByMac("aa:bb:cc:dd:ee:ff").has_value());
+}
+
+// Keepalive never creates a candidate for an unknown identity.
+TEST(EngineKeepaliveTest, DoesNotCreateCandidate) {
+    ObservationModelEngine engine(ModelConfig{});
+    engine.markLive();
+    auto ka = makeLldp("aa:bb:cc:dd:ee:ff");
+    ka.keepalive = true;
+    engine.onLldpObservation(ka);
+    EXPECT_TRUE(engine.remoteCandidates().empty());
+}
+
 } // namespace
 } // namespace RSCGroup

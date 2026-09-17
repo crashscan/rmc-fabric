@@ -248,11 +248,20 @@ void ObservationModelEngine::onLldpObservation(const LldpObservation& obs) {
         std::scoped_lock lock(mutex_);
         if (!interfacePolicy_->allowLldpEvidence(obs.localIfname)) return;
 
-        const std::string candidateKey =
-            resolveLldpIdentity(obs.remoteChassisId, obs.remotePortId);
+        const std::string candidateKey = resolveLldpIdentity(obs.remoteChassisId, obs.remotePortId);
         if (candidateKey.empty()) return;
 
-        auto& c = getOrCreateCandidate(candidateKey);
+        const auto it = candidates_.find(candidateKey);
+        if (obs.keepalive) {
+            // Keepalives are Present-only re-assertions; anything else is a
+            // producer bug — drop it. They never create candidates and never
+            // touch Removed tombstones; they refresh/revive live candidates.
+            if (obs.event != ObservationEvent::Present) return;
+            if (it == candidates_.end() || it->second.status == CandidateStatus::Removed) {
+                return;
+            }
+        }
+        auto& c = (it != candidates_.end()) ? it->second: getOrCreateCandidate(candidateKey);
         const bool wasPublishable = isPublishable(c);
 
         if (obs.event == ObservationEvent::Present) {
@@ -273,6 +282,21 @@ void ObservationModelEngine::onLldpObservation(const LldpObservation& obs) {
         if (hasNoEvidence(c)) {
             candidates_.erase(candidateKey);
             pending.recordErased(candidateKey, wasPublishable);
+        } else if (obs.keepalive) {
+            // Refresh lastSeen and revive Aged/Expired. Emit an event only
+            // on a real status/classification change — a re-assert of
+            // unchanged state must not produce a CandidateChanged storm.
+            const auto oldStatus         = c.status;
+            const auto oldClassification = c.classification;
+
+            updateClassification(c);
+            if (c.status == CandidateStatus::Aged || c.status == CandidateStatus::Expired) {
+                c.status = CandidateStatus::Confirmed;
+            }
+
+            if (c.status != oldStatus || c.classification != oldClassification) {
+                pending.record(candidateKey, wasPublishable, isPublishable(c));
+            }
         } else {
             updateClassification(c);
             reconcileStatusLocked(c, obs.event);

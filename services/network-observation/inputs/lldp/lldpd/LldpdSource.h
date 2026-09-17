@@ -33,6 +33,7 @@
 #pragma once
 #include "ILldpSource.h"
 #include "LldpObserverTypes.h"
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
@@ -60,6 +61,17 @@ public:
     void refreshAll() override;
     void refreshInterface(const std::string& ifname) override;
     void removeInterface(const std::string& ifname) override;
+
+    /**
+     * @brief Re-emit all cached neighbors as keepalive Present observations.
+     *
+     * Holds one admission lease for the whole batch (mirrors
+     * removeInterface). The cache lock is released before downstream
+     * delivery. Does not stamp liveness. No-op when admission is closed.
+     */
+    void reassertAll() override;
+    [[nodiscard]] bool isBackendAlive() override;
+    [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const override;
 
     /**
      * @brief Test seam: inject a parsed neighbor change directly through the

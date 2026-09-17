@@ -70,6 +70,12 @@ struct LldpObservation : ObservationBase {
     std::optional<std::string> remoteChassisId;
     std::optional<std::string> remotePortId;
     std::optional<std::string> remoteSystemName;
+    /// True when this observation is a periodic source re-assertion of
+    /// already-known state (keepalive), not a backend change notification.
+    /// The engine refreshes lastSeen and revives Aged/Expired candidates,
+    /// but suppresses no-op model events and never creates candidates or
+    /// touches Removed tombstones. Producers must only set this on Present.
+    bool keepalive = false;
 };
 
 } // namespace RSCGroup

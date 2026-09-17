@@ -221,8 +221,17 @@ void ObservationService::agingLoop(std::stop_token st)
         if (agingCv_.wait_for(lk, st, agingInterval_, [&] { return st.stop_requested(); })) {
             break;
         }
-        runtime_->age(std::chrono::steady_clock::now());
+        //runtime_->age(std::chrono::steady_clock::now());
+        // Run the maintenance body outside agingMutex_. The worker wake
+        // callback takes agingMutex_ to notify agingCv_, and tick() may
+        // block on lldpctl I/O (reconnect). Holding the lock across the
+        // body would delay stop() by that I/O time.
+        lk.unlock();
+        const auto now = std::chrono::steady_clock::now();
+        runtime_->age(now);
+        runtime_->tick(now);
         refreshRuntimeIssues();
+        lk.lock();
     }
 }
 

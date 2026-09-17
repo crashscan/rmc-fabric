@@ -11,7 +11,7 @@
  */
 #pragma once
 #include "public/ILldpSource.h"
-#include "public/LldpObserverTypes.h"
+#include <chrono>
 #include <memory>
 #include <string>
 
@@ -45,6 +45,14 @@ public:
     void onInterfaceRemoved(const std::string& ifname);
     /** @} */
 
+    /// Re-emit all cached neighbors as keepalive Present observations.
+    void reassertAll();
+
+    /// Cheap backend connectivity probe; see ILldpSource.
+    [[nodiscard]] bool isBackendAlive();
+
+    /// Last backend-originated event time; see ILldpSource.
+    [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const;
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;

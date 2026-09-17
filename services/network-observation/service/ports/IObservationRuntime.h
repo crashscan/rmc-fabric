@@ -58,6 +58,21 @@ public:
     [[nodiscard]] virtual std::vector<RemoteCandidate> remoteCandidates() const = 0;
     [[nodiscard]] virtual std::optional<RemoteCandidate> findCandidateByMac(const std::string& mac) const = 0;
     virtual void age(std::chrono::steady_clock::time_point now) = 0;
+
+
+    /**
+     * @brief Periodic maintenance hook driven by the service aging loop.
+     *
+     * Called on the service aging thread after age(), outside the service's
+     * aging mutex. Implementations may perform bounded blocking I/O (e.g.
+     * reconnect attempts). The service stop path joins the aging worker, so
+     * tick() must remain bounded; it never runs concurrently with start()/
+     * stop() of the runtime.
+     *
+     * Threading: concurrent with producer callbacks (netlink, LLDP watch)
+     * and with query calls. Default no-op.
+     */
+    virtual void tick(std::chrono::steady_clock::time_point now) { (void)now; }
 };
 
 } // namespace RSCGroup

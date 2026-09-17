@@ -29,6 +29,16 @@ public:
         source_->removeInterface(ifname);
     }
 
+    void reassertAll() {
+        source_->reassertAll();
+    }
+    bool isBackendAlive() {
+        return source_->isBackendAlive();
+    }
+    [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const {
+        return source_->lastEventAt();
+    }
+
 private:
     std::unique_ptr<ILldpSource> source_;
 };
@@ -48,5 +58,9 @@ void LldpObserver::refreshInterface(const std::string& ifname) { impl_->refreshI
 void LldpObserver::onInterfaceUp(const std::string& ifname) { impl_->onInterfaceUp(ifname); }
 void LldpObserver::onInterfaceDown(const std::string& ifname) { impl_->onInterfaceDown(ifname); }
 void LldpObserver::onInterfaceRemoved(const std::string& ifname) { impl_->onInterfaceRemoved(ifname); }
+
+void LldpObserver::reassertAll() { impl_->reassertAll(); }
+bool LldpObserver::isBackendAlive() { return impl_->isBackendAlive(); }
+std::chrono::steady_clock::time_point LldpObserver::lastEventAt() const { return impl_->lastEventAt(); }
 
 } // namespace RSCGroup
