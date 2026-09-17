@@ -36,6 +36,10 @@ namespace {
     }
 } // namespace
 
+MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacksForTest() {
+        return makeCallbacks();
+}
+
 NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(ModelConfig config)
     : reassertInterval_(deriveReassertInterval(config.candidateAgeout))
     , lldpSourceFactory_(defaultLldpSourceFactory())

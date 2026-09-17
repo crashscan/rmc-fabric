@@ -104,7 +104,7 @@ public:
     /// Test seam: build the monitor callbacks without starting a monitor.
     /// Lets a test fire link events directly and observe that they reach an
     /// observer created after the callbacks were built. Not for production use.
-    [[nodiscard]] MonitorCallbacks makeCallbacksForTest() { return makeCallbacks(); }
+    [[nodiscard]] MonitorCallbacks makeCallbacksForTest();
 
 private:
     [[nodiscard]] std::shared_ptr<LldpObserver> createLldpObserver();
@@ -117,6 +117,12 @@ private:
 
     /// Keepalive period, derived from ModelConfig::candidateAgeout.
     std::chrono::steady_clock::duration reassertInterval_{std::chrono::seconds{30}};
+
+    /// Creates LLDP sources. Defaults to the real lldpd-backed source;
+    /// replaced by setLldpSourceFactoryForTest() before start().
+    /// Read on the supervision thread by createLldpObserver() on every
+    /// retry, which is why assignment is restricted to the pre-start window.
+    LldpSourceFactory lldpSourceFactory_;
 
     std::unique_ptr<INetworkObservationModel> model_;
     std::atomic<std::shared_ptr<LldpObserver> > lldpObserver_{nullptr};
