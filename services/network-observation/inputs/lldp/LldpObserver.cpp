@@ -33,7 +33,7 @@ public:
         source_->reassertAll();
     }
 
-    bool isBackendAlive() {
+    bool isBackendAlive() const {
         return source_->isBackendAlive();
     }
 
@@ -63,6 +63,6 @@ void LldpObserver::onInterfaceDown(const std::string &ifname) { impl_->onInterfa
 void LldpObserver::onInterfaceRemoved(const std::string &ifname) { impl_->onInterfaceRemoved(ifname); }
 
 void LldpObserver::reassertAll() { impl_->reassertAll(); }
-bool LldpObserver::isBackendAlive() { return impl_->isBackendAlive(); }
+bool LldpObserver::isBackendAlive() const { return impl_->isBackendAlive(); }
 std::chrono::steady_clock::time_point LldpObserver::lastEventAt() const { return impl_->lastEventAt(); }
 } // namespace RSCGroup

@@ -38,6 +38,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <vector>
 
 namespace RSCGroup {
 class LldpdSource : public ILldpSource {
@@ -74,7 +76,10 @@ public:
      */
     void reassertAll() override;
 
-    [[nodiscard]] bool isBackendAlive() override;
+    /// Probes backend connectivity over a separate short-lived connection.
+    /// const because it mutates no source state — the probe owns its own
+    /// socket and touches neither the watch nor the cache.
+    [[nodiscard]] bool isBackendAlive() const override;
 
     [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const override;
 
@@ -108,6 +113,29 @@ public:
      * @brief Test seam: close admission and drain active leases.
      */
     void closeAdmissionAndDrainForTest();
+
+    /**
+      * @brief Test seam: run the post-reconnect reconciliation pass directly.
+      *
+      * refreshAll() reaches reconcileAfterRefresh() only after a successful
+      * makeWatch() + enumerateInitialNeighbors(), both of which require a live
+      * lldpd. This seam supplies the pre-reconnect snapshot directly so the
+      * removal diff — and its deliberately unguarded delivery, the only
+      * generationGuard=false path in the source — can be exercised without a
+      * daemon.
+      *
+      * @param oldNeighbors Pre-reconnect neighbours as (ifname, chassisId,
+      *        portId). Entries whose identity is also present in the current
+      *        cache are treated as re-seen and produce no Removed. Entries
+      *        with a non-MAC identity are skipped, matching the caching rule
+      *        in cacheAndForward().
+      *
+      * Precondition: admission is open (openAdmissionForTest()). If admission
+      * is closed the call is a no-op, exactly as the real path would be.
+      *
+      * Unit tests only; do not call from production code.
+      */
+    void reconcileAfterRefreshForTest(const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors);
 
 private:
     class Impl;

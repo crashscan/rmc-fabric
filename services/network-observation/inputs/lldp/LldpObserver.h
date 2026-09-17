@@ -56,7 +56,7 @@ public:
     void reassertAll();
 
     /// Cheap backend connectivity probe; see ILldpSource.
-    [[nodiscard]] bool isBackendAlive();
+    [[nodiscard]] bool isBackendAlive() const;
 
     /// Last backend-originated event time; see ILldpSource.
     [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const;
