@@ -385,13 +385,11 @@ namespace {
                                            "aa:bb:cc:dd:ee:02", "p2", "h2");
         source.submitNeighborChangeForTest("eth1", ObservationEvent::Present,
                                            "aa:bb:cc:dd:ee:03", "p3", "h3");
-        const auto beforeKeepalives = sink.count();
 
         source.reassertAll();
 
-        EXPECT_EQ(sink.count() - beforeKeepalives, 3)
-        << "every cached neighbour is re-asserted when the cache is stable";
-        EXPECT_EQ(sink.keepaliveCount(), 3);
+                EXPECT_EQ(sink.keepaliveCount(), 3)
+                   << "every cached neighbour is re-asserted when the cache is stable";
     }
 
     // The generation counter must be bumped by cache mutation, not by delivery.

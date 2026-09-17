@@ -38,6 +38,8 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <tuple>
+#include <vector>
 
 namespace RSCGroup {
 class LldpdSource : public ILldpSource {
