@@ -108,6 +108,9 @@ bool BoundedLldpConnection::waitReadable() const {
         pollfd pfds[2]{{fd_.get(), POLLIN, 0}, {wakeupFd_.get(), POLLIN, 0}};
         const int rc = ::poll(pfds, 2, -1); // no deadline: idle is normal
         if (rc < 0) {
+            // EINTR is not a failure: a signal interrupted the wait, and the
+            // loop re-checks unblocked_ before parking again.
+            if (errno == EINTR) continue;
             // A genuine poll failure (EINVAL/ENOMEM/EFAULT) is reported to
             // liblldpctl as EOF because that is the only way to unwind the
             // watch loop — but it is NOT a clean shutdown, and the caller's
