@@ -14,7 +14,6 @@
 #include <string>
 
 namespace RSCGroup {
-
 class ILldpSource {
 public:
     virtual ~ILldpSource() = default;
@@ -35,6 +34,7 @@ public:
      * a no-op.
      */
     virtual void stop() = 0;
+
     [[nodiscard]] virtual bool isRunning() const = 0;
 
     /**
@@ -59,7 +59,7 @@ public:
      * For snapshot or packet-based backends, this triggers an active
      * resync scoped to a single interface.
      */
-    virtual void refreshInterface(const std::string& ifname) = 0;
+    virtual void refreshInterface(const std::string &ifname) = 0;
 
     /**
      * @brief Flush all LLDP state for a removed or downed interface.
@@ -74,7 +74,7 @@ public:
      * Called by LldpObserver when netlink reports link-down or
      * interface removal.
      */
-    virtual void removeInterface(const std::string& ifname) = 0;
+    virtual void removeInterface(const std::string &ifname) = 0;
 
     /**
      * @brief Re-emit every currently cached neighbor as a Present
@@ -107,5 +107,4 @@ public:
     [[nodiscard]] virtual std::chrono::steady_clock::time_point lastEventAt() const = 0;
 
 };
-
 } // namespace RSCGroup

@@ -15,163 +15,172 @@
 #include <unordered_map>
 #include <vector>
 #include <optional>
+#include <cstdint>
+
+#include "BoundedLldpConnection.h"
 
 namespace RSCGroup {
-
 namespace {
+    // tick() is documented as bounded; the probe worst case is
+    // connect (1s) + one round-trip (2s) ≈ 3s per supervision interval.
+    constexpr auto kProbeConnectTimeout = std::chrono::milliseconds{1000};
+    constexpr auto kProbeIoTimeout = std::chrono::milliseconds{2000};
 
-struct CachedLldpNeighbor {
-    std::optional<std::string> rawChassisId;
-    std::optional<std::string> rawPortId;
-    std::optional<std::string> rawSystemName;
-};
-
-using NeighborCache = std::unordered_map<std::string, std::unordered_map<std::string, CachedLldpNeighbor>>;
-
-/**
- * @brief Shared callback state owned by shared_ptr.
- *
- * All state touched by the external watch callback lives here.  The watch
- * callback captures only a weak_ptr to this object so that delayed or
- * copied callbacks cannot access freed source/service state.
- */
-struct CallbackState {
-    // Immutable after construction
-    LldpSourceConfig config;
-    LldpObservationCallback downstream;
-
-    // Admission gate
-    std::mutex       mtx;
-    std::condition_variable cv;
-    bool admitting   = false;
-    int  activeCount = 0;
-
-    // Neighbor cache
-    mutable std::mutex cacheMutex;
-    NeighborCache byInterface;
-
-    // Backend liveness: stamped ONLY by backend-originated paths (watch
-    // callbacks, initial enumeration). reassertAll() and removeInterface()
-    // deliberately bypass stamping — keepalives must not feed the watchdog.
-    std::atomic<std::chrono::steady_clock::time_point> lastWatchEventAt{
-        std::chrono::steady_clock::time_point::min()
+    struct CachedLldpNeighbor {
+        std::optional<std::string> rawChassisId;
+        std::optional<std::string> rawPortId;
+        std::optional<std::string> rawSystemName;
     };
 
-    CallbackState(LldpSourceConfig cfg, LldpObservationCallback cb)
-        : config(std::move(cfg)), downstream(std::move(cb)) {}
-};
+    using NeighborCache = std::unordered_map<std::string, std::unordered_map<std::string, CachedLldpNeighbor> >;
 
-/**
- * @brief Move-only RAII lease that decrements the active callback count on
- *        every exit path including exceptions.
- */
-class CallbackLease {
-public:
-    explicit CallbackLease(std::shared_ptr<CallbackState> state)
-        : state_(std::move(state)) {}
+    /**
+     * @brief Shared callback state owned by shared_ptr.
+     *
+     * All state touched by the external watch callback lives here.  The watch
+     * callback captures only a weak_ptr to this object so that delayed or
+     * copied callbacks cannot access freed source/service state.
+     */
+    struct CallbackState {
+        // Immutable after construction
+        LldpSourceConfig config;
+        LldpObservationCallback downstream;
 
-    ~CallbackLease() noexcept { release(); }
+        // Admission gate
+        std::mutex mtx;
+        std::condition_variable cv;
+        bool admitting = false;
+        int activeCount = 0;
 
-    CallbackLease(CallbackLease&& o) noexcept : state_(std::move(o.state_)) {}
-    CallbackLease& operator=(CallbackLease&& o) noexcept
-    {
-        if (this != &o) {
-            release();
-            state_ = std::move(o.state_);
+        // Neighbor cache
+        mutable std::mutex cacheMutex;
+        NeighborCache byInterface;
+        // Bumped on EVERY cache mutation (cacheAndForward, removeInterface,
+        // stop() clear, refreshAll() swap) while cacheMutex is held. Read
+        // lock-free by reassertAll() to detect a stale snapshot mid-delivery.
+        std::atomic<std::uint64_t> cacheGeneration{0};
+
+        // Backend liveness: stamped ONLY by backend-originated paths (watch
+        // callbacks, initial enumeration). reassertAll() and removeInterface()
+        // deliberately bypass stamping — keepalives must not feed the watchdog.
+        std::atomic<std::chrono::steady_clock::time_point> lastWatchEventAt{
+            std::chrono::steady_clock::time_point::min()
+        };
+
+        CallbackState(LldpSourceConfig cfg, LldpObservationCallback cb)
+            : config(std::move(cfg)), downstream(std::move(cb)) {
         }
-        return *this;
+    };
+
+    /**
+     * @brief Move-only RAII lease that decrements the active callback count on
+     *        every exit path including exceptions.
+     */
+    class CallbackLease {
+    public:
+        explicit CallbackLease(std::shared_ptr<CallbackState> state)
+            : state_(std::move(state)) {
+        }
+
+        ~CallbackLease() noexcept { release(); }
+
+        CallbackLease(CallbackLease &&o) noexcept : state_(std::move(o.state_)) {
+        }
+
+        CallbackLease &operator=(CallbackLease &&o) noexcept {
+            if (this != &o) {
+                release();
+                state_ = std::move(o.state_);
+            }
+            return *this;
+        }
+
+        CallbackLease(const CallbackLease &) = delete;
+
+        CallbackLease &operator=(const CallbackLease &) = delete;
+
+    private:
+        void release() noexcept {
+            if (!state_) return;
+            {
+                std::unique_lock lk(state_->mtx);
+                --state_->activeCount;
+            }
+            state_->cv.notify_all();
+            state_.reset();
+        }
+
+        std::shared_ptr<CallbackState> state_;
+    };
+
+    /**
+     * @brief Try to acquire a callback lease through the admission gate.
+     *
+     * Returns std::nullopt if admission is closed (stop/refresh in progress).
+     */
+    [[nodiscard]] std::optional<CallbackLease> tryAcquireLease(
+        const std::shared_ptr<CallbackState> &state) {
+        std::unique_lock lk(state->mtx);
+        if (!state->admitting) return std::nullopt;
+        ++state->activeCount;
+        return CallbackLease(state);
     }
 
-    CallbackLease(const CallbackLease&)            = delete;
-    CallbackLease& operator=(const CallbackLease&) = delete;
+    /**
+     * @brief Open admission on a CallbackState.
+     *
+     * Must be called before creating the watch handle so that initial
+     * enumeration callbacks (which may fire synchronously) are admitted.
+     */
+    void openAdmission(CallbackState &state) noexcept {
+        std::unique_lock lk(state.mtx);
+        state.admitting = true;
+    }
 
-private:
-    void release() noexcept
-    {
-        if (!state_) return;
+    /**
+     * @brief Close admission and wait for all active leases to drain.
+     *
+     * Does NOT hold the mutex while waiting, so it cannot deadlock with
+     * callbacks that use the same lock.
+     */
+    void closeAdmissionAndDrain(CallbackState &state) noexcept {
         {
-            std::unique_lock lk(state_->mtx);
-            --state_->activeCount;
+            std::unique_lock lk(state.mtx);
+            state.admitting = false;
         }
-        state_->cv.notify_all();
-        state_.reset();
+        {
+            std::unique_lock lk(state.mtx);
+            state.cv.wait(lk, [&state] { return state.activeCount == 0; });
+        }
     }
 
-    std::shared_ptr<CallbackState> state_;
-};
-
-/**
- * @brief Try to acquire a callback lease through the admission gate.
- *
- * Returns std::nullopt if admission is closed (stop/refresh in progress).
- */
-[[nodiscard]] std::optional<CallbackLease> tryAcquireLease(
-    const std::shared_ptr<CallbackState>& state)
-{
-    std::unique_lock lk(state->mtx);
-    if (!state->admitting) return std::nullopt;
-    ++state->activeCount;
-    return CallbackLease(state);
-}
-
-/**
- * @brief Open admission on a CallbackState.
- *
- * Must be called before creating the watch handle so that initial
- * enumeration callbacks (which may fire synchronously) are admitted.
- */
-void openAdmission(CallbackState& state) noexcept
-{
-    std::unique_lock lk(state.mtx);
-    state.admitting = true;
-}
-
-/**
- * @brief Close admission and wait for all active leases to drain.
- *
- * Does NOT hold the mutex while waiting, so it cannot deadlock with
- * callbacks that use the same lock.
- */
-void closeAdmissionAndDrain(CallbackState& state) noexcept
-{
-    {
-        std::unique_lock lk(state.mtx);
-        state.admitting = false;
-    }
-    {
-        std::unique_lock lk(state.mtx);
-        state.cv.wait(lk, [&state] { return state.activeCount == 0; });
-    }
-}
-
- /**
-  * @brief Cache-update + downstream delivery shared by the watch path
-  *        (dispatchChange) and the test seam.
-  *
-  * Caller must hold a valid CallbackLease. The cache lock is released before
-  * the downstream callback. Does not stamp liveness — callers stamp
-  * themselves when backend-originated.
-  */
-void cacheAndForward(CallbackState& state, const LldpObservation& obs)
-{
-    const std::string key = resolveLldpIdentity(obs.remoteChassisId, obs.remotePortId);
-    if (key.empty()) {
-        VLOG(1) << "LLDP neighbor on " << obs.localIfname << " — non-MAC identity, not cached";
-    } else {
-        std::unique_lock cacheLk(state.cacheMutex);
-        auto& ifaceCache = state.byInterface[obs.localIfname];
-        if (obs.event == ObservationEvent::Removed) {
-            VLOG(1) << "LLDP cache erase: ifname=" << obs.localIfname << " key=" << key;
-            ifaceCache.erase(key);
+    /**
+     * @brief Cache-update + downstream delivery shared by the watch path
+     *        (dispatchChange) and the test seam.
+     *
+     * Caller must hold a valid CallbackLease. The cache lock is released before
+     * the downstream callback. Does not stamp liveness — callers stamp
+     * themselves when backend-originated.
+     */
+    void cacheAndForward(CallbackState &state, const LldpObservation &obs) {
+        const std::string key = resolveLldpIdentity(obs.remoteChassisId, obs.remotePortId);
+        if (key.empty()) {
+            VLOG(1) << "LLDP neighbor on " << obs.localIfname << " — non-MAC identity, not cached";
         } else {
-            VLOG(1) << "LLDP cache insert: ifname=" << obs.localIfname << " key=" << key;
-            ifaceCache[key] = CachedLldpNeighbor{obs.remoteChassisId,obs.remotePortId,obs.remoteSystemName};
+            std::unique_lock cacheLk(state.cacheMutex);
+            auto &ifaceCache = state.byInterface[obs.localIfname];
+            if (obs.event == ObservationEvent::Removed) {
+                VLOG(1) << "LLDP cache erase: ifname=" << obs.localIfname << " key=" << key;
+                ifaceCache.erase(key);
+            } else {
+                VLOG(1) << "LLDP cache insert: ifname=" << obs.localIfname << " key=" << key;
+                ifaceCache[key] = CachedLldpNeighbor{obs.remoteChassisId, obs.remotePortId, obs.remoteSystemName};
+            }
+            state.cacheGeneration.fetch_add(1, std::memory_order_release);
         }
+        if (state.downstream)
+            state.downstream(obs);
     }
-    if (state.downstream)
-        state.downstream(obs);
-}
-
 } // anonymous namespace
 
 // ---------------------------------------------------------------------------
@@ -182,11 +191,10 @@ class LldpdSource::Impl {
 public:
     Impl(LldpSourceConfig config, LldpObservationCallback cb)
         : callbackState_(
-              std::make_shared<CallbackState>(std::move(config), std::move(cb)))
-    {}
+            std::make_shared<CallbackState>(std::move(config), std::move(cb))) {
+    }
 
-    ~Impl()
-    {
+    ~Impl() {
         try {
             stop();
         } catch (...) {
@@ -194,11 +202,10 @@ public:
         }
     }
 
-    bool start()
-    {
+    bool start() {
         std::unique_lock lk(lifecycleMutex_);
         if (state_ == State::Running || state_ == State::Starting) return true;
-        if (state_ != State::Stopped) return false;  // stopping or refreshing
+        if (state_ != State::Stopped) return false; // stopping or refreshing
         state_ = State::Starting;
         lk.unlock();
 
@@ -221,8 +228,7 @@ public:
         return true;
     }
 
-    void stop()
-    {
+    void stop() {
         // 1. Claim stopping under lifecycleMutex_
         std::unique_lock lk(lifecycleMutex_);
         if (state_ == State::Stopped) return;
@@ -251,14 +257,15 @@ public:
         // 6. Wait for active callback leases to drain
         {
             std::unique_lock cbLk(callbackState_->mtx);
-            callbackState_->cv.wait(cbLk,
-                [this] { return callbackState_->activeCount == 0; });
+            callbackState_->cv.wait(cbLk, [this] { return callbackState_->activeCount == 0; });
+            callbackState_->cacheGeneration.fetch_add(1, std::memory_order_release);
         }
 
         // 7. Clear cache only after drain completes
         {
             std::unique_lock cacheLk(callbackState_->cacheMutex);
             callbackState_->byInterface.clear();
+            callbackState_->cacheGeneration.fetch_add(1, std::memory_order_release);
         }
 
         // 8. Commit stopped and notify lifecycle waiters
@@ -270,8 +277,7 @@ public:
         LOG(INFO) << "LldpdSource stopped";
     }
 
-    [[nodiscard]] bool isRunning() const
-    {
+    [[nodiscard]] bool isRunning() const {
         std::unique_lock lk(lifecycleMutex_);
         return state_ == State::Running;
     }
@@ -280,8 +286,7 @@ public:
      * @brief Reconnect: close old watch, drain old callbacks, reopen with new
      *        watch.  If the reconnect fails, transitions to Stopped.
      */
-    void refreshAll()
-    {
+    void refreshAll() {
         // 1. running -> refreshing
         std::unique_lock lk(lifecycleMutex_);
         if (state_ != State::Running) return;
@@ -305,7 +310,7 @@ public:
         {
             std::unique_lock cbLk(callbackState_->mtx);
             callbackState_->cv.wait(cbLk,
-                [this] { return callbackState_->activeCount == 0; });
+                                    [this] { return callbackState_->activeCount == 0; });
         }
 
         // 6. Snapshot old cache for post-reconnect reconciliation
@@ -340,7 +345,8 @@ public:
         LOG(INFO) << "LldpdSource reconnected";
     }
 
-    void refreshInterface(const std::string& /*ifname*/) {}
+    void refreshInterface(const std::string & /*ifname*/) {
+    }
 
     /**
      * @brief Flush all cached neighbors for a removed interface.
@@ -349,29 +355,29 @@ public:
      * interleave between partial removals.  If admission is closed
      * (stop/refresh in progress) the batch is discarded.
      */
-    void removeInterface(const std::string& ifname)
-    {
+    void removeInterface(const std::string &ifname) {
         auto lease = tryAcquireLease(callbackState_);
-        if (!lease) return;  // stop/refresh in progress; discard batch
+        if (!lease) return; // stop/refresh in progress; discard batch
 
         std::vector<CachedLldpNeighbor> toRemove;
         {
             std::unique_lock cacheLk(callbackState_->cacheMutex);
             auto it = callbackState_->byInterface.find(ifname);
             if (it == callbackState_->byInterface.end()) return;
-            for (const auto& [_, entry] : it->second)
+            for (const auto &[_, entry]: it->second)
                 toRemove.push_back(entry);
             callbackState_->byInterface.erase(it);
+            callbackState_->cacheGeneration.fetch_add(1, std::memory_order_release);
         }
 
-        for (const auto& entry : toRemove) {
+        for (const auto &entry: toRemove) {
             LldpObservation obs;
-            obs.observedAt    = std::chrono::steady_clock::now();
-            obs.kind          = ObservationKind::Lldp;
-            obs.localIfname   = ifname;
-            obs.event         = ObservationEvent::Removed;
-            obs.remoteChassisId  = entry.rawChassisId;
-            obs.remotePortId     = entry.rawPortId;
+            obs.observedAt = std::chrono::steady_clock::now();
+            obs.kind = ObservationKind::Lldp;
+            obs.localIfname = ifname;
+            obs.event = ObservationEvent::Removed;
+            obs.remoteChassisId = entry.rawChassisId;
+            obs.remotePortId = entry.rawPortId;
             obs.remoteSystemName = entry.rawSystemName;
             if (callbackState_->downstream) callbackState_->downstream(obs);
         }
@@ -385,52 +391,67 @@ public:
      * released. Does NOT stamp lastWatchEventAt — keepalives must not count
      * as backend liveness for the watchdog.
      */
-    void reassertAll()
-    {
+    void reassertAll() {
         auto lease = tryAcquireLease(callbackState_);
-        if (!lease) return;  // stop/refresh in progress; keepalive dropped
+        if (!lease) return; // stop/refresh in progress; keepalive dropped
 
         std::vector<LldpObservation> batch;
+        std::uint64_t generation = 0;
         {
             std::unique_lock cacheLk(callbackState_->cacheMutex);
-            for (const auto& [ifname, neighbors] : callbackState_->byInterface) {
-                for (const auto& [_, entry] : neighbors) {
+            generation = callbackState_->cacheGeneration.load(std::memory_order_acquire);
+            for (const auto &[ifname, neighbors]: callbackState_->byInterface) {
+                for (const auto &[_, entry]: neighbors) {
                     LldpObservation obs;
-                    obs.observedAt       = std::chrono::steady_clock::now();
-                    obs.kind             = ObservationKind::Lldp;
-                    obs.localIfname      = ifname;
-                    obs.event            = ObservationEvent::Present;
-                    obs.remoteChassisId  = entry.rawChassisId;
-                    obs.remotePortId     = entry.rawPortId;
+                    obs.observedAt = std::chrono::steady_clock::now();
+                    obs.kind = ObservationKind::Lldp;
+                    obs.localIfname = ifname;
+                    obs.event = ObservationEvent::Present;
+                    obs.remoteChassisId = entry.rawChassisId;
+                    obs.remotePortId = entry.rawPortId;
                     obs.remoteSystemName = entry.rawSystemName;
-                    obs.keepalive        = true;
+                    obs.keepalive = true;
                     batch.push_back(std::move(obs));
                 }
             }
         }
 
-        for (const auto& obs : batch) {
-            if (callbackState_->downstream) callbackState_->downstream(obs);
+        for (std::size_t i = 0; i < batch.size(); ++i) {
+            // If the cache moved since the snapshot (removeInterface /
+            // dispatchChange / refreshAll swap), abandon the rest of this
+            // batch: delivering a stale keepalive after Removed(X) would
+            // resurrect seenInLldp / TopologyPeer for a full
+            // candidateAgeout. The next cycle rebuilds fresh.
+            //
+            // A nanosecond-wide check-then-emit window remains; closing it
+            // fully would require holding cacheMutex across downstream (the
+            // model), whose duration is not ours to bound. Accepted,
+            // documented.
+            if (callbackState_->cacheGeneration.load(std::memory_order_acquire) != generation) {
+                VLOG(1) << "reassertAll: cache mutated during delivery; dropping "
+                << (batch.size() - i) << " remaining keepalive(s)";
+                return;
+            }
+            if (callbackState_->downstream) callbackState_->downstream(batch[i]);
         }
         // lease released here
     }
 
     void submitNeighborChangeForTest(std::string_view ifname,
-                                         ObservationEvent event,
-                                         std::optional<std::string> chassisId,
-                                         std::optional<std::string> portId,
-                                         std::optional<std::string> systemName)
-    {
+                                     ObservationEvent event,
+                                     std::optional<std::string> chassisId,
+                                     std::optional<std::string> portId,
+                                     std::optional<std::string> systemName) {
         auto lease = tryAcquireLease(callbackState_);
         if (!lease) return;
 
         LldpObservation obs;
-        obs.observedAt   = std::chrono::steady_clock::now();
-        obs.kind         = ObservationKind::Lldp;
-        obs.localIfname  = std::string(ifname);
-        obs.event        = event;
-        obs.remoteChassisId  = std::move(chassisId);
-        obs.remotePortId     = std::move(portId);
+        obs.observedAt = std::chrono::steady_clock::now();
+        obs.kind = ObservationKind::Lldp;
+        obs.localIfname = std::string(ifname);
+        obs.event = event;
+        obs.remoteChassisId = std::move(chassisId);
+        obs.remotePortId = std::move(portId);
         obs.remoteSystemName = std::move(systemName);
 
         // Deliberately NOT liveness-stamped: the seam is not backend contact.
@@ -438,45 +459,44 @@ public:
         // lease released here
     }
 
-     /**
-     * @brief Emit Removed for neighbors present before a reconnect but not
-     *        re-observed during re-enumeration.
-     *
-     * Precondition: admission open; called after enumerateInitialNeighbors()
-     * so callbackState_->byInterface holds the fresh set. Enumeration already
-     * emitted Present for everything currently known; this pass emits the
-     * removals the old silent cache clear used to swallow.
-     */
-    void reconcileAfterRefresh(NeighborCache oldCache)
-    {
+    /**
+    * @brief Emit Removed for neighbors present before a reconnect but not
+    *        re-observed during re-enumeration.
+    *
+    * Precondition: admission open; called after enumerateInitialNeighbors()
+    * so callbackState_->byInterface holds the fresh set. Enumeration already
+    * emitted Present for everything currently known; this pass emits the
+    * removals the old silent cache clear used to swallow.
+    */
+    void reconcileAfterRefresh(NeighborCache oldCache) {
         auto lease = tryAcquireLease(callbackState_);
         if (!lease) return;
 
         std::vector<LldpObservation> removals;
         {
             std::unique_lock cacheLk(callbackState_->cacheMutex);
-            for (const auto& [ifname, neighbors] : oldCache) {
+            for (const auto &[ifname, neighbors]: oldCache) {
                 const auto freshIt = callbackState_->byInterface.find(ifname);
-                for (const auto& [key, entry] : neighbors) {
+                for (const auto &[key, entry]: neighbors) {
                     const bool reSeen =
-                        freshIt != callbackState_->byInterface.end() &&
-                        freshIt->second.contains(key);
+                            freshIt != callbackState_->byInterface.end() &&
+                            freshIt->second.contains(key);
                     if (reSeen) continue;
 
                     LldpObservation obs;
-                    obs.observedAt       = std::chrono::steady_clock::now();
-                    obs.kind             = ObservationKind::Lldp;
-                    obs.localIfname      = ifname;
-                    obs.event            = ObservationEvent::Removed;
-                    obs.remoteChassisId  = entry.rawChassisId;
-                    obs.remotePortId     = entry.rawPortId;
+                    obs.observedAt = std::chrono::steady_clock::now();
+                    obs.kind = ObservationKind::Lldp;
+                    obs.localIfname = ifname;
+                    obs.event = ObservationEvent::Removed;
+                    obs.remoteChassisId = entry.rawChassisId;
+                    obs.remotePortId = entry.rawPortId;
                     obs.remoteSystemName = entry.rawSystemName;
                     removals.push_back(std::move(obs));
                 }
             }
         }
 
-        for (const auto& obs : removals) {
+        for (const auto &obs: removals) {
             if (callbackState_->downstream) callbackState_->downstream(obs);
         }
         // lease released here
@@ -489,50 +509,90 @@ public:
      * so it is safe to call from the runtime tick thread concurrently with
      * watch callbacks.
      */
-    [[nodiscard]] bool isBackendAlive()
-    {
+    [[nodiscard]] bool isBackendAlive() {
         try {
-            lldpcli::LldpCtl ctl;
-            (void)ctl.GetInterfaces();
-            return true;
-        } catch (const std::exception& e) {
-            VLOG(1) << "LLDP backend probe failed: " << e.what();
-            return false;
-        } catch (...) {
+            BoundedLldpConnection probe(resolvedCtlPath(), kProbeConnectTimeout, kProbeIoTimeout);
+            return probe.QueryInterfacesOk();
+        } catch (const std::system_error &) {
             return false;
         }
     }
 
-    [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const
-    {
+    [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const {
         return callbackState_->lastWatchEventAt.load(std::memory_order_acquire);
     }
 
+    void openAdmissionForTest() {
+        openAdmission(*callbackState_);
+    }
+
+    void closeAdmissionAndDrainForTest() {
+        closeAdmissionAndDrain(*callbackState_);
+    }
+
 private:
-    bool makeWatch()
-    {
+    /// Resolved lldpd control socket for bounded connections.
+    [[nodiscard]] std::string resolvedCtlPath() const {
+        return callbackState_->config.ctlSocketPath.empty()
+                   ? ::lldpctl_get_default_transport()
+                   : callbackState_->config.ctlSocketPath;
+    }
+
+    /**
+     * @brief Bounded replacement for lldpcli::LldpCtl().GetInterfaces().
+     *
+     * The default liblldpctl transport has no timeout and would wedge the
+     * tick() thread against a hung lldpd. The returned atoms hold a
+     * non-owning alias of the bounded connection — @p bounded must outlive
+     * the returned list. GetPort()/GetAtomList() on the returned atoms do
+     * IO through the same bounded connection.
+     */
+    static std::list<lldpcli::LldpAtom> getInterfacesBounded(BoundedLldpConnection &bounded) {
+        const std::shared_ptr<lldpctl_conn_t> aliased(bounded.connection(), [](lldpctl_conn_t *) {
+        });
+
+        lldpctl_atom_t *raw = ::lldpctl_get_interfaces(bounded.connection());
+        if (!raw) {
+            throw std::system_error(
+                make_error_code(lldpctl_last_error(bounded.connection())),
+                "getInterfacesBounded: lldpctl_get_interfaces failed");
+        }
+        struct AtomDecRef {
+            void operator()(lldpctl_atom_t *a) const { ::lldpctl_atom_dec_ref(a); }
+        };
+        const std::unique_ptr<lldpctl_atom_t, AtomDecRef> interfaces(raw);
+
+        std::list<lldpcli::LldpAtom> list;
+        lldpctl_atom_t *atom = nullptr;
+        lldpctl_atom_foreach(interfaces.get(), atom) {
+            list.emplace_back(atom, true, aliased);
+        }
+        return list;
+    }
+
+    bool makeWatch() {
         // Capture only a weak_ptr — the watch callback must not retain ownership
         // of the Impl or the shared CallbackState.
         std::weak_ptr<CallbackState> weakState = callbackState_;
 
         try {
-            watch_ = std::make_unique<lldpcli::LldpWatch<void, void>>(
-                std::make_optional<lldpcli::LldpWatch<void, void>::ChangeCallback<void>>(
+            watch_ = std::make_unique<lldpcli::LldpWatch<void, void> >(
+                std::make_optional<lldpcli::LldpWatch<void, void>::ChangeCallback<void> >(
                     [weakState](std::string_view ifname,
                                 lldpctl_change_t change,
-                                const lldpcli::LldpAtom& /*interface*/,
-                                const lldpcli::LldpAtom& neighbor,
-                                void* /*ctx*/) {
+                                const lldpcli::LldpAtom & /*interface*/,
+                                const lldpcli::LldpAtom &neighbor,
+                                void * /*ctx*/) {
                         // Lock weak_ptr — if Impl is destroyed this is a no-op
                         auto state = weakState.lock();
                         if (!state) return;
 
                         auto lease = tryAcquireLease(state);
-                        if (!lease) return;  // admission closed
+                        if (!lease) return; // admission closed
 
                         try {
                             dispatchChange(*state, ifname, change, neighbor);
-                        } catch (const std::exception& e) {
+                        } catch (const std::exception &e) {
                             LOG(ERROR) << "LldpdSource: watch callback exception: " << e.what();
                         } catch (...) {
                             LOG(ERROR) << "LldpdSource: watch callback unknown exception";
@@ -542,7 +602,7 @@ private:
                 )
             );
             return true;
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             LOG(ERROR) << "Lldpd watch creation failed: " << e.what();
             return false;
         } catch (...) {
@@ -551,12 +611,14 @@ private:
         }
     }
 
-    void enumerateInitialNeighbors()
-    {
-        // Precondition: admission is open; lifecycleMutex_ NOT held here
+    void enumerateInitialNeighbors() {
+        // Precondition: admission is open; lifecycleMutex_ NOT held here.
+        // Bounded transport: this runs on the tick() thread via refreshAll();
+        // the default lldpctl transport has no timeout.
         try {
-            lldpcli::LldpCtl ctl;
-            for (const auto& iface : ctl.GetInterfaces()) {
+            BoundedLldpConnection bounded(resolvedCtlPath(),
+                                          kProbeConnectTimeout, kProbeIoTimeout);
+            for (const auto &iface: getInterfacesBounded(bounded)) {
                 auto ifname = iface.GetValue<std::string>(lldpctl_k_interface_name);
                 if (!ifname) continue;
 
@@ -570,12 +632,12 @@ private:
                 auto port = iface.GetPort();
                 auto neighbors = port.GetAtomList(lldpctl_k_port_neighbors);
 
-                for (const auto& nb : neighbors) {
+                for (const auto &nb: neighbors) {
                     auto lease = tryAcquireLease(callbackState_);
-                    if (!lease) return;  // stop/refresh began during enumeration
+                    if (!lease) return; // stop/refresh began during enumeration
                     try {
                         dispatchChange(*callbackState_, *ifname, lldpctl_c_added, nb);
-                    } catch (const std::exception& e) {
+                    } catch (const std::exception &e) {
                         LOG(ERROR) << "LLDP initial enumeration dispatch error: " << e.what();
                     }
                 }
@@ -584,7 +646,7 @@ private:
             // A completed enumeration proves backend connectivity even when
             // zero neighbors were found (dispatchChange stamps per neighbor).
             callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(), std::memory_order_release);
-        } catch (const std::exception& e) {
+        } catch (const std::exception &e) {
             LOG(ERROR) << "LLDP initial enumeration failed: " << e.what();
         }
     }
@@ -595,11 +657,10 @@ private:
      * Caller must hold a valid CallbackLease (keeping activeCount > 0).
      * Cache locks are released before the downstream callback.
      */
-    static void dispatchChange(CallbackState& state,
-                                   std::string_view ifname,
-                                   lldpctl_change_t change,
-                                   const lldpcli::LldpAtom& neighbor)
-    {
+    static void dispatchChange(CallbackState &state,
+                               std::string_view ifname,
+                               lldpctl_change_t change,
+                               const lldpcli::LldpAtom &neighbor) {
         // Backend-originated contact — liveness stamp. reassertAll() and
         // removeInterface() bypass this function on purpose.
         state.lastWatchEventAt.store(std::chrono::steady_clock::now(),
@@ -615,12 +676,12 @@ private:
         if (change == lldpctl_c_deleted && !state.config.emitRemovals) return;
 
         LldpObservation obs;
-        obs.observedAt   = std::chrono::steady_clock::now();
-        obs.kind         = ObservationKind::Lldp;
-        obs.localIfname  = std::string(ifname);
-        obs.event        = (change == lldpctl_c_deleted)
-            ? ObservationEvent::Removed
-            : ObservationEvent::Present;
+        obs.observedAt = std::chrono::steady_clock::now();
+        obs.kind = ObservationKind::Lldp;
+        obs.localIfname = std::string(ifname);
+        obs.event = (change == lldpctl_c_deleted)
+                        ? ObservationEvent::Removed
+                        : ObservationEvent::Present;
 
         if (auto chassisId = neighbor.GetValue<std::string>(lldpctl_k_chassis_id))
             obs.remoteChassisId = *chassisId;
@@ -635,7 +696,7 @@ private:
     enum class State { Stopped, Starting, Running, Refreshing, Stopping };
 
     std::shared_ptr<CallbackState> callbackState_;
-    std::unique_ptr<lldpcli::LldpWatch<void, void>> watch_;
+    std::unique_ptr<lldpcli::LldpWatch<void, void> > watch_;
 
     mutable std::mutex lifecycleMutex_;
     std::condition_variable lifecycleCv_;
@@ -647,27 +708,30 @@ private:
 // ---------------------------------------------------------------------------
 
 LldpdSource::LldpdSource(LldpSourceConfig config, LldpObservationCallback cb)
-    : impl_(std::make_unique<Impl>(std::move(config), std::move(cb))) {}
+    : impl_(std::make_unique<Impl>(std::move(config), std::move(cb))) {
+}
 
 LldpdSource::~LldpdSource() = default;
 
-bool LldpdSource::start()   { return impl_->start(); }
-void LldpdSource::stop()    { impl_->stop(); }
+bool LldpdSource::start() { return impl_->start(); }
+void LldpdSource::stop() { impl_->stop(); }
 bool LldpdSource::isRunning() const { return impl_->isRunning(); }
-void LldpdSource::refreshAll()      { impl_->refreshAll(); }
-void LldpdSource::refreshInterface(const std::string& ifname) { impl_->refreshInterface(ifname); }
-void LldpdSource::removeInterface(const std::string& ifname)  { impl_->removeInterface(ifname); }
+void LldpdSource::refreshAll() { impl_->refreshAll(); }
+void LldpdSource::refreshInterface(const std::string &ifname) { impl_->refreshInterface(ifname); }
+void LldpdSource::removeInterface(const std::string &ifname) { impl_->removeInterface(ifname); }
 
 void LldpdSource::submitNeighborChangeForTest(std::string_view ifname,
-                                     ObservationEvent event,
-                                     std::optional<std::string> chassisId,
-                                     std::optional<std::string> portId,
-                                     std::optional<std::string> systemName)
-{
-    impl_->submitNeighborChangeForTest(ifname,event,std::move(chassisId),std::move(portId),std::move(systemName));
+                                              ObservationEvent event,
+                                              std::optional<std::string> chassisId,
+                                              std::optional<std::string> portId,
+                                              std::optional<std::string> systemName) {
+    impl_->submitNeighborChangeForTest(ifname, event, std::move(chassisId), std::move(portId), std::move(systemName));
 }
+
 void LldpdSource::reassertAll() { impl_->reassertAll(); }
-bool LldpdSource::isBackendAlive()  { return impl_->isBackendAlive(); }
+bool LldpdSource::isBackendAlive() { return impl_->isBackendAlive(); }
 std::chrono::steady_clock::time_point LldpdSource::lastEventAt() const { return impl_->lastEventAt(); }
 
+void LldpdSource::openAdmissionForTest() { impl_->openAdmissionForTest(); }
+void LldpdSource::closeAdmissionAndDrainForTest() { impl_->closeAdmissionAndDrainForTest(); }
 } // namespace RSCGroup

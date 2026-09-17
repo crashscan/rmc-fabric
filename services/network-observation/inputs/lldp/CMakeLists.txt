@@ -3,6 +3,7 @@ cmake_minimum_required(VERSION 3.16)
 add_library(lldp-observer STATIC
     LldpObserver.cpp
     lldpd/LldpdSource.cpp
+    lldpd/BoundedLldpConnection.cpp
 )
 target_compile_features(lldp-observer PUBLIC cxx_std_20)
 

@@ -88,7 +88,20 @@ public:
                                      std::optional<std::string> chassisId,
                                      std::optional<std::string> portId,
                                      std::optional<std::string> systemName);
+    /**
+     * @brief Test seam: open the callback admission gate without a backend.
+     *
+     * While open, submitNeighborChangeForTest / reassertAll /
+     * removeInterface run exactly as with a live backend, enabling
+     * cache-level unit tests without lldpd. Does not change lifecycle
+     * state and does not stamp liveness. Not for production use.
+     */
+    void openAdmissionForTest();
 
+    /**
+     * @brief Test seam: close admission and drain active leases.
+     */
+    void closeAdmissionAndDrainForTest();
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;

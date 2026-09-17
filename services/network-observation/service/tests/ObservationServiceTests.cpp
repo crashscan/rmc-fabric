@@ -99,6 +99,7 @@ public:
 
     void age(std::chrono::steady_clock::time_point) override
     {
+        ++ageCalls_;
         if (onAge_) {
             onAge_();
         }
@@ -127,6 +128,41 @@ public:
         releaseAge_ = true;
         releaseAgeCv_.notify_all();
     }
+
+    // --- tick blocking (supervision worker path) ---
+    void tick(std::chrono::steady_clock::time_point) override
+    {
+        std::unique_lock lock(tickMutex_);
+        tickEntered_ = true;
+        tickEnteredCv_.notify_all();
+        if (blockInTick_) {
+            releaseTickCv_.wait(lock, [&] { return releaseTick_; });
+        }
+    }
+
+    [[nodiscard]] bool waitUntilTickEntered(
+        std::chrono::milliseconds timeout = std::chrono::milliseconds(500))
+    {
+        std::unique_lock lock(tickMutex_);
+        return tickEnteredCv_.wait_for(lock, timeout, [&] { return tickEntered_; });
+    }
+
+    void releaseTick()
+    {
+        {
+            std::scoped_lock lock(tickMutex_);
+            releaseTick_ = true;
+        }
+        releaseTickCv_.notify_all();
+    }
+
+    void setBlockInTick(bool value)
+    {
+        std::scoped_lock lock(tickMutex_);
+        blockInTick_ = value;
+    }
+
+    [[nodiscard]] int ageCalls() const { return ageCalls_.load(); }
 
     [[nodiscard]] IModelEventSink* sink() const { return sink_; }
     [[nodiscard]] int startCount() const { return startCount_.load(); }
@@ -159,6 +195,13 @@ private:
     bool releaseAge_{false};
     std::condition_variable ageEnteredCv_;
     std::condition_variable releaseAgeCv_;
+    std::atomic<int> ageCalls_{0};
+    mutable std::mutex tickMutex_;
+    std::condition_variable tickEnteredCv_;
+    std::condition_variable releaseTickCv_;
+    bool tickEntered_{false};
+    bool blockInTick_{false};
+    bool releaseTick_{false};
 };
 
 class FakeObservationTransport final : public IObservationTransport {
@@ -605,6 +648,31 @@ void testConcurrentStopWaitsForTeardownCompletion()
     expect(runtimePtr->stopCount() == 1, "the runtime must be stopped exactly once");
 }
 
+// Supervision runs on its own worker: a blocked tick() must not starve
+// aging, and stop() completes once the bounded tick returns.
+void testAgingContinuesWhileSupervisionTickIsBlocked()
+{
+    auto runtime = std::make_unique<FakeObservationRuntime>();
+    auto runtimePtr = runtime.get();
+    runtimePtr->setBlockInTick(true);
+    auto transport = std::make_shared<FakeObservationTransport>();
+
+    ObservationService service(std::move(runtime), transport, std::chrono::milliseconds(20));
+    expect(service.start(), "service should start");
+    expect(runtimePtr->waitUntilTickEntered(), "supervision worker should enter tick()");
+
+    const int callsBefore = runtimePtr->ageCalls();
+    std::this_thread::sleep_for(std::chrono::milliseconds(150));
+    expect(runtimePtr->ageCalls() > callsBefore,
+           "age() must keep running while tick() is blocked");
+
+    runtimePtr->releaseTick();
+    service.stop();
+
+    expect(runtimePtr->stopCount() == 1, "runtime stopped exactly once");
+    expect(transport->stopCount() == 1, "transport stopped exactly once");
+}
+
 } // namespace
 
 int main()
@@ -622,5 +690,6 @@ int main()
     testSelfStopFromAgingThreadIsRejected();
     testAgingWorkerCrashRemainsObservationOwnedDegradation();
     testConcurrentStopWaitsForTeardownCompletion();
+    testAgingContinuesWhileSupervisionTickIsBlocked();
     return EXIT_SUCCESS;
 }

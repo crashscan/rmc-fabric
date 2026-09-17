@@ -50,7 +50,9 @@ public:
 
 private:
     void agingLoop(std::stop_token st);
+    void supervisionLoop(std::stop_token stopToken);
     void onAgingWorkerExit(const ManagedWorker::Exit& exit);
+    void onSupervisionWorkerExit(const ManagedWorker::Exit& exit);
     void refreshRuntimeIssues();
     void reportIssue(const std::string& issueCode,
                      const std::string& severity,
@@ -71,6 +73,8 @@ private:
 
     std::unique_ptr<IObservationRuntime> runtime_;
     std::chrono::steady_clock::duration agingInterval_;
+    /// tick() cadence — kept at the aging cadence tick() previously ran at.
+    std::chrono::steady_clock::duration supervisionInterval_;
     std::mutex agingMutex_;
     std::condition_variable_any agingCv_;
     mutable std::mutex issuesMutex_;
@@ -82,11 +86,12 @@ private:
     // ------------------------------------------------------------------ //
     // Member destruction order
     // ------------------------------------------------------------------ //
-    // agingWorker_ MUST be the last member: its work/wake/exit callbacks
-    // capture `this` and access runtime_, agingInterval_, agingMutex_,
-    // agingCv_, issuesMutex_, and issues_.  Declaring it last means reverse
-    // member destruction destroys (and therefore stops and joins) the worker
-    // before any state it touches goes away.
+    // The workers MUST be the last members: their work/wake/exit callbacks
+    // capture `this` and access runtime_, the intervals, agingMutex_,
+    // agingCv_, issuesMutex_, and issues_.  Declaring them last means
+    // reverse member destruction stops and joins them before any state
+    // they touch goes away.
+    ManagedWorker supervisionWorker_;
     ManagedWorker agingWorker_;
 };
 

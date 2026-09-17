@@ -7,10 +7,15 @@
 
 #include <map>
 #include <stdexcept>
+#include <string_view>
 
 namespace RSCGroup {
 namespace {
 
+// Additive issue code (map-valued issues; wire format unchanged —
+// CONTRACT_VERSION stays). Defined locally, not in interop_contract.
+
+constexpr std::string_view kIssueSupervisionLoopStopped = "observation.worker.supervision.stopped";
 namespace contract = interop_contract::network_observation;
 
 [[nodiscard]] std::vector<std::shared_ptr<IObservationTransport>> observationTransports(const ServiceBase& service)
@@ -40,13 +45,22 @@ ObservationService::ObservationService(std::unique_ptr<IObservationRuntime> runt
     : ServiceBase("observation-service")
     , runtime_(std::move(runtime))
     , agingInterval_(agingInterval)
-    , agingWorker_("observation-aging",
-                   [this](std::stop_token st) { agingLoop(std::move(st)); },
+    , supervisionInterval_(agingInterval)
+    , supervisionWorker_("observation-supervision",
+                   [this](std::stop_token st) { supervisionLoop(std::move(st)); },
                    [this] {
-                       std::scoped_lock agingLock(agingMutex_);
+                       std::scoped_lock lk(agingMutex_);
                        agingCv_.notify_all();
                    },
-                   [this](const ManagedWorker::Exit& exit) { onAgingWorkerExit(exit); })
+                   [this](const ManagedWorker::Exit& exit) { onSupervisionWorkerExit(exit); })
+    , agingWorker_("observation-aging",
+                              [this](std::stop_token st) { agingLoop(std::move(st)); },
+                              [this] {
+                                  std::scoped_lock agingLock(agingMutex_);
+                                  agingCv_.notify_all();
+                              },
+                              [this](const ManagedWorker::Exit& exit) { onAgingWorkerExit(exit); })
+
 {
     if (!runtime_) {
         throw std::invalid_argument("ObservationService: runtime is null");
@@ -133,7 +147,23 @@ bool ObservationService::start()
         transition.fail();
         return false;
     }
-
+    try {
+        (void)supervisionWorker_.start();
+    } catch (const std::exception& e) {
+        agingWorker_.stop();
+        runtime_->stop();
+        ServiceBase::stop();
+        diagnostics::logError(name(), "worker.supervision", "start", "worker_start_failed", "supervision", e.what());
+        transition.fail();
+        return false;
+    } catch (...) {
+        agingWorker_.stop();
+        runtime_->stop();
+                ServiceBase::stop();
+                diagnostics::logError(name(), "worker.supervision", "start", "worker_start_failed", "supervision", "unknown exception");
+                transition.fail();
+                return false;
+            }
     transition.complete();
     return true;
 }
@@ -143,8 +173,8 @@ void ObservationService::stop()
     // Self-stop is rejected *before* shutdown is claimed.  There is no detach
     // path: a detached worker capturing `this` would open a use-after-free
     // window and break the producer-drain guarantee.
-    if (agingWorker_.isCurrentThread()) {
-        diagnostics::logError(name(), "worker.aging", "stop", "self_stop_rejected", "aging", "stop() called from the aging worker thread; request shutdown externally");
+    if (agingWorker_.isCurrentThread() || supervisionWorker_.isCurrentThread()) {
+        diagnostics::logError(name(), "worker", "stop", "self_stop_rejected", "worker", "stop() called from a service worker thread; request shutdown externally");
         return;
     }
 
@@ -159,7 +189,11 @@ void ObservationService::stop()
     // Structural, local, noexcept.
     quiesceQueriesOnTransports();
 
-    // Step 2: Request stop, notify the aging condition variable, and join.
+    // Step 2: Join both workers — supervision FIRST: LldpdSource's
+    // refreshAll()/stop() state hand-off relies on tick() being quiescent
+    // before runtime_->stop() (M3 invariant). Both joins are bounded:
+    // tick() never blocks longer than the probe timeouts.
+    supervisionWorker_.stop();
     agingWorker_.stop();
 
     // Step 3: Stop the runtime (netlink join → LLDP callback drain → sink
@@ -214,6 +248,33 @@ void ObservationService::onAgingWorkerExit(const ManagedWorker::Exit& exit)
                 detail);
 }
 
+void ObservationService::onSupervisionWorkerExit(const ManagedWorker::Exit& exit)
+{
+    // Same degradation policy as the aging worker: surface as an issue,
+    // never drive lifecycle or readiness.
+    if (exit.reason != ManagedWorker::ExitReason::exception) {
+        return;
+    }
+
+    std::string detail = "unknown exception";
+    try {
+        if (exit.exception) {
+            std::rethrow_exception(exit.exception);
+        }
+    } catch (const std::exception& e) {
+        detail = e.what();
+    } catch (...) {
+    }
+
+    reportIssue(std::string(kIssueSupervisionLoopStopped),
+                std::string(contract::SEVERITY_ERROR),
+                "worker.supervision",
+                "tick",
+                "worker_loop_failed",
+                "supervision",
+                detail);
+}
+
 void ObservationService::agingLoop(std::stop_token st)
 {
     std::unique_lock lk(agingMutex_);
@@ -221,15 +282,27 @@ void ObservationService::agingLoop(std::stop_token st)
         if (agingCv_.wait_for(lk, st, agingInterval_, [&] { return st.stop_requested(); })) {
             break;
         }
-        //runtime_->age(std::chrono::steady_clock::now());
-        // Run the maintenance body outside agingMutex_. The worker wake
-        // callback takes agingMutex_ to notify agingCv_, and tick() may
-        // block on lldpctl I/O (reconnect). Holding the lock across the
-        // body would delay stop() by that I/O time.
+        // Body runs outside agingMutex_: the workers' wake callback takes
+        // the mutex to notify agingCv_.
         lk.unlock();
-        const auto now = std::chrono::steady_clock::now();
-        runtime_->age(now);
-        runtime_->tick(now);
+        runtime_->age(std::chrono::steady_clock::now());
+        lk.lock();
+    }
+}
+
+// Supervision (LLDP retry / probe / keepalive driving) on its own worker so
+// a slow lldpd probe can never starve aging.  tick() remains bounded by the
+// BoundedLldpConnection timeouts; the body runs outside agingMutex_ for the
+// same reason as agingLoop.  Sharing the mutex/CV is safe: timed predicate
+// waits, bodies outside the lock.
+void ObservationService::supervisionLoop(std::stop_token st) {
+    std::unique_lock lk(agingMutex_);
+    while (!st.stop_requested()) {
+        if (agingCv_.wait_for(lk, st, supervisionInterval_, [&] { return st.stop_requested(); })) {
+            break;
+        }
+        lk.unlock();
+        runtime_->tick(std::chrono::steady_clock::now());
         refreshRuntimeIssues();
         lk.lock();
     }
@@ -486,8 +559,7 @@ void ObservationService::noteTransportPublishFailure(const std::string& transpor
                 message);
 }
 
-void ObservationService::clearTransportPublishFailure(const std::string& transportName,
-                                                       const std::string& operation)
+void ObservationService::clearTransportPublishFailure(const std::string& transportName, const std::string& operation)
 {
     clearIssue(makeTransportIssueCode(transportName, operation),
                "transport." + diagnostics::sanitizeField(transportName),
