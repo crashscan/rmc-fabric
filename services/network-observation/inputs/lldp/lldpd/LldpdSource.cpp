@@ -477,45 +477,36 @@ public:
     }
 
     /**
-    * @brief Emit Removed for neighbors present before a reconnect but not
-    *        re-observed during re-enumeration.
-    *
-    * Precondition: admission open; called after enumerateInitialNeighbors()
-    * so callbackState_->byInterface holds the fresh set. Enumeration already
-    * emitted Present for everything currently known; this pass emits the
-    * removals the old silent cache clear used to swallow.
-    */
+     * @brief Emit Removed for neighbors present before a reconnect but not
+     *        re-observed during re-enumeration.
+     *
+     * Precondition: admission open; called after enumerateInitialNeighbors()
+     * so callbackState_->byInterface holds the fresh set. Enumeration already
+     * emitted Present for everything currently known; this pass emits the
+     * removals the old silent cache clear used to swallow.
+     *
+     * Unguarded on purpose (generationGuard=false): a Removed stays correct
+     * even if the cache moves mid-delivery, and abandoning the batch would
+     * strand the candidate until candidateAgeout. Keepalives are the opposite
+     * case — see reassertAll().
+     */
     void reconcileAfterRefresh(NeighborCache oldCache) {
         auto lease = tryAcquireLease(callbackState_);
         if (!lease) return;
 
-        std::vector<LldpObservation> removals;
-        {
-            std::unique_lock cacheLk(callbackState_->cacheMutex);
+        emitBatch([&oldCache](const NeighborCache &fresh,
+                              std::vector<LldpObservation> &out) {
             for (const auto &[ifname, neighbors]: oldCache) {
-                const auto freshIt = callbackState_->byInterface.find(ifname);
+                const auto freshIt = fresh.find(ifname);
                 for (const auto &[key, entry]: neighbors) {
-                    const bool reSeen =
-                            freshIt != callbackState_->byInterface.end() &&
-                            freshIt->second.contains(key);
+                    const bool reSeen = freshIt != fresh.end() &&
+                                        freshIt->second.contains(key);
                     if (reSeen) continue;
-
-                    LldpObservation obs;
-                    obs.observedAt = std::chrono::steady_clock::now();
-                    obs.kind = ObservationKind::Lldp;
-                    obs.localIfname = ifname;
-                    obs.event = ObservationEvent::Removed;
-                    obs.remoteChassisId = entry.rawChassisId;
-                    obs.remotePortId = entry.rawPortId;
-                    obs.remoteSystemName = entry.rawSystemName;
-                    removals.push_back(std::move(obs));
+                    out.push_back(makeLldpObservation(
+                        ifname, ObservationEvent::Removed, entry));
                 }
             }
-        }
-
-        for (const auto &obs: removals) {
-            if (callbackState_->downstream) callbackState_->downstream(obs);
-        }
+        }, /*generationGuard=*/false);
         // lease released here
     }
 
@@ -526,7 +517,7 @@ public:
      * so it is safe to call from the runtime tick thread concurrently with
      * watch callbacks.
      */
-    [[nodiscard]] bool isBackendAlive() {
+    [[nodiscard]] bool isBackendAlive() const {
         try {
             BoundedLldpConnection probe(resolvedCtlPath(), kProbeConnectTimeout, kProbeIoTimeout);
             return probe.QueryInterfacesOk();
@@ -714,20 +705,24 @@ private:
 
         if (change == lldpctl_c_deleted && !state.config.emitRemovals) return;
 
-        LldpObservation obs;
-        obs.observedAt = std::chrono::steady_clock::now();
-        obs.kind = ObservationKind::Lldp;
-        obs.localIfname = std::string(ifname);
-        obs.event = (change == lldpctl_c_deleted)
-                        ? ObservationEvent::Removed
-                        : ObservationEvent::Present;
+        // Hoisted so the factory receives owning optionals. GetValue returns
+        // optional<string> by value; an absent field stays nullopt, which is
+        // what the cache and the model both expect.
+        std::optional<std::string> chassisId;
+        std::optional<std::string> portId;
+        std::optional<std::string> systemName;
+        if (auto v = neighbor.GetValue<std::string>(lldpctl_k_chassis_id))
+            chassisId = std::move(*v);
+        if (auto v = neighbor.GetValue<std::string>(lldpctl_k_port_id))
+            portId = std::move(*v);
+        if (auto v = neighbor.GetValue<std::string>(lldpctl_k_chassis_name))
+            systemName = std::move(*v);
 
-        if (auto chassisId = neighbor.GetValue<std::string>(lldpctl_k_chassis_id))
-            obs.remoteChassisId = *chassisId;
-        if (auto portId = neighbor.GetValue<std::string>(lldpctl_k_port_id))
-            obs.remotePortId = *portId;
-        if (auto chassisName = neighbor.GetValue<std::string>(lldpctl_k_chassis_name))
-            obs.remoteSystemName = *chassisName;
+        const auto obs = makeLldpObservation(
+            ifname,
+            change == lldpctl_c_deleted ? ObservationEvent::Removed
+                                        : ObservationEvent::Present,
+            std::move(chassisId), std::move(portId), std::move(systemName));
 
         cacheAndForward(state, obs);
     }

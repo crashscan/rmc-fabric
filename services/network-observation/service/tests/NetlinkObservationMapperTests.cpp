@@ -1,9 +1,6 @@
 //
 // Created by vvass on 18-Sep-26.
 //
-//
-// Created by vvass on 18-Sep-26.
-//
 
 #include "NetlinkObservationMapper.h"
 
@@ -15,6 +12,7 @@
 #include <iostream>
 #include <string>
 #include <vector>
+#include <utility>
 
 namespace {
 using namespace RSCGroup;
@@ -29,7 +27,7 @@ void expect(bool cond, const std::string &msg) {
 
 /// Fixed, recognisable timestamp: proves observedAt is plumbed through rather
 /// than re-sampled inside the mapping functions.
-constexpr std::chrono::steady_clock::time_point kStamp{42s};
+const std::chrono::steady_clock::time_point kStamp{std::chrono::duration_cast<std::chrono::steady_clock::duration>(42s)};
 
 // ---------------------------------------------------------------------------
 // Pure field mappings

@@ -1,10 +1,6 @@
 //
 // Created by vvass on 18-Sep-26.
 //
-
-//
-// Created by vvass on 19-Sep-26.
-//
 #pragma once
 
 #include "ObservationTypes.h"
