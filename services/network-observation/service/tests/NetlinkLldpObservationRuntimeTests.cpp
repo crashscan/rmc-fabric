@@ -57,7 +57,7 @@ public:
     void refreshInterface(const std::string& i) override { s_->interfacesUp.push_back(i); }
     void removeInterface(const std::string& i)  override { s_->interfacesDown.push_back(i); }
     void reassertAll() override { ++s_->reassertCalls; }
-    [[nodiscard]] bool isBackendAlive() override { return s_->backendAlive; }
+    [[nodiscard]] bool isBackendAlive() const override { return s_->backendAlive; }
     [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const override {
         return std::chrono::steady_clock::time_point::min();
     }

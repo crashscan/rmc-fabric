@@ -469,14 +469,7 @@ public:
         auto lease = tryAcquireLease(callbackState_);
         if (!lease) return;
 
-        LldpObservation obs;
-        obs.observedAt = std::chrono::steady_clock::now();
-        obs.kind = ObservationKind::Lldp;
-        obs.localIfname = std::string(ifname);
-        obs.event = event;
-        obs.remoteChassisId = std::move(chassisId);
-        obs.remotePortId = std::move(portId);
-        obs.remoteSystemName = std::move(systemName);
+        const auto obs = makeLldpObservation(ifname, event, std::move(chassisId),std::move(portId), std::move(systemName));
 
         // Deliberately NOT liveness-stamped: the seam is not backend contact.
         cacheAndForward(*callbackState_, obs);
