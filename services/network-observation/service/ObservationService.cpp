@@ -138,6 +138,7 @@ bool ObservationService::start() {
     try {
         (void) supervisionWorker_.start();
     } catch (const std::exception &e) {
+        supervisionWorker_.stop();   // idempotent; guards a partially-started worker
         agingWorker_.stop();
         runtime_->stop();
         ServiceBase::stop();
@@ -145,6 +146,7 @@ bool ObservationService::start() {
         transition.fail();
         return false;
     } catch (...) {
+        supervisionWorker_.stop();
         agingWorker_.stop();
         runtime_->stop();
         ServiceBase::stop();
@@ -281,9 +283,8 @@ void ObservationService::agingLoop(std::stop_token st) {
 
 // Supervision (LLDP retry / probe / keepalive driving) on its own worker so
 // a slow lldpd probe can never starve aging.  tick() remains bounded by the
-// BoundedLldpConnection timeouts; the body runs outside agingMutex_ for the
-// same reason as agingLoop.  Sharing the mutex/CV is safe: timed predicate
-// waits, bodies outside the lock.
+// BoundedLldpConnection timeouts plus, on a failed probe, the reconnect
+// drain bound (kRefreshDrainTimeout) — worst case ~6s per cycle.
 void ObservationService::supervisionLoop(std::stop_token st) {
     std::unique_lock lk(supervisionMutex_);
     while (!st.stop_requested()) {

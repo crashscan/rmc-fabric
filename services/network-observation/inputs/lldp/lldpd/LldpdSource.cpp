@@ -212,7 +212,11 @@ public:
     bool start() {
         std::unique_lock lk(lifecycleMutex_);
         if (state_ == State::Running || state_ == State::Starting) return true;
-        if (state_ != State::Stopped) return false; // stopping or refreshing
+        // pendingDrain_ means abandoned leases are still in flight from a
+        // timed-out refreshAll(); reopening admission now would let them
+        // coexist with fresh watch callbacks and break the drain
+        // accounting. Caller must stop() (or drop the source) first.
+        if (state_ != State::Stopped || pendingDrain_) return false;
         state_ = State::Starting;
         lk.unlock();
 
