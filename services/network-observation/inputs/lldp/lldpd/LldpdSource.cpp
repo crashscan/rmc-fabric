@@ -542,6 +542,31 @@ public:
         closeAdmissionAndDrain(*callbackState_);
     }
 
+    /**
+ * @brief Build a NeighborCache from loose triples and run the real
+ *        reconciliation pass over it.
+ *
+ * The rebuild mirrors cacheAndForward()'s keying exactly — same
+ * resolveLldpIdentity(), same non-MAC skip — so the snapshot a test
+ * supplies is indistinguishable from one the watch path produced.
+ */
+    void reconcileAfterRefreshForTest(
+        const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors) {
+        NeighborCache oldCache;
+        for (const auto &[ifname, chassisId, portId]: oldNeighbors) {
+            CachedLldpNeighbor entry{chassisId, portId, std::nullopt};
+            const std::string key = resolveLldpIdentity(entry.rawChassisId, entry.rawPortId);
+            if (key.empty()) {
+                // Non-MAC identities are never cached by the live path, so a
+                // test snapshot must not contain them either — silently
+                // skipping keeps the two in step.
+                continue;
+            }
+            oldCache[ifname][key] = std::move(entry);
+        }
+        reconcileAfterRefresh(std::move(oldCache));
+    }
+
 private:
     /// Resolved lldpd control socket for bounded connections.
     [[nodiscard]] std::string resolvedCtlPath() const {
@@ -771,4 +796,8 @@ std::chrono::steady_clock::time_point LldpdSource::lastEventAt() const { return 
 
 void LldpdSource::openAdmissionForTest() { impl_->openAdmissionForTest(); }
 void LldpdSource::closeAdmissionAndDrainForTest() { impl_->closeAdmissionAndDrainForTest(); }
+void LldpdSource::reconcileAfterRefreshForTest(
+    const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors) {
+    impl_->reconcileAfterRefreshForTest(oldNeighbors);
+}
 } // namespace RSCGroup

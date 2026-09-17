@@ -1,6 +1,8 @@
 //
 // Created by vvass on 24-Jul-26.
 //
+#include <algorithm>
+
 #include "LldpdSource.h"
 #include <gtest/gtest.h>
 #include <atomic>
@@ -40,6 +42,33 @@ namespace {
         [[nodiscard]] std::vector<LldpObservation> snapshot() const {
             std::unique_lock lk(mtx);
             return observations;
+        }
+
+        /// Keepalive re-assertions only. Distinct from Present: a keepalive is
+        /// always Present, but a Present is not necessarily a keepalive.
+        [[nodiscard]] int keepaliveCount() const {
+            std::unique_lock lk(mtx);
+            return static_cast<int>(std::ranges::count_if(
+                observations, [](const LldpObservation &o) { return o.keepalive; }));
+        }
+
+        [[nodiscard]] int removedCount() const {
+            std::unique_lock lk(mtx);
+            return static_cast<int>(std::ranges::count_if(
+                observations, [](const LldpObservation &o) {
+                    return o.event == ObservationEvent::Removed;
+                }));
+        }
+
+        /// Chassis ID of the most recent Removed, or empty if none / unset.
+        [[nodiscard]] std::string lastRemovedChassisId() const {
+            std::unique_lock lk(mtx);
+            for (auto it = observations.rbegin(); it != observations.rend(); ++it) {
+                if (it->event == ObservationEvent::Removed) {
+                    return it->remoteChassisId.value_or(std::string{});
+                }
+            }
+            return {};
         }
     };
 
@@ -339,6 +368,105 @@ namespace {
                 std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
         EXPECT_LT(elapsedMs, 5000)
                 << "probe blocked " << elapsedMs << "ms against a hung backend";
+    }
+
+    // Complement to ReassertAllDropsBatchWhenCacheMutatedMidDelivery: with no
+    // mid-delivery mutation the guard must not fire. Without this, a guard that
+    // always abandoned after the first item would still pass the drop test.
+    TEST(LldpdSourceTest, ReassertAllDeliversWholeBatchWhenCacheIsStable) {
+        TestSink sink;
+        LldpdSource source(LldpSourceConfig{},
+                           [&](const LldpObservation &o) { sink.onObservation(o); });
+        source.openAdmissionForTest();
+
+        source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
+                                           "aa:bb:cc:dd:ee:01", "p1", "h1");
+        source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
+                                           "aa:bb:cc:dd:ee:02", "p2", "h2");
+        source.submitNeighborChangeForTest("eth1", ObservationEvent::Present,
+                                           "aa:bb:cc:dd:ee:03", "p3", "h3");
+        const auto beforeKeepalives = sink.count();
+
+        source.reassertAll();
+
+        EXPECT_EQ(sink.count() - beforeKeepalives, 3)
+        << "every cached neighbour is re-asserted when the cache is stable";
+        EXPECT_EQ(sink.keepaliveCount(), 3);
+    }
+
+    // The generation counter must be bumped by cache mutation, not by delivery.
+    // A reassertAll that stamped the generation itself would silently disable the
+    // guard for every subsequent batch.
+    TEST(LldpdSourceTest, ReassertAllDoesNotAdvanceTheCacheGeneration) {
+        TestSink sink;
+        LldpdSource source(LldpSourceConfig{},
+                           [&](const LldpObservation &o) { sink.onObservation(o); });
+        source.openAdmissionForTest();
+        source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
+                                           "aa:bb:cc:dd:ee:01", "p1", "h1");
+        source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
+                                           "aa:bb:cc:dd:ee:02", "p2", "h2");
+
+        source.reassertAll(); // first pass: must not perturb the generation
+        sink.clear();
+        source.reassertAll(); // second pass must still deliver everything
+
+        EXPECT_EQ(sink.keepaliveCount(), 2)
+        << "a prior reassert must not leave the cache looking mutated";
+    }
+
+    // The unguarded half of emitBatch's policy. A Removed stays correct even if
+    // the cache moves mid-delivery, so the batch must run to completion —
+    // abandoning it would strand the candidate until candidateAgeout. This is the
+    // exact inverse of ReassertAllDropsBatchWhenCacheMutatedMidDelivery.
+    TEST(LldpdSourceTest, ReconcileDeliversAllRemovalsDespiteMidDeliveryMutation) {
+        TestSink sink;
+        std::unique_ptr<LldpdSource> source;
+        source = std::make_unique<LldpdSource>(
+            LldpSourceConfig{},
+            [&](const LldpObservation &o) {
+                sink.onObservation(o);
+                if (o.event == ObservationEvent::Removed) {
+                    // Mutate the cache from inside delivery. Under the guarded
+                    // policy this would abandon the remainder; under the
+                    // unguarded policy every removal must still be emitted.
+                    source->submitNeighborChangeForTest("eth9", ObservationEvent::Present,
+                                                        "aa:bb:cc:dd:ee:99", "p9", "h9");
+                }
+            });
+        source->openAdmissionForTest();
+
+        // Fresh cache is empty, so all three old neighbours reconcile as Removed.
+        source->reconcileAfterRefreshForTest({
+            {"eth0", "aa:bb:cc:dd:ee:01", "p1"},
+            {"eth0", "aa:bb:cc:dd:ee:02", "p2"},
+            {"eth1", "aa:bb:cc:dd:ee:03", "p3"},
+        });
+
+        EXPECT_EQ(sink.removedCount(), 3)
+        << "unguarded batch delivers every removal even as the cache mutates";
+    }
+
+    // Neighbours still present after the reconnect must NOT be reported Removed —
+    // the diff, not the guard, decides membership.
+    TEST(LldpdSourceTest, ReconcileSuppressesRemovalForReSeenNeighbours) {
+        TestSink sink;
+        LldpdSource source(LldpSourceConfig{},
+                           [&](const LldpObservation &o) { sink.onObservation(o); });
+        source.openAdmissionForTest();
+
+        // Simulates what enumerateInitialNeighbors() re-observed post-reconnect.
+        source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
+                                           "aa:bb:cc:dd:ee:01", "p1", "h1");
+        sink.clear();
+
+        source.reconcileAfterRefreshForTest({
+            {"eth0", "aa:bb:cc:dd:ee:01", "p1"}, // re-seen — no removal
+            {"eth0", "aa:bb:cc:dd:ee:02", "p2"}, // gone — removal
+        });
+
+        EXPECT_EQ(sink.removedCount(), 1);
+        EXPECT_EQ(sink.lastRemovedChassisId(), "aa:bb:cc:dd:ee:02");
     }
 } // namespace
 } // namespace RSCGroup

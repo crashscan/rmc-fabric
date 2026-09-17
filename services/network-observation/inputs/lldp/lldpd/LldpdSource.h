@@ -112,6 +112,29 @@ public:
      */
     void closeAdmissionAndDrainForTest();
 
+    /**
+      * @brief Test seam: run the post-reconnect reconciliation pass directly.
+      *
+      * refreshAll() reaches reconcileAfterRefresh() only after a successful
+      * makeWatch() + enumerateInitialNeighbors(), both of which require a live
+      * lldpd. This seam supplies the pre-reconnect snapshot directly so the
+      * removal diff — and its deliberately unguarded delivery, the only
+      * generationGuard=false path in the source — can be exercised without a
+      * daemon.
+      *
+      * @param oldNeighbors Pre-reconnect neighbours as (ifname, chassisId,
+      *        portId). Entries whose identity is also present in the current
+      *        cache are treated as re-seen and produce no Removed. Entries
+      *        with a non-MAC identity are skipped, matching the caching rule
+      *        in cacheAndForward().
+      *
+      * Precondition: admission is open (openAdmissionForTest()). If admission
+      * is closed the call is a no-op, exactly as the real path would be.
+      *
+      * Unit tests only; do not call from production code.
+      */
+    void reconcileAfterRefreshForTest(const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors);
+
 private:
     class Impl;
     std::unique_ptr<Impl> impl_;
