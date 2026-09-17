@@ -10,12 +10,12 @@
 #include <string>
 #include <vector>
 
-#include "ILldpSource.h"
 #include "ObservationTypes.h"
 
 namespace RSCGroup {
 class INetworkObservationModel;
 class LldpObserver;
+class ILldpSource;
 class ModelConfig;
 class NetlinkNetworkMonitor;
 struct MonitorCallbacks;
@@ -100,6 +100,11 @@ public:
      * Applies to the initial observer and to every tick()-driven retry.
      */
     void setLldpSourceFactoryForTest(LldpSourceFactory factory);
+
+    /// Test seam: build the monitor callbacks without starting a monitor.
+    /// Lets a test fire link events directly and observe that they reach an
+    /// observer created after the callbacks were built. Not for production use.
+    [[nodiscard]] MonitorCallbacks makeCallbacksForTest() { return makeCallbacks(); }
 
 private:
     [[nodiscard]] std::shared_ptr<LldpObserver> createLldpObserver();

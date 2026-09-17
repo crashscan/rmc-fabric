@@ -12,6 +12,7 @@
 #include <glog/logging.h>
 #include <algorithm>
 #include <chrono>
+#include <stdexcept>
 
 #include "NetlinkObservationMapper.h"
 
