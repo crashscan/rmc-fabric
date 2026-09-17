@@ -649,8 +649,10 @@ private:
 
     void enumerateInitialNeighbors() {
         // Precondition: admission is open; lifecycleMutex_ NOT held here.
-        // Bounded transport: this runs on the tick() thread via refreshAll();
-        // the default lldpctl transport has no timeout.
+        // Uses BoundedLldpConnection rather than lldpcli::LldpCtl: this runs
+        // on the supervision (tick) thread via refreshAll(), and the default
+        // lldpctl transport has no timeout, so a hung lldpd would block the
+        // supervision worker and in turn delay ObservationService::stop().
         try {
             BoundedLldpConnection bounded(resolvedCtlPath(),
                                           kProbeConnectTimeout, kProbeIoTimeout);

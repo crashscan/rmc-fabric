@@ -11,102 +11,112 @@
 #include <sys/un.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
-#include <memory>
-#include <string_view>
+#include <limits>
 #include <system_error>
+#include <glog/logging.h>
 
 namespace RSCGroup {
+UniqueFd BoundedLldpConnection::makeSocket() {
+    UniqueFd fd(::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0));
+    if (!fd.valid()) {
+        throw std::system_error(errno, std::generic_category(),
+                                "BoundedLldpConnection: socket");
+    }
+    return fd;
+}
 
+UniqueFd BoundedLldpConnection::makeWakeupFd(Mode mode) {
+    if (mode != Mode::Interruptible) return {};
+    UniqueFd fd(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    if (!fd.valid()) {
+        throw std::system_error(errno, std::generic_category(),
+                                "BoundedLldpConnection: eventfd");
+    }
+    return fd;
+}
 
 // --- ctor: create the wakeup fd up front, but stay Bounded for setup ---
 BoundedLldpConnection::BoundedLldpConnection(std::string_view ctlname,
                                              std::chrono::milliseconds connectTimeout,
                                              std::chrono::milliseconds ioTimeout,
-                                             Mode mode) {
-    const int fd = ::socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
-    if (fd < 0) {
-        throw std::system_error(errno, std::generic_category(), "BoundedLldpConnection: socket");
+                                             Mode mode)
+    : fd_(makeSocket())
+      , wakeupFd_(makeWakeupFd(mode))
+      , mode_(mode) {
+    // Any throw below unwinds the already-constructed UniqueFd members,
+    // so no manual descriptor cleanup is needed.
+    sockaddr_un addr{};
+    addr.sun_family = AF_UNIX;
+    // Filesystem paths only: abstract sockets (leading NUL) are not
+    // supported here and are not produced by lldpctl_get_default_transport().
+    if (ctlname.size() >= sizeof(addr.sun_path)) {
+        throw std::system_error(std::make_error_code(std::errc::filename_too_long),
+                                "BoundedLldpConnection: ctl socket path");
     }
-    int wake = -1;
-    try {
-        if (mode == Mode::Interruptible) {
-            wake = ::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
-            if (wake < 0) {
-                throw std::system_error(errno, std::generic_category(),
-                                        "BoundedLldpConnection: eventfd");
-            }
-        }
+    std::memcpy(addr.sun_path, ctlname.data(), ctlname.size());
 
-        sockaddr_un addr{};
-        addr.sun_family = AF_UNIX;
-        // Filesystem paths only: abstract sockets (leading NUL) are not
-        // supported here and are not produced by lldpctl_get_default_transport().
-        if (ctlname.size() >= sizeof(addr.sun_path)) {
-            throw std::system_error(std::make_error_code(std::errc::filename_too_long),
-                                    "BoundedLldpConnection: ctl socket path");
-        }
-        std::memcpy(addr.sun_path, ctlname.data(), ctlname.size());
+    connectBounded(fd_.get(), addr, connectTimeout);
+    // Setup always runs bounded — including, for a watch connection, the
+    // lldpctl_watch_callback2 subscribe round-trip. Interruptible mode is
+    // entered only afterwards, via enterInterruptibleMode().
+    setIoTimeouts(fd_.get(), ioTimeout);
 
-        connectBounded(fd, addr, connectTimeout);
-        // Setup always runs bounded — including, for a watch connection,
-        // the lldpctl_watch_callback2 subscribe round-trip. This is the
-        // step that hangs makeWatch() against a wedged lldpd.
-        setIoTimeouts(fd, ioTimeout);
-
-        conn_.reset(::lldpctl_new_name(std::string(ctlname).c_str(),
-                                       &BoundedLldpConnection::sendCb,
-                                       &BoundedLldpConnection::recvCb,
-                                       this));
-        if (!conn_) {
-            throw std::system_error(std::make_error_code(std::errc::not_enough_memory),
-                                    "BoundedLldpConnection: lldpctl_new_name");
-        }
-    } catch (...) {
-        if (wake >= 0) ::close(wake);
-        ::close(fd);
-        throw;
+    conn_.reset(::lldpctl_new_name(std::string(ctlname).c_str(),
+                                   &BoundedLldpConnection::sendCb,
+                                   &BoundedLldpConnection::recvCb,
+                                   this));
+    if (!conn_) {
+        throw std::system_error(std::make_error_code(std::errc::not_enough_memory),
+                                "BoundedLldpConnection: lldpctl_new_name");
     }
-    fd_ = fd;
-    wakeupFd_ = wake;
-    mode_ = mode;   // still behaving Bounded until enterInterruptibleMode()
 }
 
-BoundedLldpConnection::~BoundedLldpConnection() {
-    conn_.reset();  // release library connection while fd is valid
-    if (wakeupFd_ >= 0) ::close(wakeupFd_);
-    if (fd_ >= 0) ::close(fd_);
-}
+// Destruction order is load-bearing and now implicit: conn_ is declared
+// last, so it is destroyed first — the library connection is released
+// while both descriptors are still open.
+BoundedLldpConnection::~BoundedLldpConnection() = default;
 
 void BoundedLldpConnection::enterInterruptibleMode() {
     if (mode_ != Mode::Interruptible) return;
     // Clear SO_RCVTIMEO/SO_SNDTIMEO: from here recv blocks in waitReadable()
     // until data arrives or unblock() fires. A socket timeout would busy-poll
     // the watch loop on an idle link.
-    setIoTimeouts(fd_, std::chrono::milliseconds{0});   // {0,0} == no timeout
+    setIoTimeouts(fd_.get(), std::chrono::milliseconds{0}); // {0,0} == no timeout
 }
 
 void BoundedLldpConnection::unblock() noexcept {
-    if (wakeupFd_ < 0) return;
+    if (!wakeupFd_.valid()) return;
     unblocked_.store(true, std::memory_order_release);
     const std::uint64_t one = 1;
-    // Sticky: EAGAIN only if the counter saturated, which already means woken.
-    (void)::write(wakeupFd_, &one, sizeof(one));
+    // Sticky: EAGAIN only if the counter saturated, which already means
+    // woken. Any other errno means the wakeup was lost — unblocked_ still
+    // stops the next waitReadable() iteration, but an already-parked poll()
+    // will not return. Log rather than lose it silently.
+    if (::write(wakeupFd_.get(), &one, sizeof(one)) < 0 && errno != EAGAIN) {
+        PLOG(ERROR) << "BoundedLldpConnection: eventfd wakeup write failed";
+    }
 }
 
 bool BoundedLldpConnection::waitReadable() const {
     for (;;) {
         if (unblocked_.load(std::memory_order_acquire)) return false;
-        pollfd pfds[2]{{fd_, POLLIN, 0}, {wakeupFd_, POLLIN, 0}};
-        const int rc = ::poll(pfds, 2, -1);   // no deadline: idle is normal
+        pollfd pfds[2]{{fd_.get(), POLLIN, 0}, {wakeupFd_.get(), POLLIN, 0}};
+        const int rc = ::poll(pfds, 2, -1); // no deadline: idle is normal
         if (rc < 0) {
-            if (errno == EINTR) continue;
+            // A genuine poll failure (EINVAL/ENOMEM/EFAULT) is reported to
+            // liblldpctl as EOF because that is the only way to unwind the
+            // watch loop — but it is NOT a clean shutdown, and the caller's
+            // lldpctl_strerror() will show an unrelated error. Log the real
+            // cause so the two are distinguishable in the field.
+            PLOG(ERROR) << "BoundedLldpConnection: poll failed";
             return false;
         }
-        if (pfds[1].revents != 0) return false;             // unblock()
+        if (pfds[1].revents != 0) return false; // unblock()
         if (pfds[0].revents & (POLLIN | POLLHUP | POLLERR)) return true;
     }
 }
@@ -119,14 +129,14 @@ ssize_t BoundedLldpConnection::recvCb(lldpctl_conn_t *, const uint8_t *data,
     // Interruptible mode only: park in poll() until readable or unblocked.
     // In Bounded mode SO_RCVTIMEO does the bounding and we fall straight
     // through to recv().
-    if (self->mode_ == Mode::Interruptible && self->wakeupFd_ >= 0) {
-        if (!self->waitReadable()) return LLDPCTL_ERR_EOF;   // unwinds the loop
+    if (self->mode_ == Mode::Interruptible && self->wakeupFd_.valid()) {
+        if (!self->waitReadable()) return LLDPCTL_ERR_EOF; // unwinds the loop
     }
 
     // The const on `data` is a liblldpctl API wart: per the
     // lldpctl_recv_callback doc it IS the buffer we must fill.
     for (;;) {
-        const ssize_t n = ::recv(self->fd_, const_cast<uint8_t *>(data), length, 0);
+        const ssize_t n = ::recv(self->fd_.get(), const_cast<uint8_t *>(data), length, 0);
         if (n > 0) return n;
         if (n == 0) return LLDPCTL_ERR_EOF;
         if (errno == EINTR) continue;
@@ -135,7 +145,6 @@ ssize_t BoundedLldpConnection::recvCb(lldpctl_conn_t *, const uint8_t *data,
         return LLDPCTL_ERR_CALLBACK_FAILURE;
     }
 }
-
 
 
 /// One bounded request/response round-trip. False on any failure,
@@ -160,7 +169,12 @@ void BoundedLldpConnection::connectBounded(int fd, const sockaddr_un &addr, std:
     int rc = ::connect(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr));
     if (rc < 0 && errno == EINPROGRESS) {
         pollfd pfd{fd, POLLOUT, 0};
-        rc = ::poll(&pfd, 1, static_cast<int>(timeout.count()));
+        // Clamp: a duration above INT_MAX ms would wrap negative, which
+        // poll() reads as "block forever" — the one thing this path must
+        // never do.
+        const auto ms = std::clamp<std::int64_t>(timeout.count(), 0,
+                                                 std::numeric_limits<int>::max());
+        rc = ::poll(&pfd, 1, static_cast<int>(ms));
         if (rc == 0) {
             throw std::system_error(std::make_error_code(std::errc::timed_out),
                                     "BoundedLldpConnection: connect");
@@ -180,9 +194,10 @@ void BoundedLldpConnection::connectBounded(int fd, const sockaddr_un &addr, std:
         throw std::system_error(errno, std::generic_category(), "connect");
     }
     if (::fcntl(fd, F_SETFL, flags) < 0) {
-        // restore blocking mode;
         throw std::system_error(errno, std::generic_category(), "fcntl restore");
-    } // per-IO bound is SO_RCVTIMEO
+    }
+    // Back to blocking mode: the per-IO bound from here is SO_RCVTIMEO
+    // (Bounded mode) or waitReadable() (Interruptible mode).
 }
 
 void BoundedLldpConnection::setIoTimeouts(int fd, std::chrono::milliseconds timeout) {
@@ -202,7 +217,7 @@ ssize_t BoundedLldpConnection::sendCb(lldpctl_conn_t *, const uint8_t *data, siz
                                       void *userData) {
     auto *self = static_cast<BoundedLldpConnection *>(userData);
     for (;;) {
-        const ssize_t n = ::send(self->fd_, data, length, MSG_NOSIGNAL);
+        const ssize_t n = ::send(self->fd_.get(), data, length, MSG_NOSIGNAL);
         if (n >= 0) return n;
         if (errno == EINTR) continue;
         if (errno == EAGAIN || errno == EWOULDBLOCK) return LLDPCTL_ERR_WOULDBLOCK;
@@ -210,5 +225,4 @@ ssize_t BoundedLldpConnection::sendCb(lldpctl_conn_t *, const uint8_t *data, siz
         return LLDPCTL_ERR_CALLBACK_FAILURE;
     }
 }
-
 } // namespace RSCGroup

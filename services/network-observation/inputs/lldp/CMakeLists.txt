@@ -28,6 +28,7 @@ endif ()
 
 target_link_libraries(lldp-observer
         PRIVATE
+        rsc_util
         liblldpctl.so
 )
 

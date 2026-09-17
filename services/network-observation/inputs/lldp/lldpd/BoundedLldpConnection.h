@@ -8,6 +8,7 @@
 #include <chrono>
 #include <memory>
 #include <string_view>
+#include <UniqueFd.h>
 
 namespace RSCGroup {
 /**
@@ -75,6 +76,10 @@ public:
     [[nodiscard]] lldpctl_conn_t *connection() const { return conn_.get(); }
 
 private:
+    /// Throws on failure. Static so it can run in the member-init list.
+    [[nodiscard]] static UniqueFd makeSocket();
+    /// Returns an invalid fd for Mode::Bounded (no wakeup needed).
+    [[nodiscard]] static UniqueFd makeWakeupFd(Mode mode);
     static void connectBounded(int fd, const sockaddr_un &addr,
                                std::chrono::milliseconds timeout);
     static void setIoTimeouts(int fd, std::chrono::milliseconds timeout);
@@ -84,11 +89,16 @@ private:
     /// Blocks until the socket is readable or unblock() is called.
     /// Returns false when woken by unblock() (or on poll error).
     [[nodiscard]] bool waitReadable() const;
+    // Immutable after construction. recvCb reads these from the watch
+    // thread AND, during the subscribe round-trip, from the constructing
+    // thread; const removes the data race by construction.
+    const UniqueFd fd_;
+    const UniqueFd wakeupFd_;           // invalid unless Mode::Interruptible
+    const Mode mode_;
 
-    int fd_ = -1;
-    int wakeupFd_ = -1;                 // eventfd, Interruptible mode only
-    Mode mode_ = Mode::Bounded;
     std::atomic<bool> unblocked_{false};
+    // MUST remain last: destroyed first, so the library connection is
+    // released while both descriptors are still open.
     std::unique_ptr<lldpctl_conn_t, decltype(&lldpctl_release)> conn_{nullptr, &lldpctl_release};
 };
 } // namespace RSCGroup
