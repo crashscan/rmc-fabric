@@ -19,6 +19,7 @@
 
 #include "BoundedLldpConnection.h"
 #include "BoundedLldpWatch.h"
+#include "LldpObservationFactory.h"
 
 namespace RSCGroup {
 namespace {
@@ -404,17 +405,47 @@ public:
         }
 
         for (const auto &entry: toRemove) {
-            LldpObservation obs;
-            obs.observedAt = std::chrono::steady_clock::now();
-            obs.kind = ObservationKind::Lldp;
-            obs.localIfname = ifname;
-            obs.event = ObservationEvent::Removed;
-            obs.remoteChassisId = entry.rawChassisId;
-            obs.remotePortId = entry.rawPortId;
-            obs.remoteSystemName = entry.rawSystemName;
-            if (callbackState_->downstream) callbackState_->downstream(obs);
+            deliver(makeLldpObservation(ifname, ObservationEvent::Removed, entry));
         }
         // lease released here, decrementing activeCount
+    }
+
+    /**
+ * @brief Build a batch under cacheMutex, then deliver it unlocked.
+ *
+ * @param select        Invoked with the locked cache; appends to `out`.
+ * @param generationGuard When true, abandon the remainder of the batch if
+ *        the cache moves mid-delivery. Required for keepalives, which
+ *        would otherwise resurrect a candidate removed between snapshot
+ *        and emit. NOT wanted for removals: a Removed is still correct
+ *        even if the cache has since changed, and dropping one would
+ *        strand the candidate until ageout.
+ *
+ * Precondition: caller holds a CallbackLease.
+ */
+    template<typename Select>
+    void emitBatch(Select &&select, bool generationGuard) {
+        std::vector<LldpObservation> batch;
+        std::uint64_t generation = 0;
+        {
+            std::unique_lock cacheLk(callbackState_->cacheMutex);
+            generation = callbackState_->cacheGeneration.load(std::memory_order_acquire);
+            select(callbackState_->byInterface, batch);
+        }
+
+        for (std::size_t i = 0; i < batch.size(); ++i) {
+            if (generationGuard &&
+                callbackState_->cacheGeneration.load(std::memory_order_acquire) != generation) {
+                VLOG(1) << "emitBatch: cache mutated during delivery; dropping "
+                        << (batch.size() - i) << " remaining observation(s)";
+                return;
+            }
+            deliver(batch[i]);
+        }
+    }
+
+    void deliver(const LldpObservation &obs) const {
+        if (callbackState_->downstream) callbackState_->downstream(obs);
     }
 
     /**
@@ -428,46 +459,12 @@ public:
         auto lease = tryAcquireLease(callbackState_);
         if (!lease) return; // stop/refresh in progress; keepalive dropped
 
-        std::vector<LldpObservation> batch;
-        std::uint64_t generation = 0;
-        {
-            std::unique_lock cacheLk(callbackState_->cacheMutex);
-            generation = callbackState_->cacheGeneration.load(std::memory_order_acquire);
-            for (const auto &[ifname, neighbors]: callbackState_->byInterface) {
-                for (const auto &[_, entry]: neighbors) {
-                    LldpObservation obs;
-                    obs.observedAt = std::chrono::steady_clock::now();
-                    obs.kind = ObservationKind::Lldp;
-                    obs.localIfname = ifname;
-                    obs.event = ObservationEvent::Present;
-                    obs.remoteChassisId = entry.rawChassisId;
-                    obs.remotePortId = entry.rawPortId;
-                    obs.remoteSystemName = entry.rawSystemName;
-                    obs.keepalive = true;
-                    batch.push_back(std::move(obs));
-                }
-            }
-        }
-
-        for (std::size_t i = 0; i < batch.size(); ++i) {
-            // If the cache moved since the snapshot (removeInterface /
-            // dispatchChange / refreshAll swap), abandon the rest of this
-            // batch: delivering a stale keepalive after Removed(X) would
-            // resurrect seenInLldp / TopologyPeer for a full
-            // candidateAgeout. The next cycle rebuilds fresh.
-            //
-            // A nanosecond-wide check-then-emit window remains; closing it
-            // fully would require holding cacheMutex across downstream (the
-            // model), whose duration is not ours to bound. Accepted,
-            // documented.
-            if (callbackState_->cacheGeneration.load(std::memory_order_acquire) != generation) {
-                VLOG(1) << "reassertAll: cache mutated during delivery; dropping "
-                << (batch.size() - i) << " remaining keepalive(s)";
-                return;
-            }
-            if (callbackState_->downstream) callbackState_->downstream(batch[i]);
-        }
-        // lease released here
+        emitBatch([](const NeighborCache &cache, std::vector<LldpObservation> &out) {
+            for (const auto &[ifname, neighbors]: cache)
+                for (const auto &[_, entry]: neighbors)
+                    out.push_back(makeLldpObservation(
+                        ifname, ObservationEvent::Present, entry, /*keepalive=*/true));
+        }, /*generationGuard=*/true);
     }
 
     void submitNeighborChangeForTest(std::string_view ifname,

@@ -74,6 +74,9 @@ public:
      */
     void reassertAll() override;
 
+    /// Probes backend connectivity over a separate short-lived connection.
+    /// const because it mutates no source state — the probe owns its own
+    /// socket and touches neither the watch nor the cache.
     [[nodiscard]] bool isBackendAlive() override;
 
     [[nodiscard]] std::chrono::steady_clock::time_point lastEventAt() const override;

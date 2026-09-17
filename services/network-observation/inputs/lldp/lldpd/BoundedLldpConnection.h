@@ -7,7 +7,10 @@
 #include <atomic>
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <string_view>
+
+#include <EventFdSignal.h>
 #include <UniqueFd.h>
 
 namespace RSCGroup {
@@ -78,8 +81,8 @@ public:
 private:
     /// Throws on failure. Static so it can run in the member-init list.
     [[nodiscard]] static UniqueFd makeSocket();
-    /// Returns an invalid fd for Mode::Bounded (no wakeup needed).
-    [[nodiscard]] static UniqueFd makeWakeupFd(Mode mode);
+    /// nullopt for Mode::Bounded — no wakeup descriptor is needed.
+    [[nodiscard]] static std::optional<EventFdSignal> makeWakeupSignal(Mode mode);
     static void connectBounded(int fd, const sockaddr_un &addr,
                                std::chrono::milliseconds timeout);
     static void setIoTimeouts(int fd, std::chrono::milliseconds timeout);
@@ -93,7 +96,9 @@ private:
     // thread AND, during the subscribe round-trip, from the constructing
     // thread; const removes the data race by construction.
     const UniqueFd fd_;
-    const UniqueFd wakeupFd_;           // invalid unless Mode::Interruptible
+    /// Present only in Mode::Interruptible. EventFdSignal owns the eventfd
+    /// and its EAGAIN-is-benign write semantics.
+    const std::optional<EventFdSignal> wakeupSignal_;
     const Mode mode_;
 
     std::atomic<bool> unblocked_{false};

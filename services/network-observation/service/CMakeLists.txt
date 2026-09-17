@@ -64,7 +64,9 @@ if (BUILD_TESTING)
     set_tests_properties(
             network_observation_service_tests
             PROPERTIES
-            TIMEOUT 15
+            # Worst case supervision cycle ≈ 12s: probe 3s + refresh drain 3s
+            # + watch subscribe 3s + initial enumerate 3s.
+            TIMEOUT 60
             LABELS "unit;resilience"
     )
 

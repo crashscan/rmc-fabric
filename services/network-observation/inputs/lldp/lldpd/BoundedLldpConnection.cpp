@@ -4,9 +4,9 @@
 
 #include "BoundedLldpConnection.h"
 
+#include <PollOnce.h>
+
 #include <fcntl.h>
-#include <poll.h>
-#include <sys/eventfd.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
@@ -16,6 +16,7 @@
 #include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <ErrnoString.h>
 #include <limits>
 #include <system_error>
 #include <glog/logging.h>
@@ -30,15 +31,12 @@ UniqueFd BoundedLldpConnection::makeSocket() {
     return fd;
 }
 
-UniqueFd BoundedLldpConnection::makeWakeupFd(Mode mode) {
-    if (mode != Mode::Interruptible) return {};
-    UniqueFd fd(::eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
-    if (!fd.valid()) {
-        throw std::system_error(errno, std::generic_category(),
-                                "BoundedLldpConnection: eventfd");
+std::optional<EventFdSignal> BoundedLldpConnection::makeWakeupSignal(Mode mode) {
+        if (mode != Mode::Interruptible) return std::nullopt;
+        // Throws std::runtime_error on failure; the ctor's UniqueFd members
+        // unwind normally.
+        return EventFdSignal{};
     }
-    return fd;
-}
 
 // --- ctor: create the wakeup fd up front, but stay Bounded for setup ---
 BoundedLldpConnection::BoundedLldpConnection(std::string_view ctlname,
@@ -46,7 +44,6 @@ BoundedLldpConnection::BoundedLldpConnection(std::string_view ctlname,
                                              std::chrono::milliseconds ioTimeout,
                                              Mode mode)
     : fd_(makeSocket())
-      , wakeupFd_(makeWakeupFd(mode))
       , mode_(mode) {
     // Any throw below unwinds the already-constructed UniqueFd members,
     // so no manual descriptor cleanup is needed.
@@ -90,35 +87,31 @@ void BoundedLldpConnection::enterInterruptibleMode() {
 }
 
 void BoundedLldpConnection::unblock() noexcept {
-    if (!wakeupFd_.valid()) return;
+    if (!wakeupSignal_) return;
     unblocked_.store(true, std::memory_order_release);
-    const std::uint64_t one = 1;
-    // Sticky: EAGAIN only if the counter saturated, which already means
-    // woken. Any other errno means the wakeup was lost — unblocked_ still
-    // stops the next waitReadable() iteration, but an already-parked poll()
-    // will not return. Log rather than lose it silently.
-    if (::write(wakeupFd_.get(), &one, sizeof(one)) < 0 && errno != EAGAIN) {
-        PLOG(ERROR) << "BoundedLldpConnection: eventfd wakeup write failed";
-    }
+        // signal() already treats EAGAIN (counter saturated == already woken) as
+        // success and retries EINTR.
+        if (const int err = wakeupSignal_->signal(); err != 0) {
+                LOG(ERROR) << "BoundedLldpConnection: eventfd wakeup failed: "
+                           << errnoToString(err);
+            }
 }
 
 bool BoundedLldpConnection::waitReadable() const {
     for (;;) {
         if (unblocked_.load(std::memory_order_acquire)) return false;
-        pollfd pfds[2]{{fd_.get(), POLLIN, 0}, {wakeupFd_.get(), POLLIN, 0}};
-        const int rc = ::poll(pfds, 2, -1); // no deadline: idle is normal
-        if (rc < 0) {
-            // EINTR is not a failure: a signal interrupted the wait, and the
-            // loop re-checks unblocked_ before parking again.
-            if (errno == EINTR) continue;
-            // A genuine poll failure (EINVAL/ENOMEM/EFAULT) is reported to
-            // liblldpctl as EOF because that is the only way to unwind the
-            // watch loop — but it is NOT a clean shutdown, and the caller's
-            // lldpctl_strerror() will show an unrelated error. Log the real
-            // cause so the two are distinguishable in the field.
-            PLOG(ERROR) << "BoundedLldpConnection: poll failed";
-            return false;
-        }
+                pollfd pfds[2]{
+                        {fd_.get(), POLLIN, 0},
+                        {wakeupSignal_->fd(), POLLIN, 0},
+                    };
+                // pollOnce owns the syscall mechanics: revents clearing, EINTR retry,
+                // errno capture. Same primitive the netlink event loop uses.
+                const auto result = PollUtils::pollOnce(pfds, -1);
+                if (result.kind == PollUtils::PollResult::Kind::SyscallFailure) {
+                        LOG(ERROR) << "BoundedLldpConnection: poll failed: "
+                                   << errnoToString(result.errNo);
+                        return false;
+                    }
         if (pfds[1].revents != 0) return false; // unblock()
         if (pfds[0].revents & (POLLIN | POLLHUP | POLLERR)) return true;
     }
