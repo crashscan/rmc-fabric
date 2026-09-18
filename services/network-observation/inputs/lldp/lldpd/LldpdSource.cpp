@@ -76,7 +76,7 @@ namespace {
      * @brief Cache-update + downstream delivery shared by the watch path
      *        (dispatchChange) and the test seam.
      *
-     * Caller must hold a valid CallbackLease. The cache lock is released before
+     * The cache lock is released before
      * the downstream callback. Does not stamp liveness — callers stamp
      * themselves when backend-originated.
      */
@@ -443,6 +443,11 @@ public:
         return callbackState_->lastWatchEventAt.load(std::memory_order_acquire);
     }
 
+    // In Impl, near lastEventAt():
+    [[nodiscard]] thread_safe::admission_gate &gate() {
+        return callbackState_->gate;
+    }
+
     /**
      * @brief Build a NeighborCache from loose triples and run the real
      *        reconciliation pass over it.
@@ -699,4 +704,10 @@ void LldpdSource::reconcileAfterRefreshForTest(
     const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors) {
     impl_->reconcileAfterRefreshForTest(oldNeighbors);
 }
+
+// With the other forwarders:
+thread_safe::admission_gate &LldpdSource::admissionGateForTest() {
+    return impl_->gate();
+}
+
 } // namespace RSCGroup
