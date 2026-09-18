@@ -286,6 +286,65 @@ public:
         return netlinkState_.getLinksSnapshot();
     }
 
+    bool requestRedump() {
+        if (worker_.isCurrentThread()) {
+            LOG(ERROR) << "requestRedump() must not be called from a netlink callback";
+            return false;
+        }
+        if (!lifecycle_.isRunning()) {
+            LOG(WARNING) << "requestRedump() while monitor is not running";
+            return false;
+        }
+
+        // Reject rather than serialise: two overlapping clear-then-replay
+        // sequences leave netlinkState_ matching neither dump.
+        bool expected = false;
+        if (!redumpInFlight_.compare_exchange_strong(expected, true,std::memory_order_acq_rel)) {
+            LOG(WARNING) << "requestRedump() ignored: a redump is already in flight";
+            return false;
+        }
+        struct Clear {
+            std::atomic<bool> &flag;
+            ~Clear() { flag.store(false, std::memory_order_release); }
+        } clear{redumpInFlight_};
+
+        // Borrow the live stop signal so stop() interrupts the redump's
+        // poll() exactly as it interrupts the initial dump. Copied under no
+        // lock: stopSignal_ is only reset in closeResources(), which runs
+        // after the worker is joined, and isRunning() above established the
+        // epoch. A stop racing us wins via the signal itself.
+        if (!stopSignal_) {
+            return false;
+        }
+
+        try {
+            // Clear BEFORE the dump: NetlinkState dedups, so replaying
+            // against live state would suppress every message and the
+            // resync would emit nothing at all.
+            netlinkState_.clear();
+
+            NetlinkInitialDump dump(*stopSignal_,
+                                    [this](const nlmsghdr *message) {
+                                        processSingleMessage(message);
+                                    });
+            const auto result = dump.run();
+            if (!result.completed()) {
+                LOG(ERROR) << "netlink redump failed: status="
+                           << NetlinkInitialDump::statusName(result.status)
+                           << ", error=" << result.error;
+                return false;
+            }
+            LOG(INFO) << "netlink redump completed";
+            return true;
+        } catch (const std::exception &error) {
+            LOG(ERROR) << "netlink redump threw: " << error.what();
+            return false;
+        } catch (...) {
+            LOG(ERROR) << "netlink redump threw an unknown exception";
+            return false;
+        }
+    }
+
 private:
     using StartTransition = LifecycleCoordinator::CancellableStart;
 
@@ -487,6 +546,8 @@ private:
      * stops and joins the worker before those members are destroyed.
      */
     ManagedWorker worker_;
+    /// Excludes concurrent redumps; see requestRedump().
+    std::atomic<bool> redumpInFlight_{false};
 };
 
 NetlinkNetworkMonitor::NetlinkNetworkMonitor(
@@ -527,4 +588,9 @@ std::vector<DeviceEvent> NetlinkNetworkMonitor::getDevicesSnapshot() const {
 std::vector<LinkEvent> NetlinkNetworkMonitor::getLinksSnapshot() const {
     return impl_->getLinksSnapshot();
 }
+
+bool NetlinkNetworkMonitor::requestRedump() {
+    return impl_->requestRedump();
+}
+
 } // namespace RSCGroup
