@@ -1,5 +1,6 @@
 #include "NetlinkLldpObservationRuntime.h"
 
+#include <ObservationItem.h>
 #include "LldpObserver.h"
 #include "LldpdSource.h"
 #include "NetlinkNetworkMonitor.h"
@@ -18,6 +19,9 @@
 
 namespace RSCGroup {
 namespace {
+    /// Netlink bursts hard on boot and on bridge churn. Sized so a normal
+    /// burst never drops; tune against stats().highWater on real hardware.
+    constexpr std::size_t kObservationQueueCapacity = 4096;
     constexpr auto kLldpRetryInterval = std::chrono::seconds{30};
     constexpr auto kLldpProbeInterval = std::chrono::seconds{60};
 
@@ -43,7 +47,16 @@ MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacksForTest() {
 NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(ModelConfig config)
     : reassertInterval_(deriveReassertInterval(config.candidateAgeout))
     , lldpSourceFactory_(defaultLldpSourceFactory())
-    , model_(createNetworkObservationModel(std::move(config))) {
+    , model_(createNetworkObservationModel(std::move(config)))
+    , observationQueue_(kObservationQueueCapacity)
+    , observationWorker_("observation-consumer",
+                         [this](std::stop_token st) { observationLoop(std::move(st)); },
+                         // Wake, not close: close() is one-way and would
+                         // leave the queue dead across a restart.
+                         [this] { observationQueue_.wake(); },
+                         [this](const ManagedWorker::Exit &exit) {
+                             onObservationWorkerExit(exit);
+                         }) {
 }
 
 NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(
@@ -54,7 +67,16 @@ NetlinkLldpObservationRuntime::NetlinkLldpObservationRuntime(
     // on the ctor the tests use.
     : reassertInterval_(reassertInterval)
     , lldpSourceFactory_(defaultLldpSourceFactory())
-    , model_(std::move(model)) {
+    , model_(std::move(model))
+    , observationQueue_(kObservationQueueCapacity)
+    , observationWorker_("observation-consumer",
+                         [this](std::stop_token st) { observationLoop(std::move(st)); },
+                         // Wake, not close: close() is one-way and would
+                         // leave the queue dead across a restart.
+                         [this] { observationQueue_.wake(); },
+                         [this](const ManagedWorker::Exit &exit) {
+                             onObservationWorkerExit(exit);
+                         }) {
 }
 
 NetlinkLldpObservationRuntime::~NetlinkLldpObservationRuntime() = default;
@@ -68,19 +90,35 @@ void NetlinkLldpObservationRuntime::setLldpSourceFactoryForTest(LldpSourceFactor
 }
 
 std::shared_ptr<LldpObserver> NetlinkLldpObservationRuntime::createLldpObserver() {
-    auto source = lldpSourceFactory_([this](const LldpObservation& obs) {
-        model_->onLldpObservation(obs);
+    auto source = lldpSourceFactory_([this](const LldpObservation &obs) {
+        observationQueue_.push({ObservationSource::Lldp, obs});
     });
     return std::make_shared<LldpObserver>(std::move(source));
 }
 
 MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks() {
     ObservationSinks sinks;
-    sinks.onLink     = [this](LinkObservation o)     { model_->onLinkObservation(o); };
-    sinks.onAddress  = [this](AddressObservation o)  { model_->onAddressObservation(o); };
-    sinks.onNeighbor = [this](NeighborObservation o) { model_->onNeighborObservation(o); };
-    sinks.onFdb      = [this](FdbObservation o)      { model_->onFdbObservation(o); };
-    sinks.onLinkStateForLldp = [this](const std::string& ifname, bool up) {
+    // Hand off to the queue instead of calling into the model. This is the
+    // boundary that keeps netlink parsing off the model's critical path.
+    sinks.onLink = [this](LinkObservation o) {
+        observationQueue_.push({ObservationSource::Netlink, std::move(o)});
+    };
+    sinks.onAddress = [this](AddressObservation o) {
+        observationQueue_.push({ObservationSource::Netlink, std::move(o)});
+    };
+    sinks.onNeighbor = [this](NeighborObservation o) {
+        observationQueue_.push({ObservationSource::Netlink, std::move(o)});
+    };
+    sinks.onFdb = [this](FdbObservation o) {
+        observationQueue_.push({ObservationSource::Netlink, std::move(o)});
+    };
+
+    // NOT queued. This is a control signal, not an observation: it drives
+    // LldpObserver's interface flush and must stay ordered with respect to
+    // the link event that caused it (see the mapper's ordering test).
+    // Routing it through the queue would let the flush overtake or lag the
+    // link change it belongs to.
+    sinks.onLinkStateForLldp = [this](const std::string &ifname, bool up) {
         if (auto observer = lldpObserver_.load()) {
             up ? observer->onInterfaceUp(ifname) : observer->onInterfaceDown(ifname);
         }
@@ -91,8 +129,21 @@ MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks() {
 bool NetlinkLldpObservationRuntime::start() {
     model_->prepareForRestart();
 
+    // Reopen and start the consumer BEFORE any producer. The initial netlink
+    // dump fires callbacks during monitor_->start(); a closed or undrained
+    // queue at that moment loses the entire boot snapshot and the model
+    // starts empty — silently.
+    observationQueue_.reopen();
+    observationWorkerFailed_.store(false, std::memory_order_release);
+    try {
+        (void) observationWorker_.start();
+    } catch (const std::exception &e) {
+        LOG(ERROR) << "observation consumer failed to start: " << e.what();
+        observationQueue_.close();
+        return false;
+    }
+
     if (auto observer = createLldpObserver(); observer->start()) {
-        // Published only after a successful start; never replaced while live.
         lldpObserver_.store(std::move(observer));
     } else {
         LOG(WARNING) << "LLDP observer failed to start — LLDP unavailable (tick() will retry)";
@@ -101,20 +152,21 @@ bool NetlinkLldpObservationRuntime::start() {
     monitor_ = std::make_unique<NetlinkNetworkMonitor>(makeCallbacks());
     if (!monitor_->start()) {
         lldpObserver_.store(nullptr);
+        observationQueue_.close();
+        observationWorker_.stop();
         return false;
     }
 
     model_->markLive();
-
     LOG(INFO) << "NetlinkLldpObservationRuntime started";
     return true;
 }
 
 void NetlinkLldpObservationRuntime::stop() {
-    // Ordering: stop netlink monitor first (its callbacks may call into LLDP),
-    // then drain LLDP, then detach the event sink.  This ensures no
-    // IModelEventSink callback fires after stop() returns.
-
+    // Ordering: silence producers, then close, then join, then detach the
+    // sink. Closing before the producers are stopped would drop observations
+    // they are still emitting; joining before closing would leave the
+    // consumer parked with a full queue.
     if (monitor_) {
         monitor_->stop();
         monitor_.reset();
@@ -124,7 +176,13 @@ void NetlinkLldpObservationRuntime::stop() {
         observer->stop(); // drains in-flight LLDP callbacks
     }
 
-    // Detach event sink only after all producers have drained.
+    // No producer can push from here. Close so the consumer drains what is
+    // already queued, then join.
+    observationQueue_.close();
+    observationWorker_.stop();
+
+    // Detach event sink only after all producers AND the consumer have
+    // drained — the consumer is itself a producer of model events.
     model_->setEventSink(nullptr);
 }
 
@@ -135,9 +193,57 @@ bool NetlinkLldpObservationRuntime::isRunning() const {
 ObservationRuntimeHealth NetlinkLldpObservationRuntime::health() const {
     ObservationRuntimeHealth result;
     result.running = monitor_ && monitor_->isRunning();
+    // A dead consumer means observations no longer reach the model, even
+    // though both producers are healthy. Without this the service would
+    // report running while silently ingesting nothing.
+    if (observationWorkerFailed_.load(std::memory_order_acquire)) {
+            result.running = false;
+    }
     auto observer = lldpObserver_.load();
     result.lldpAvailable = observer && observer->isRunning();
     return result;
+}
+
+void NetlinkLldpObservationRuntime::observationLoop(std::stop_token st) {
+    // waitPop returns nullopt only when closed AND drained, so a stop during
+    // shutdown still delivers everything already queued.
+    while (auto item = observationQueue_.waitPop(st)) {
+        applyObservation(*item);
+    }
+}
+
+void NetlinkLldpObservationRuntime::applyObservation(const ObservationItem &item) {
+    // Exhaustive by construction: adding a variant alternative without a
+    // branch here fails to compile.
+    std::visit([this](const auto &o) {
+        using T = std::decay_t<decltype(o)>;
+        if constexpr (std::is_same_v<T, LinkObservation>) {
+            model_->onLinkObservation(o);
+        } else if constexpr (std::is_same_v<T, AddressObservation>) {
+            model_->onAddressObservation(o);
+        } else if constexpr (std::is_same_v<T, NeighborObservation>) {
+            model_->onNeighborObservation(o);
+        } else if constexpr (std::is_same_v<T, FdbObservation>) {
+            model_->onFdbObservation(o);
+        } else if constexpr (std::is_same_v<T, LldpObservation>) {
+            model_->onLldpObservation(o);
+        } else {
+            static_assert(false, "unhandled ObservationItem alternative");
+        }
+    }, item.payload);
+}
+
+void NetlinkLldpObservationRuntime::onObservationWorkerExit(const ManagedWorker::Exit &exit) {
+    if (exit.reason != ManagedWorker::ExitReason::exception) return;
+    std::string detail = "unknown exception";
+    try {
+        if (exit.exception) std::rethrow_exception(exit.exception);
+    } catch (const std::exception &e) { detail = e.what(); } catch (...) {}
+
+    // No issue-reporting channel here — the runtime has no diagnostics sink.
+    // health() reflects it instead: see below.
+    LOG(ERROR) << "observation consumer worker terminated: " << detail;
+    observationWorkerFailed_.store(true, std::memory_order_release);
 }
 
 void NetlinkLldpObservationRuntime::setEventSink(IModelEventSink *sink) {

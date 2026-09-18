@@ -1,12 +1,17 @@
 #pragma once
 
 #include "IObservationRuntime.h"
+#include "BoundedObservationQueue.h"
+#include "ObservationItem.h"
+
+#include <ManagedWorker.h>
 
 #include <atomic>
 #include <chrono>
 #include <functional>
 #include <memory>
 #include <optional>
+#include <stop_token>
 #include <string>
 #include <vector>
 
@@ -28,6 +33,11 @@ struct MonitorCallbacks;
  * implementations.
  *
  * Threading notes:
+ *  - Observations do NOT reach model_ on the producing thread. Netlink
+ *    callbacks and LLDP watch callbacks push to observationQueue_; a single
+ *    consumer worker drains it and is the ONLY thread that calls into
+ *    model_. This is what stops a slow model update — or a slow transport
+ *    behind it — from back-pressuring netlink parsing.
  *  - lldpObserver_ is atomically shared: netlink callbacks (monitor thread)
  *    load it per link event, while tick() (service aging thread) may create
  *    and publish a new observer after a retry. An observer is published only
@@ -111,10 +121,18 @@ private:
 
     [[nodiscard]] MonitorCallbacks makeCallbacks();
 
+    void observationLoop(std::stop_token st);
+
+    /// Applies one item to the model. Consumer thread only.
+    void applyObservation(const ObservationItem &item);
+
+    void onObservationWorkerExit(const ManagedWorker::Exit &exit);
+
     void superviseLldp(std::chrono::steady_clock::time_point now);
 
     void reassertLldpNeighbors(std::chrono::steady_clock::time_point now);
 
+    std::atomic<bool> observationWorkerFailed_{false};
     /// Keepalive period, derived from ModelConfig::candidateAgeout.
     std::chrono::steady_clock::duration reassertInterval_{std::chrono::seconds{30}};
 
@@ -127,11 +145,20 @@ private:
     std::unique_ptr<INetworkObservationModel> model_;
     std::atomic<std::shared_ptr<LldpObserver> > lldpObserver_{nullptr};
 
+    /// Producer → model hand-off. Declared before the workers: the consumer
+    /// loop and the netlink callbacks both touch it.
+    BoundedObservationQueue observationQueue_;
+
     // LLDP supervision state — touched only on the tick() thread.
     std::chrono::steady_clock::time_point lastReassert_{};
     std::chrono::steady_clock::time_point lastLldpAttempt_{};
     std::chrono::steady_clock::time_point lastLldpProbe_{};
     unsigned lldpRetryCount_ = 0;
+
+    /// Drains observationQueue_ into model_. Declared before monitor_ so
+    /// monitor_ (and its callbacks) are destroyed first — but see stop(),
+    /// which orders teardown explicitly rather than relying on this.
+    ManagedWorker observationWorker_;
 
     // Must remain last: destroyed first. Its callbacks capture `this`.
     std::unique_ptr<NetlinkNetworkMonitor> monitor_;

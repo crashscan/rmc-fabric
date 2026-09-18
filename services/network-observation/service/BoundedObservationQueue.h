@@ -3,42 +3,16 @@
 //
 #pragma once
 
-#include "ObservationTypes.h"
-
 #include <BoundedQueue.h>   // rsc_util — adjust to the util include path
+#include "ObservationItem.h"
 
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <optional>
 #include <stop_token>
 #include <utility>
-#include <variant>
 
 namespace RSCGroup {
-/// Origin of a queued observation. Drives resync accounting: on overflow the
-/// bit of the DISCARDED item's source is raised, so the consumer can repair
-/// the model by re-reading that source (netlink: snapshot; LLDP: refreshAll).
-enum class ObservationSource : std::uint8_t {
-    Netlink = 0,
-    Lldp = 1,
-};
-
-[[nodiscard]] constexpr std::uint32_t sourceBit(ObservationSource source) noexcept {
-    return std::uint32_t{1} << static_cast<std::uint8_t>(source);
-}
-
-using ObservationPayload = std::variant<
-    LinkObservation,
-    AddressObservation,
-    NeighborObservation,
-    FdbObservation,
-    LldpObservation>;
-
-struct QueuedItem {
-    ObservationSource source;
-    ObservationPayload payload;
-};
 
 /**
  * @brief Service-facing bounded observation queue.
@@ -52,10 +26,10 @@ struct QueuedItem {
  */
 class BoundedObservationQueue {
 public:
-    using Stats = thread_safe::bounded_queue<QueuedItem>::Stats;
+    using Stats = thread_safe::bounded_queue<ObservationItem>::Stats;
 
     explicit BoundedObservationQueue(std::size_t capacity)
-        : queue_(capacity, [this](const QueuedItem &discarded) {
+        : queue_(capacity, [this](const ObservationItem &discarded) {
             resyncMask_.fetch_or(sourceBit(discarded.source),
                                  std::memory_order_release);
         }) {
@@ -67,16 +41,16 @@ public:
 
     /// Never blocks. False exactly when an older item was discarded (its
     /// source's resync bit is now raised). After close(): silently ignored.
-    bool push(QueuedItem item) { return queue_.push(std::move(item)); }
+    bool push(ObservationItem item) { return queue_.push(std::move(item)); }
 
     /// Oldest item, waiting while empty; nullopt once closed AND drained,
     /// or when @p st is requested.
-    std::optional<QueuedItem> waitPop(std::stop_token st = {}) {
+    std::optional<ObservationItem> waitPop(std::stop_token st = {}) {
         return queue_.waitPop(std::move(st));
     }
 
     /// Oldest item if immediately available.
-    std::optional<QueuedItem> tryPop() { return queue_.tryPop(); }
+    std::optional<ObservationItem> tryPop() { return queue_.tryPop(); }
 
     /// Discard the queued backlog without consuming it. Called by the
     /// consumer immediately after takeResyncMask() returns non-zero: the
@@ -120,6 +94,6 @@ public:
 private:
     // Declared first: the drop hook registered with queue_ touches this.
     std::atomic<std::uint32_t> resyncMask_{0};
-    thread_safe::bounded_queue<QueuedItem> queue_;
+    thread_safe::bounded_queue<ObservationItem> queue_;
 };
 } // namespace RSCGroup
