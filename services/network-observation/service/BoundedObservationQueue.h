@@ -103,6 +103,14 @@ public:
         return resyncMask_.load(std::memory_order_acquire);
     }
 
+    /// Reset to a fresh, open, empty queue for a new service epoch. Clears
+    /// the resync mask as well: the bits describe divergence in the previous
+    /// epoch's model, which no longer exists.
+    void reopen() {
+        queue_.reopen();
+        resyncMask_.store(0, std::memory_order_release);
+    }
+
     void close() { queue_.close(); }
     [[nodiscard]] bool closed() const { return queue_.closed(); }
     [[nodiscard]] std::size_t size() const { return queue_.size(); }

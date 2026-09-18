@@ -149,6 +149,26 @@ void testStopTokenUnblocksWithoutClosing()
     expect(!q.closed(), "and must not close the queue");
     expect(q.push(makeItem(ObservationSource::Lldp, 9)), "queue survives for restart");
 }
+
+// Resync bits describe divergence in the previous epoch's model. Carrying
+// them across a restart would make the new consumer's first cycle perform a
+// full resync against a model that was just built from scratch.
+void testReopenClearsResyncMask()
+{
+    BoundedObservationQueue q(2);
+    q.push(makeItem(ObservationSource::Netlink, 1));
+    q.push(makeItem(ObservationSource::Netlink, 2));
+    q.push(makeItem(ObservationSource::Lldp, 3));     // drop -> Netlink bit
+    q.close();
+    expect(q.resyncMask() != 0u, "a drop raised a bit");
+
+    q.reopen();
+
+    expect(q.resyncMask() == 0u, "reopen clears the previous epoch's bits");
+    expect(!q.closed() && q.size() == 0, "queue is open and empty");
+    expect(q.push(makeItem(ObservationSource::Lldp, 4)), "and accepts again");
+}
+
 } // namespace
 
 int main()
