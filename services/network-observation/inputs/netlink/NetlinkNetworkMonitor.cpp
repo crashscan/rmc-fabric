@@ -30,6 +30,7 @@
 #include <stop_token>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -89,6 +90,9 @@ public:
 
         try {
             stopSignal_.emplace();
+            // Separate eventfd for redumps; see the member declaration for
+            // why it must not share stopSignal_.
+            redumpStopSignal_.emplace();
 
             /*
              * Bind the subscribed live socket before starting the initial
@@ -266,6 +270,12 @@ public:
          */
         workerFailed_.store(false, std::memory_order_release);
 
+        // Wait out an in-flight redump before destroying the signal it is
+        // polling. Bounded: it was just interrupted and only has to unwind.
+        while (redumpInFlight_.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+       }
+
         closeResources();
         netlinkState_.clear();
         transition.complete();
@@ -308,11 +318,7 @@ public:
             ~Clear() { flag.store(false, std::memory_order_release); }
         } clear{redumpInFlight_};
 
-        // Borrow the live stop signal so stop() interrupts the redump's
-        // poll() exactly as it interrupts the initial dump. Copied under no
-        // lock: stopSignal_ is only reset in closeResources(), which runs
-        // after the worker is joined, and isRunning() above established the
-        // epoch. A stop racing us wins via the signal itself.
+        // Uses its own eventfd, not stopSignal_ — see the member declaration. stop() signals both.
         if (!redumpStopSignal_) {
             return false;
         }
@@ -366,6 +372,7 @@ private:
         // NetlinkEventLoop borrows stopSignal_.
         liveLoop_.reset();
         stopSignal_.reset();
+        redumpStopSignal_.reset();
     }
 
     void signalStop() noexcept {
