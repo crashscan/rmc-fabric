@@ -219,8 +219,7 @@ public:
         // Open admission BEFORE creating watch so synchronous callbacks admitted
         openAdmission(*callbackState_);
 
-        bool ok = makeWatch();
-        if (!ok) {
+        if (const bool ok = makeWatch(); !ok) {
             closeAdmissionAndDrain(*callbackState_);
             lk.lock();
             state_ = State::Stopped;
@@ -405,18 +404,18 @@ public:
     }
 
     /**
- * @brief Build a batch under cacheMutex, then deliver it unlocked.
- *
- * @param select        Invoked with the locked cache; appends to `out`.
- * @param generationGuard When true, abandon the remainder of the batch if
- *        the cache moves mid-delivery. Required for keepalives, which
- *        would otherwise resurrect a candidate removed between snapshot
- *        and emit. NOT wanted for removals: a Removed is still correct
- *        even if the cache has since changed, and dropping one would
- *        strand the candidate until ageout.
- *
- * Precondition: caller holds a CallbackLease.
- */
+     * @brief Build a batch under cacheMutex, then deliver it unlocked.
+     *
+     * @param select        Invoked with the locked cache; appends to `out`.
+     * @param generationGuard When true, abandon the remainder of the batch if
+     *        the cache moves mid-delivery. Required for keepalives, which
+     *        would otherwise resurrect a candidate removed between snapshot
+     *        and emit. NOT wanted for removals: a Removed is still correct
+     *        even if the cache has since changed, and dropping one would
+     *        strand the candidate until ageout.
+     *
+     * Precondition: caller holds a CallbackLease.
+     */
     template<typename Select>
     void emitBatch(Select &&select, bool generationGuard) {
         std::vector<LldpObservation> batch;
@@ -450,8 +449,9 @@ public:
      * as backend liveness for the watchdog.
      */
     void reassertAll() {
-        auto lease = tryAcquireLease(callbackState_);
-        if (!lease) return; // stop/refresh in progress; keepalive dropped
+        if (const auto lease = tryAcquireLease(callbackState_); !lease) {
+            return; // stop/refresh in progress; keepalive dropped
+        }
 
         emitBatch([](const NeighborCache &cache, std::vector<LldpObservation> &out) {
             for (const auto &[ifname, neighbors]: cache)
@@ -491,8 +491,9 @@ public:
      * case — see reassertAll().
      */
     void reconcileAfterRefresh(NeighborCache oldCache) {
-        auto lease = tryAcquireLease(callbackState_);
-        if (!lease) return;
+        if (const auto lease = tryAcquireLease(callbackState_); !lease) {
+            return;
+        }
 
         emitBatch([&oldCache](const NeighborCache &fresh,
                               std::vector<LldpObservation> &out) {

@@ -126,6 +126,9 @@ private:
     /// Applies one item to the model. Consumer thread only.
     void applyObservation(const ObservationItem &item);
 
+    /// Unwinds a partial start; see the definition for ordering.
+    void cleanUpFailedStart();
+
     void onObservationWorkerExit(const ManagedWorker::Exit &exit);
 
     void superviseLldp(std::chrono::steady_clock::time_point now);

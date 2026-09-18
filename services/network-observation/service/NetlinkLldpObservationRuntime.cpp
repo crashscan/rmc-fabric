@@ -128,7 +128,33 @@ MonitorCallbacks NetlinkLldpObservationRuntime::makeCallbacks() {
     return RSCGroup::makeCallbacks(std::move(sinks));
 }
 
+/**
+ * @brief Unwind a partial start in the same order as stop().
+ *
+ * Producers first, then close, then join the consumer. Every step is
+ * idempotent and safe on a component that was never started, so all
+ * failure exits can share one path rather than each unwinding to a
+ * different depth.
+ */
+void NetlinkLldpObservationRuntime::cleanUpFailedStart() {
+    if (monitor_) {
+        monitor_->stop();
+        monitor_.reset();
+    }
+    if (auto observer = lldpObserver_.load()) {
+        lldpObserver_.store(nullptr);
+        observer->stop(); // drains in-flight LLDP callbacks
+    }
+    observationQueue_.close();
+    observationWorker_.stop();
+}
+
 bool NetlinkLldpObservationRuntime::start() {
+    if (monitor_) {
+        LOG(ERROR) << "start() called while already started";
+        return false;
+    }
+
     model_->prepareForRestart();
 
     // Reopen and start the consumer BEFORE any producer. The initial netlink
@@ -141,10 +167,16 @@ bool NetlinkLldpObservationRuntime::start() {
         (void) observationWorker_.start();
     } catch (const std::exception &e) {
         LOG(ERROR) << "observation consumer failed to start: " << e.what();
-        observationQueue_.close();
+        cleanUpFailedStart();
+        return false;
+    } catch (...) {
+        LOG(ERROR) << "observation consumer failed to start: unknown exception";
+        cleanUpFailedStart();
         return false;
     }
 
+    // Not fatal: tick() retries. The observer is published only on success,
+    // so a failed candidate is destroyed here and never observed elsewhere.
     if (auto observer = createLldpObserver(); observer->start()) {
         lldpObserver_.store(std::move(observer));
     } else {
@@ -153,9 +185,10 @@ bool NetlinkLldpObservationRuntime::start() {
 
     monitor_ = std::make_unique<NetlinkNetworkMonitor>(makeCallbacks());
     if (!monitor_->start()) {
-        lldpObserver_.store(nullptr);
-        observationQueue_.close();
-        observationWorker_.stop();
+        // Full unwind: the LLDP observer may already be running and pushing.
+        // Detaching it without stop() would leave a live watch thread
+        // producing into a closed queue.
+        cleanUpFailedStart();
         return false;
     }
 
@@ -189,18 +222,19 @@ void NetlinkLldpObservationRuntime::stop() {
 }
 
 bool NetlinkLldpObservationRuntime::isRunning() const {
+    // A dead consumer means observations no longer reach the model, so the
+    // runtime is not running even though the monitor is healthy. Kept here
+    // rather than only in health() so every caller — including
+    // setLldpSourceFactoryForTest's guard — sees one answer.
+    if (observationWorkerFailed_.load(std::memory_order_acquire)) {
+        return false;
+    }
     return monitor_ && monitor_->isRunning();
 }
 
 ObservationRuntimeHealth NetlinkLldpObservationRuntime::health() const {
     ObservationRuntimeHealth result;
-    result.running = monitor_ && monitor_->isRunning();
-    // A dead consumer means observations no longer reach the model, even
-    // though both producers are healthy. Without this the service would
-    // report running while silently ingesting nothing.
-    if (observationWorkerFailed_.load(std::memory_order_acquire)) {
-            result.running = false;
-    }
+    result.running = isRunning();
     auto observer = lldpObserver_.load();
     result.lldpAvailable = observer && observer->isRunning();
     return result;
