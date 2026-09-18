@@ -132,7 +132,16 @@ private:
 
     void reassertLldpNeighbors(std::chrono::steady_clock::time_point now);
 
-    std::atomic<bool> observationWorkerFailed_{false};
+    /**
+     * @brief Repair model divergence after the observation queue dropped items.
+     *
+     * On the supervision tick, not the consumer loop: a redump is five netlink
+     * round-trips, and a consumer blocked repairing is a consumer not draining —
+     * which backs the queue up and drops more, raising the very bit it is trying
+     * to clear. The tick cadence also supplies the retry throttle for free.
+     */
+    void performResync(std::chrono::steady_clock::time_point /*now*/);
+
     /// Keepalive period, derived from ModelConfig::candidateAgeout.
     std::chrono::steady_clock::duration reassertInterval_{std::chrono::seconds{30}};
 
@@ -148,6 +157,8 @@ private:
     /// Producer → model hand-off. Declared before the workers: the consumer
     /// loop and the netlink callbacks both touch it.
     BoundedObservationQueue observationQueue_;
+
+    std::atomic<bool> observationWorkerFailed_{false};
 
     // LLDP supervision state — touched only on the tick() thread.
     std::chrono::steady_clock::time_point lastReassert_{};

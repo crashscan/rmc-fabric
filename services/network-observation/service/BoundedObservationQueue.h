@@ -77,6 +77,16 @@ public:
         return resyncMask_.load(std::memory_order_acquire);
     }
 
+    /// Re-raise a source's resync bit after a failed repair.
+    ///
+    /// takeResyncMask() clears the mask, so a consumer that takes it and
+    /// then fails to repair must put the bit back — otherwise the model
+    /// stays diverged with no error on any path: the drop already happened
+    /// and nothing else will raise it again.
+    void raiseResync(ObservationSource source) {
+        resyncMask_.fetch_or(sourceBit(source), std::memory_order_release);
+    }
+
     /// Reset to a fresh, open, empty queue for a new service epoch. Clears
     /// the resync mask as well: the bits describe divergence in the previous
     /// epoch's model, which no longer exists.

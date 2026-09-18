@@ -1,10 +1,10 @@
 #include "NetlinkLldpObservationRuntime.h"
 
-#include <ObservationItem.h>
 #include "LldpObserver.h"
 #include "LldpdSource.h"
 #include "NetlinkNetworkMonitor.h"
 #include "NetlinkTypes.h"
+#include "ObservationItem.h"
 #include "ICandidateClassifier.h"
 #include "INetworkObservationModel.h"
 #include "ModelConfig.h"
@@ -14,6 +14,8 @@
 #include <algorithm>
 #include <chrono>
 #include <stdexcept>
+#include <type_traits>
+#include <variant>
 
 #include "NetlinkObservationMapper.h"
 
@@ -228,7 +230,7 @@ void NetlinkLldpObservationRuntime::applyObservation(const ObservationItem &item
         } else if constexpr (std::is_same_v<T, LldpObservation>) {
             model_->onLldpObservation(o);
         } else {
-            static_assert(false, "unhandled ObservationItem alternative");
+            static_assert(!sizeof(T *), "unhandled ObservationItem alternative");
         }
     }, item.payload);
 }
@@ -277,6 +279,45 @@ void NetlinkLldpObservationRuntime::age(std::chrono::steady_clock::time_point no
 void NetlinkLldpObservationRuntime::tick(std::chrono::steady_clock::time_point now) {
     superviseLldp(now);
     reassertLldpNeighbors(now);
+    performResync(now);
+}
+
+/**
+ * @brief Repair model divergence after the observation queue dropped items.
+ *
+ * On the supervision tick, not the consumer loop: a redump is five netlink
+ * round-trips, and a consumer blocked repairing is a consumer not draining —
+ * which backs the queue up and drops more, raising the very bit it is trying
+ * to clear. The tick cadence also supplies the retry throttle for free.
+ */
+void NetlinkLldpObservationRuntime::performResync(std::chrono::steady_clock::time_point /*now*/) {
+    const auto mask = observationQueue_.takeResyncMask();
+    if (mask == 0) return;
+
+    if (mask & sourceBit(ObservationSource::Netlink)) {
+        // Drop the backlog first: it predates the redump and re-applying it
+        // afterwards would overwrite fresh kernel state with stale events.
+        observationQueue_.discardAll();
+
+        if (!monitor_ || !monitor_->requestRedump()) {
+            observationQueue_.raiseResync(ObservationSource::Netlink);
+            LOG(WARNING) << "netlink resync failed; retrying next tick";
+        } else {
+            LOG(INFO) << "netlink resync completed";
+        }
+    }
+
+    if (mask & sourceBit(ObservationSource::Lldp)) {
+        // refreshAll() reconnects, re-enumerates, and — unlike the netlink
+        // redump — reconciles removals via reconcileAfterRefresh(). On
+        // failure the source stops and superviseLldp() re-acquires it next
+        // tick, so this path is self-healing and needs no re-raise.
+        if (auto observer = lldpObserver_.load()) {
+            observer->refreshAll();
+        } else {
+            LOG(WARNING) << "LLDP resync skipped: no observer; retry path owns recovery";
+        }
+    }
 }
 
 void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::time_point now) {

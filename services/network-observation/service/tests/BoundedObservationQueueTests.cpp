@@ -23,7 +23,7 @@ void expect(bool condition, const std::string& message)
     }
 }
 
-QueuedItem makeItem(ObservationSource source, int id)
+ObservationItem makeItem(ObservationSource source, int id)
 {
     NeighborObservation obs;
     obs.kind = ObservationKind::Neighbor;
@@ -33,10 +33,10 @@ QueuedItem makeItem(ObservationSource source, int id)
     obs.mac = "aa:bb:cc:dd:ee:ff";
     obs.ip = std::to_string(id);
     obs.observedAt = std::chrono::steady_clock::now();
-    return QueuedItem{source, obs};
+    return ObservationItem{source, obs};
 }
 
-int idOf(const QueuedItem& item)
+int idOf(const ObservationItem& item)
 {
     return std::stoi(std::get<NeighborObservation>(item.payload).ip);
 }
@@ -136,10 +136,10 @@ void testStopTokenUnblocksWithoutClosing()
     BoundedObservationQueue q(4);
     std::stop_source src;
     std::atomic<bool> returned{false};
-    std::optional<QueuedItem> out;
+    std::optional<ObservationItem> out;
     std::thread consumer([&] { out = q.waitPop(src.get_token()); returned = true; });
 
-    std::this_thread::sleep_for(50ms);
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
     expect(!returned.load(), "waitPop blocks while empty");
 
     src.request_stop();
@@ -180,5 +180,6 @@ int main()
     testStatsPassThrough();
     testStopTokenUnblocksWithoutClosing();
     testDiscardAllDoesNotReRaiseResyncBits();
+    testReopenClearsResyncMask();
     return EXIT_SUCCESS;
 }

@@ -532,6 +532,8 @@ private:
     /// only and intentionally does not transition itself on worker exit; this
     /// flag records loss of the live producer while the epoch remains running.
     std::atomic<bool> workerFailed_{false};
+    /// Excludes concurrent redumps; see requestRedump().
+    std::atomic<bool> redumpInFlight_{false};
 
     // Pre-bound handlers: constructed once, no per-message binding.
     std::function<void(const LinkEvent &)> onLinkHandler_;
@@ -539,15 +541,12 @@ private:
     std::function<void(const FdbEvent &)> onFdbHandler_;
     std::function<void(const NeighborEvent &)> onNeighHandler_;
     std::function<void(const DeviceEvent &)> onDeviceHandler_;
-
     /*
      * Must remain last. Its work, wake, and exit callbacks capture this and
      * access every relevant member above. Reverse member destruction therefore
      * stops and joins the worker before those members are destroyed.
      */
     ManagedWorker worker_;
-    /// Excludes concurrent redumps; see requestRedump().
-    std::atomic<bool> redumpInFlight_{false};
 };
 
 NetlinkNetworkMonitor::NetlinkNetworkMonitor(
