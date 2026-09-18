@@ -4,6 +4,7 @@
 #include <ManagedWorker.h>
 #include <ServiceBase.h>
 
+#include "PublicationQueue.h"
 #include "IObservationQueryService.h"
 #include "IObservationRuntime.h"
 #include "IObservationTransport.h"
@@ -56,6 +57,28 @@ public:
     [[nodiscard]] std::string getPhase() const override;
 
 private:
+    void onStartFailedcleanUp();
+    void publicationLoop(std::stop_token st);
+    void onPublicationWorkerExit(const ManagedWorker::Exit &exit);
+
+    /// Applies one taken generation to every transport.
+    void publishBatch(const PendingPublication &pending);
+
+    /// Publish one operation to all transports, isolating failures per
+    /// transport and folding the issue-report/clear pair that was repeated
+    /// eight times in the old onModelEvent.
+    template <typename Publish>
+    void publishToAll(std::string_view operation, Publish &&publish);
+
+    /// Model → transport hand-off. Producers mark; the publication worker
+    /// drains. Bounded by model cardinality, so no capacity or drop policy.
+    PublicationQueue publicationQueue_;
+
+    // ... workers last ...
+    ManagedWorker supervisionWorker_;
+    ManagedWorker agingWorker_;
+    ManagedWorker publicationWorker_;
+
     void agingLoop(std::stop_token st);
 
     void supervisionLoop(std::stop_token stopToken);

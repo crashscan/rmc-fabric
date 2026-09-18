@@ -110,6 +110,14 @@ public:
     /// silently discards every mark.
     void wake() noexcept { dirty_.wake(); }
 
+    /// Reset to a fresh, open generation. For service restart: close() is
+    /// one-way, so a stopped-then-started service would otherwise hold a
+    /// permanently dead queue that silently discards every mark.
+    ///
+    /// Precondition: no consumer is blocked in waitAndTake() and no producer
+    /// can call mark() — i.e. the publication worker is joined and the model
+    /// event sink is detached.
+    void reopen() { dirty_.reopen(); }
     void close() { dirty_.close(); }
     [[nodiscard]] bool closed() const { return dirty_.closed(); }
     [[nodiscard]] std::size_t size() const { return dirty_.size(); }
