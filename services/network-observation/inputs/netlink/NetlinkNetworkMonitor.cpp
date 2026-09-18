@@ -313,7 +313,7 @@ public:
         // lock: stopSignal_ is only reset in closeResources(), which runs
         // after the worker is joined, and isRunning() above established the
         // epoch. A stop racing us wins via the signal itself.
-        if (!stopSignal_) {
+        if (!redumpStopSignal_) {
             return false;
         }
 
@@ -323,7 +323,7 @@ public:
             // resync would emit nothing at all.
             netlinkState_.clear();
 
-            NetlinkInitialDump dump(*stopSignal_,
+            NetlinkInitialDump dump(*redumpStopSignal_,
                                     [this](const nlmsghdr *message) {
                                         processSingleMessage(message);
                                     });
@@ -378,7 +378,11 @@ private:
             LOG(FATAL) << "netlink stop eventfd is unavailable during teardown";
             return;
         }
-
+        // Interrupt an in-flight redump too — otherwise stop() waits out
+        // the full five round-trips before the supervision thread returns.
+        if (redumpStopSignal_) {
+            (void) redumpStopSignal_->signal();
+        }
         for (;;) {
             const int error = stopSignal_->signal();
 
@@ -523,6 +527,14 @@ private:
      * liveLoop_ borrows stopSignal_, so liveLoop_ must be destroyed first.
      */
     std::optional<EventFdSignal> stopSignal_;
+    /*
+     * Separate from stopSignal_ on purpose. waitForNetlinkDataOrStop()
+     * DRAINS the signal it observes, so sharing one eventfd between the
+     * live worker and a concurrent redump lets whichever wakes first
+     * consume the other's wake — leaving the live worker blocked in
+     * poll(-1) with no further signal coming, and stop() hung on the join.
+     */
+    std::optional<EventFdSignal> redumpStopSignal_;
     std::optional<NetlinkEventLoop> liveLoop_;
 
     LifecycleCoordinator lifecycle_;

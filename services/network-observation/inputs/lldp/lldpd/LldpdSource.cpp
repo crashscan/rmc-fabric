@@ -16,6 +16,8 @@
 #include <vector>
 #include <optional>
 #include <cstdint>
+#include<tuple>
+#include<vector>
 
 #include "BoundedLldpConnection.h"
 #include "BoundedLldpWatch.h"
