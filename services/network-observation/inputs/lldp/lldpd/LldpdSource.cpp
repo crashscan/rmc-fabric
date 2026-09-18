@@ -287,13 +287,17 @@ public:
      */
     void removeInterface(const std::string &ifname) {
         auto lease = callbackState_->gate.try_acquire();
-        if (!lease) return; // stop/refresh in progress; discard batch
+        if (!lease) {
+            return; // stop/refresh in progress; discard batch
+        }
 
         std::vector<CachedLldpNeighbor> toRemove;
         {
             std::unique_lock cacheLk(callbackState_->cacheMutex);
             auto it = callbackState_->byInterface.find(ifname);
-            if (it == callbackState_->byInterface.end()) return;
+            if (it == callbackState_->byInterface.end()) {
+                return;
+            }
             for (const auto &[_, entry]: it->second)
                 toRemove.push_back(entry);
             callbackState_->byInterface.erase(it);
@@ -303,7 +307,6 @@ public:
         for (const auto &entry: toRemove) {
             deliver(makeLldpObservation(ifname, ObservationEvent::Removed, entry));
         }
-        // lease released here, decrementing activeCount
     }
 
     /**
@@ -316,8 +319,6 @@ public:
      *        and emit. NOT wanted for removals: a Removed is still correct
      *        even if the cache has since changed, and dropping one would
      *        strand the candidate until ageout.
-     *
-     * Precondition: caller holds a CallbackLease.
      */
     template<typename Select>
     void emitBatch(Select &&select, bool generationGuard) {
@@ -352,7 +353,8 @@ public:
      * as backend liveness for the watchdog.
      */
     void reassertAll() {
-        if (const auto lease = callbackState_->gate.try_acquire(); !lease) {
+        const auto lease = callbackState_->gate.try_acquire();
+        if (!lease) {
             return; // stop/refresh in progress; keepalive dropped
         }
 
@@ -369,7 +371,8 @@ public:
                                      std::optional<std::string> chassisId,
                                      std::optional<std::string> portId,
                                      std::optional<std::string> systemName) {
-        if (const auto lease = callbackState_->gate.try_acquire(); !lease) {
+        const auto lease = callbackState_->gate.try_acquire();
+        if (!lease) {
             return;
         }
 
@@ -395,7 +398,8 @@ public:
      * case — see reassertAll().
      */
     void reconcileAfterRefresh(NeighborCache oldCache) {
-        if (const auto lease = callbackState_->gate.try_acquire(); !lease) {
+        const auto lease = callbackState_->gate.try_acquire();
+        if (!lease) {
             return;
         }
 
@@ -522,7 +526,8 @@ private:
                     auto state = weakState.lock();
                     if (!state) return;
 
-                    if (const auto lease = state->gate.try_acquire(); !lease) {
+                    const auto lease = state->gate.try_acquire();
+                    if (!lease) {
                         return; // admission closed
                     }
 
@@ -533,7 +538,6 @@ private:
                     } catch (...) {
                         LOG(ERROR) << "LldpdSource: watch callback unknown exception";
                     }
-                    // lease released here, decrementing activeCount
                 });
             return true;
         } catch (const std::exception &e) {
@@ -573,7 +577,8 @@ private:
                 auto neighbors = port.GetAtomList(lldpctl_k_port_neighbors);
 
                 for (const auto &nb: neighbors) {
-                    if (const auto lease = callbackState_->gate.try_acquire(); !lease) {
+                    const auto lease = callbackState_->gate.try_acquire();
+                    if (!lease) {
                         // stop/refresh began during enumeration — stop the
                         // whole walk, not just this interface.
                         aborted = true;
@@ -606,7 +611,6 @@ private:
     /**
      * @brief Process a single parsed change event against the given state.
      *
-     * Caller must hold a valid CallbackLease (keeping activeCount > 0).
      * Cache locks are released before the downstream callback.
      */
     static void dispatchChange(CallbackState &state,
