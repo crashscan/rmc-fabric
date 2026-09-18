@@ -33,6 +33,7 @@
 #pragma once
 #include "ILldpSource.h"
 #include "LldpObserverTypes.h"
+#include "AdmissionGate.h"
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -100,21 +101,6 @@ public:
                                      std::optional<std::string> systemName);
 
     /**
-     * @brief Test seam: open the callback admission gate without a backend.
-     *
-     * While open, submitNeighborChangeForTest / reassertAll /
-     * removeInterface run exactly as with a live backend, enabling
-     * cache-level unit tests without lldpd. Does not change lifecycle
-     * state and does not stamp liveness. Not for production use.
-     */
-    void openAdmissionForTest();
-
-    /**
-     * @brief Test seam: close admission and drain active leases.
-     */
-    void closeAdmissionAndDrainForTest();
-
-    /**
       * @brief Test seam: run the post-reconnect reconciliation pass directly.
       *
       * refreshAll() reaches reconcileAfterRefresh() only after a successful
@@ -136,6 +122,11 @@ public:
       * Unit tests only; do not call from production code.
       */
     void reconcileAfterRefreshForTest(const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors);
+
+    /// Test seam: the callback admission gate. Replaces the previous
+    /// open/close seam pair — the gate is a documented primitive with its
+    /// own tests, so wrapping it added vocabulary without adding safety.
+    [[nodiscard]] thread_safe::admission_gate &admissionGateForTest();
 
 private:
     class Impl;

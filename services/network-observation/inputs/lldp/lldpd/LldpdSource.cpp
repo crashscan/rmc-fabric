@@ -49,11 +49,8 @@ namespace {
         LldpSourceConfig config;
         LldpObservationCallback downstream;
 
-        // Admission gate
-        std::mutex mtx;
-        std::condition_variable cv;
-        bool admitting = false;
-        int activeCount = 0;
+        /// Guards the callback region. Starts closed.
+        thread_safe::admission_gate gate;
 
         // Neighbor cache
         mutable std::mutex cacheMutex;
@@ -74,88 +71,6 @@ namespace {
             : config(std::move(cfg)), downstream(std::move(cb)) {
         }
     };
-
-    /**
-     * @brief Move-only RAII lease that decrements the active callback count on
-     *        every exit path including exceptions.
-     */
-    class CallbackLease {
-    public:
-        explicit CallbackLease(std::shared_ptr<CallbackState> state)
-            : state_(std::move(state)) {
-        }
-
-        ~CallbackLease() noexcept { release(); }
-
-        CallbackLease(CallbackLease &&o) noexcept : state_(std::move(o.state_)) {
-        }
-
-        CallbackLease &operator=(CallbackLease &&o) noexcept {
-            if (this != &o) {
-                release();
-                state_ = std::move(o.state_);
-            }
-            return *this;
-        }
-
-        CallbackLease(const CallbackLease &) = delete;
-
-        CallbackLease &operator=(const CallbackLease &) = delete;
-
-    private:
-        void release() noexcept {
-            if (!state_) return;
-            {
-                std::unique_lock lk(state_->mtx);
-                --state_->activeCount;
-            }
-            state_->cv.notify_all();
-            state_.reset();
-        }
-
-        std::shared_ptr<CallbackState> state_;
-    };
-
-    /**
-     * @brief Try to acquire a callback lease through the admission gate.
-     *
-     * Returns std::nullopt if admission is closed (stop/refresh in progress).
-     */
-    [[nodiscard]] std::optional<CallbackLease> tryAcquireLease(
-        const std::shared_ptr<CallbackState> &state) {
-        std::unique_lock lk(state->mtx);
-        if (!state->admitting) return std::nullopt;
-        ++state->activeCount;
-        return CallbackLease(state);
-    }
-
-    /**
-     * @brief Open admission on a CallbackState.
-     *
-     * Must be called before creating the watch handle so that initial
-     * enumeration callbacks (which may fire synchronously) are admitted.
-     */
-    void openAdmission(CallbackState &state) noexcept {
-        std::unique_lock lk(state.mtx);
-        state.admitting = true;
-    }
-
-    /**
-     * @brief Close admission and wait for all active leases to drain.
-     *
-     * Does NOT hold the mutex while waiting, so it cannot deadlock with
-     * callbacks that use the same lock.
-     */
-    void closeAdmissionAndDrain(CallbackState &state) noexcept {
-        {
-            std::unique_lock lk(state.mtx);
-            state.admitting = false;
-        }
-        {
-            std::unique_lock lk(state.mtx);
-            state.cv.wait(lk, [&state] { return state.activeCount == 0; });
-        }
-    }
 
     /**
      * @brief Cache-update + downstream delivery shared by the watch path
@@ -217,10 +132,10 @@ public:
         lk.unlock();
 
         // Open admission BEFORE creating watch so synchronous callbacks admitted
-        openAdmission(*callbackState_);
+        callbackState_->gate.open();
 
         if (const bool ok = makeWatch(); !ok) {
-            closeAdmissionAndDrain(*callbackState_);
+            callbackState_->gate.close_and_drain();
             lk.lock();
             state_ = State::Stopped;
             return false;
@@ -249,10 +164,7 @@ public:
         state_ = State::Stopping;
 
         // 2. Close callback admission
-        {
-            std::unique_lock cbLk(callbackState_->mtx);
-            callbackState_->admitting = false;
-        }
+        callbackState_->gate.close();
 
         // 3. Move watch handle out of shared state
         auto watchToDestroy = std::move(watch_);
@@ -264,11 +176,8 @@ public:
         watchToDestroy.reset();
 
         // 6. Wait for active callback leases to drain
-        {
-            std::unique_lock cbLk(callbackState_->mtx);
-            callbackState_->cv.wait(cbLk, [this] { return callbackState_->activeCount == 0; });
-            callbackState_->cacheGeneration.fetch_add(1, std::memory_order_release);
-        }
+        callbackState_->gate.drain();
+        callbackState_->cacheGeneration.fetch_add(1, std::memory_order_release);
 
         // 7. Clear cache only after drain completes
         {
@@ -303,10 +212,7 @@ public:
         state_ = State::Refreshing;
 
         // 2. Close admission
-        {
-            std::unique_lock cbLk(callbackState_->mtx);
-            callbackState_->admitting = false;
-        }
+        callbackState_->gate.close();
 
         // 3. Move old watch out
         auto oldWatch = std::move(watch_);
@@ -317,14 +223,7 @@ public:
         oldWatch.reset();
 
         // 5. Drain old callbacks — BOUNDED. See kRefreshDrainTimeout.
-        bool drained = false;
-        {
-            std::unique_lock cbLk(callbackState_->mtx);
-            drained = callbackState_->cv.wait_for(
-                cbLk, kRefreshDrainTimeout,
-                [this] { return callbackState_->activeCount == 0; });
-        }
-        if (!drained) {
+        if (const bool drained = callbackState_->gate.drain(kRefreshDrainTimeout); !drained) {
             // Abandon the reconnect rather than block shutdown. Admission
             // stays closed, the cache is left intact (the outstanding
             // callback may still be mutating it), and the source goes
@@ -349,7 +248,7 @@ public:
         }
 
         // 7. Reopen admission
-        openAdmission(*callbackState_);
+        callbackState_->gate.open();
 
         // 8. Create new watch, re-enumerate, reconcile removals
         const bool ok = makeWatch();
@@ -357,7 +256,7 @@ public:
             enumerateInitialNeighbors();
             reconcileAfterRefresh(std::move(oldCache));
         } else {
-            closeAdmissionAndDrain(*callbackState_);
+            callbackState_->gate.close_and_drain();
         }
 
         // 9. Commit state
@@ -372,6 +271,10 @@ public:
         LOG(INFO) << "LldpdSource reconnected";
     }
 
+    /// No-op by contract: lldpd is push-based and already notifies
+    /// per-interface changes continuously. There is no per-interface query
+    /// in lldpctl — the only resync available is the full reconnect in
+    /// refreshAll(). See ILldpSource::refreshInterface.
     void refreshInterface(const std::string & /*ifname*/) {
     }
 
@@ -383,7 +286,7 @@ public:
      * (stop/refresh in progress) the batch is discarded.
      */
     void removeInterface(const std::string &ifname) {
-        auto lease = tryAcquireLease(callbackState_);
+        auto lease = callbackState_->gate.try_acquire();
         if (!lease) return; // stop/refresh in progress; discard batch
 
         std::vector<CachedLldpNeighbor> toRemove;
@@ -449,7 +352,7 @@ public:
      * as backend liveness for the watchdog.
      */
     void reassertAll() {
-        if (const auto lease = tryAcquireLease(callbackState_); !lease) {
+        if (const auto lease = callbackState_->gate.try_acquire(); !lease) {
             return; // stop/refresh in progress; keepalive dropped
         }
 
@@ -466,8 +369,9 @@ public:
                                      std::optional<std::string> chassisId,
                                      std::optional<std::string> portId,
                                      std::optional<std::string> systemName) {
-        auto lease = tryAcquireLease(callbackState_);
-        if (!lease) return;
+        if (const auto lease = callbackState_->gate.try_acquire(); !lease) {
+            return;
+        }
 
         const auto obs = makeLldpObservation(ifname, event, std::move(chassisId),std::move(portId), std::move(systemName));
 
@@ -491,7 +395,7 @@ public:
      * case — see reassertAll().
      */
     void reconcileAfterRefresh(NeighborCache oldCache) {
-        if (const auto lease = tryAcquireLease(callbackState_); !lease) {
+        if (const auto lease = callbackState_->gate.try_acquire(); !lease) {
             return;
         }
 
@@ -535,22 +439,14 @@ public:
         return callbackState_->lastWatchEventAt.load(std::memory_order_acquire);
     }
 
-    void openAdmissionForTest() {
-        openAdmission(*callbackState_);
-    }
-
-    void closeAdmissionAndDrainForTest() {
-        closeAdmissionAndDrain(*callbackState_);
-    }
-
     /**
- * @brief Build a NeighborCache from loose triples and run the real
- *        reconciliation pass over it.
- *
- * The rebuild mirrors cacheAndForward()'s keying exactly — same
- * resolveLldpIdentity(), same non-MAC skip — so the snapshot a test
- * supplies is indistinguishable from one the watch path produced.
- */
+     * @brief Build a NeighborCache from loose triples and run the real
+     *        reconciliation pass over it.
+     *
+     * The rebuild mirrors cacheAndForward()'s keying exactly — same
+     * resolveLldpIdentity(), same non-MAC skip — so the snapshot a test
+     * supplies is indistinguishable from one the watch path produced.
+     */
     void reconcileAfterRefreshForTest(
         const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors) {
         NeighborCache oldCache;
@@ -626,8 +522,9 @@ private:
                     auto state = weakState.lock();
                     if (!state) return;
 
-                    auto lease = tryAcquireLease(state);
-                    if (!lease) return; // admission closed
+                    if (const auto lease = state->gate.try_acquire(); !lease) {
+                        return; // admission closed
+                    }
 
                     try {
                         dispatchChange(*state, ifname, change, neighbor);
@@ -676,8 +573,7 @@ private:
                 auto neighbors = port.GetAtomList(lldpctl_k_port_neighbors);
 
                 for (const auto &nb: neighbors) {
-                    auto lease = tryAcquireLease(callbackState_);
-                    if (!lease) {
+                    if (const auto lease = callbackState_->gate.try_acquire(); !lease) {
                         // stop/refresh began during enumeration — stop the
                         // whole walk, not just this interface.
                         aborted = true;
@@ -795,8 +691,6 @@ void LldpdSource::reassertAll() { impl_->reassertAll(); }
 bool LldpdSource::isBackendAlive() const { return impl_->isBackendAlive(); }
 std::chrono::steady_clock::time_point LldpdSource::lastEventAt() const { return impl_->lastEventAt(); }
 
-void LldpdSource::openAdmissionForTest() { impl_->openAdmissionForTest(); }
-void LldpdSource::closeAdmissionAndDrainForTest() { impl_->closeAdmissionAndDrainForTest(); }
 void LldpdSource::reconcileAfterRefreshForTest(
     const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors) {
     impl_->reconcileAfterRefreshForTest(oldNeighbors);
