@@ -35,7 +35,7 @@ namespace {
 ObservationService::ObservationService(std::unique_ptr<IObservationRuntime> runtime,
                                        std::shared_ptr<IObservationTransport> transport,
                                        std::chrono::steady_clock::duration agingInterval
-                                       )
+)
     : ServiceBase("observation-service")
       , runtime_(std::move(runtime))
       , agingInterval_(agingInterval)
@@ -59,7 +59,7 @@ ObservationService::ObservationService(std::unique_ptr<IObservationRuntime> runt
                            // Wake, not close: close() is one-way and would
                            // leave the queue dead across a restart.
                            [this] { publicationQueue_.wake(); },
-                           [this](const ManagedWorker::Exit &exit) { onPublicationWorkerExit(exit); }){
+                           [this](const ManagedWorker::Exit &exit) { onPublicationWorkerExit(exit); }) {
     if (!runtime_) {
         throw std::invalid_argument("ObservationService: runtime is null");
     }
@@ -78,6 +78,20 @@ ObservationService::~ObservationService() {
         diagnostics::logError(name(), "service.lifecycle", "destroy", "service_stop_failed", "observation-service",
                               "stop() threw during destruction");
     }
+}
+
+void ObservationService::onPublicationWorkerExit(const ManagedWorker::Exit &exit) {
+    if (exit.reason != ManagedWorker::ExitReason::exception) return;
+    std::string detail = "unknown exception";
+    try {
+        if (exit.exception) std::rethrow_exception(exit.exception);
+    } catch (const std::exception &e) { detail = e.what(); } catch (...) {
+    }
+
+    reportIssue(std::string(contract::ISSUE_CODE_PUBLICATION_LOOP_STOPPED),
+                std::string(contract::SEVERITY_ERROR),
+                "worker.publication", "publish", "worker_loop_failed",
+                "publication", detail);
 }
 
 void ObservationService::addTransport(std::shared_ptr<IObservationTransport> transport) {
@@ -103,20 +117,12 @@ bool ObservationService::initializeComponents() {
     return true;
 }
 
-void ObservationService::onStartFailedcleanUp() {
-    if(supervisionWorker_.isRunning()) {
-        supervisionWorker_.stop();
-    }
-    if (agingWorker_.isRunning()) {
-        agingWorker_.stop();
-    }
-    if (runtime_->isRunning()) {
-        runtime_->stop();
-    }
+void ObservationService::onStartFailedCleanUp() {
+    supervisionWorker_.stop();
+    agingWorker_.stop();
+    runtime_->stop();
     publicationQueue_.close();
-    if (publicationWorker_.isRunning()) {
-        publicationWorker_.stop();
-    }
+    publicationWorker_.stop();
     ServiceBase::stop();
 }
 
@@ -135,17 +141,27 @@ bool ObservationService::start() {
         return false;
     }
     publicationQueue_.reopen();
-    if (!publicationWorker_.start()) {
+    try {
+        (void) publicationWorker_.start();
+    } catch (const std::exception &e) {
+        diagnostics::logError(name(), "worker.publication", "start", "worker_start_failed", "publication", e.what());
+        publicationQueue_.close();
+        ServiceBase::stop();
+        transition.fail();
+        return false;
+    } catch (...) {
         diagnostics::logError(name(), "worker.publication", "start", "worker_start_failed", "publication",
-                      "worker start returned failure");
+                              "unknown exception");
+        publicationQueue_.close();
         ServiceBase::stop();
         transition.fail();
         return false;
     }
+
     if (!runtime_->start()) {
         diagnostics::logError(name(), "runtime", "start", "runtime_start_failed", "runtime",
                               "runtime start returned failure");
-        onStartFailedcleanUp();
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     }
@@ -156,12 +172,12 @@ bool ObservationService::start() {
         (void) agingWorker_.start();
     } catch (const std::exception &e) {
         diagnostics::logError(name(), "worker.aging", "start", "worker_start_failed", "aging", e.what());
-        onStartFailedcleanUp();
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     } catch (...) {
         diagnostics::logError(name(), "worker.aging", "start", "worker_start_failed", "aging", "unknown exception");
-        onStartFailedcleanUp();
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     }
@@ -169,12 +185,13 @@ bool ObservationService::start() {
         (void) supervisionWorker_.start();
     } catch (const std::exception &e) {
         diagnostics::logError(name(), "worker.supervision", "start", "worker_start_failed", "supervision", e.what());
-        onStartFailedcleanUp();
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     } catch (...) {
         diagnostics::logError(name(), "worker.supervision", "start", "worker_start_failed", "supervision",
                               "unknown exception");
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     }
@@ -215,18 +232,17 @@ void ObservationService::stop() {
     // coordinator stuck in a transitional state.
     try {
         runtime_->stop();
-        // Step 3a: close the queue. Already-marked publications remain takeable,
-        // so terminal removals still reach the bus.
-        publicationQueue_.close();
-
-        // Step 3b: join the publication worker. Bounded by however long the
-        // transports take on one final generation.
-        publicationWorker_.stop();
     } catch (const std::exception &e) {
         diagnostics::logError(name(), "runtime", "stop", "runtime_stop_failed", "runtime", e.what());
     } catch (...) {
         diagnostics::logError(name(), "runtime", "stop", "runtime_stop_failed", "runtime", "unknown exception");
     }
+
+    // Step 3a/3b: after runtime_->stop() no producer can mark again. Close
+    // first so already-marked publications still drain, then join. Outside
+    // the try above: a runtime stop failure must not strand the worker.
+    publicationQueue_.close();
+    publicationWorker_.stop();
 
     // Step 4: Clear runtime issue state.
     {
@@ -405,10 +421,10 @@ void ObservationService::publishBatch(const PendingPublication &pending) {
         });
 }
 
-template <typename Publish>
+template<typename Publish>
 void ObservationService::publishToAll(std::string_view operation, Publish &&publish) {
     const auto op = std::string(operation);
-    for (const auto &transport : observationTransports(*this)) {
+    for (const auto &transport: observationTransports(*this)) {
         try {
             publish(*transport);
             clearTransportPublishFailure(transport->name(), op);
