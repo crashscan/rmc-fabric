@@ -274,7 +274,7 @@ public:
         // polling. Bounded: it was just interrupted and only has to unwind.
         while (redumpInFlight_.load(std::memory_order_acquire)) {
             std::this_thread::yield();
-       }
+        }
 
         closeResources();
         netlinkState_.clear();
@@ -309,7 +309,7 @@ public:
         // Reject rather than serialise: two overlapping clear-then-replay
         // sequences leave netlinkState_ matching neither dump.
         bool expected = false;
-        if (!redumpInFlight_.compare_exchange_strong(expected, true,std::memory_order_acq_rel)) {
+        if (!redumpInFlight_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
             LOG(WARNING) << "requestRedump() ignored: a redump is already in flight";
             return false;
         }
@@ -336,8 +336,8 @@ public:
             const auto result = dump.run();
             if (!result.completed()) {
                 LOG(ERROR) << "netlink redump failed: status="
-                           << NetlinkInitialDump::statusName(result.status)
-                           << ", error=" << result.error;
+                        << NetlinkInitialDump::statusName(result.status)
+                        << ", error=" << result.error;
                 return false;
             }
             LOG(INFO) << "netlink redump completed";
@@ -369,6 +369,13 @@ private:
     }
 
     void closeResources() {
+        // Wait out an in-flight redump before destroying the signal it is
+        // polling. Bounded: signalStop() already interrupted it, so it only
+        // has to unwind. Placed here rather than in stop() so the startup
+        // rollback paths are covered too.
+        while (redumpInFlight_.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
         // NetlinkEventLoop borrows stopSignal_.
         liveLoop_.reset();
         stopSignal_.reset();
@@ -610,5 +617,4 @@ std::vector<LinkEvent> NetlinkNetworkMonitor::getLinksSnapshot() const {
 bool NetlinkNetworkMonitor::requestRedump() {
     return impl_->requestRedump();
 }
-
 } // namespace RSCGroup
