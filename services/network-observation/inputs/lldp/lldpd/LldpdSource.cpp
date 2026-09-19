@@ -205,9 +205,16 @@ public:
 
         // 5. Drain old callbacks — BOUNDED. See kRefreshDrainTimeout.
         if (!callbackState_->gate.drain(kRefreshDrainTimeout)) {
-            LOG(ERROR) << "LldpdSource: stop drain timed out; leases outstanding";
-            // Do NOT clear the cache — an outstanding callback may still
-            // be mutating it.
+            // Abandon the reconnect rather than block the supervision thread.
+            // Admission stays closed and the cache is left intact — an
+            // outstanding callback may still be mutating it. Going Stopped
+            // makes the runtime's next tick() drop and re-acquire the observer;
+            // stop()'s Stopped branch completes the drain and the clear.
+            LOG(ERROR) << "LldpdSource: reconnect drain timed out; abandoning refresh";
+            lk.lock();
+            state_ = State::Stopped;
+            lk.unlock();
+            lifecycleCv_.notify_all();
             return;
         }
 
