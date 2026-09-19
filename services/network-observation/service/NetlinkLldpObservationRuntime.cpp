@@ -27,9 +27,7 @@ namespace {
     constexpr auto kLldpRetryInterval = std::chrono::seconds{30};
     constexpr auto kLldpProbeInterval = std::chrono::seconds{60};
 
-    /// Consecutive in-place reconnect failures before giving up on the
-    /// observer and re-acquiring a fresh one. At kLldpRetryInterval per
-    /// attempt this is ~90s of repair attempts before escalating —
+    /// attempt (30s) this is ~150s of in-place repair before escalating —
     /// comfortably longer than an lldpd restart, short enough that a
     /// wedged source does not persist indefinitely.
     constexpr unsigned kLldpReconnectFailureLimit = 5;
@@ -187,8 +185,9 @@ bool NetlinkLldpObservationRuntime::start() {
     if (auto observer = createLldpObserver(); observer->start()) {
         lldpObserver_.store(std::move(observer));
         lldpReconnectFailures_ = 0;
-        // Also clear the reconnect throttle: it belongs to the observer
-        // being discarded, and a fresh one must not inherit its budget.
+        // Clear the reconnect throttle: a restart must not inherit the
+        // previous epoch's budget. There is no prior observer here — the
+        // members simply survive stop()/start().
         lastLldpReconnect_ = {};
     } else {
         LOG(WARNING) << "LLDP observer failed to start — LLDP unavailable (tick() will retry)";
@@ -288,7 +287,7 @@ void NetlinkLldpObservationRuntime::onObservationWorkerExit(const ManagedWorker:
     } catch (const std::exception &e) { detail = e.what(); } catch (...) {}
 
     // No issue-reporting channel here — the runtime has no diagnostics sink.
-    // health() reflects it instead: see below.
+    // health() reflects it instead, via isRunning().
     LOG(ERROR) << "observation consumer worker terminated: " << detail;
     observationWorkerFailed_.store(true, std::memory_order_release);
 }
@@ -375,20 +374,22 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
     auto observer = lldpObserver_.load();
 
     if (observer && !observer->isRunning()) {
-        // A watchdog reconnect left the source stopped — drop it and fall
-        // through to the retry path.
+        // The epoch is finished — not repairable, so drop and fall through
+        // to the retry path. Reachable only via an external stop(): a failed
+        // reconnect now retains the watch and leaves the epoch running, and
+        // a dead watch is handled below.
         LOG(WARNING) << "LLDP observer stopped — scheduling re-acquire";
         lldpObserver_.store(nullptr);
         observer.reset();
     }
 
     if (observer) {
-        // A dead watch is repairable IN PLACE: refreshAll() rebuilds the
-        // connection without closing admission and reconciles the
-        // pre-reconnect cache, so neighbours that really went away are
-        // reported Removed instead of stranded until candidateAgeout.
-        // Dropping the observer would discard that cache unreconciled.
         if (!observer->isWatchAlive()) {
+            // Repairable IN PLACE: refreshAll() rebuilds the connection
+            // without closing admission and reconciles the pre-reconnect
+            // cache, so neighbours that really went away are reported
+            // Removed instead of stranded until candidateAgeout. Dropping
+            // the observer would discard that cache unreconciled.
             if (reconnectLldp(*observer, now, "watch died")) {
                 return;   // probe next tick; the reconnect just proved contact
             }
@@ -408,12 +409,10 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
             lldpObserver_.store(nullptr);
             observer.reset();
             lldpReconnectFailures_ = 0;
-            // Also clear the reconnect throttle: it belongs to the observer
-            // being discarded, and a fresh one must not inherit its budget.
+            // Both throttles belong to the observer being discarded. The
+            // replacement must not inherit a budget it never spent, and the
+            // escalation already waited kLldpReconnectFailureLimit intervals.
             lastLldpReconnect_ = {};
-            // Clear the retry throttle: the escalation already waited
-            // kLldpReconnectFailureLimit intervals, so the replacement
-            // attempt should not wait another one.
             lastLldpAttempt_ = {};
         }
     }
@@ -454,10 +453,9 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
  * @brief The single entry point for LLDP reconnects.
  *
  * Every trigger — dead watch, failed probe, queue-drop resync — routes here
- * so they share one throttle and one failure policy. performResync()
- * previously called refreshAll() directly and bypassed the supervision
- * throttle entirely, so a down daemon paid a bounded connect every tick.
- *
+ * so they share one throttle and one failure policy. Bypassing it costs a
+ * bounded connect per tick against a down daemon, and desynchronises the
+ * consecutive-failure count that drives escalation in superviseLldp().
  * @return false if throttled OR the reconnect failed. Callers repairing a
  *         known divergence must treat false as unrepaired: a failed
  *         refreshAll() retains the existing watch and leaves the epoch

@@ -41,7 +41,9 @@ struct MonitorCallbacks;
  *  - lldpObserver_ is atomically shared: netlink callbacks (monitor thread)
  *    load it per link event, while tick() (service aging thread) may create
  *    and publish a new observer after a retry. An observer is published only
- *    after a successful start(); a live observer is never replaced.
+ *    after a successful start(). A live observer is never replaced in place;
+ *    it is only ever dropped to nullptr — by an ended epoch, or by the
+ *    reconnect-failure escalation — and a replacement published afterwards.
  *  - monitor_ is written only on the service thread in start()/stop(), which
  *    the service guarantees run outside the aging worker's lifetime (the
  *    worker is started after runtime start and joined before runtime stop).
@@ -133,7 +135,11 @@ private:
 
     void superviseLldp(std::chrono::steady_clock::time_point now);
 
-    [[nodiscard]] bool reconnectLldp(LldpObserver &observer,std::chrono::steady_clock::time_point now,const char *reason);
+    /// Single entry point for LLDP reconnects; see the definition for the
+    /// throttle and failure-count contract.
+    [[nodiscard]] bool reconnectLldp(LldpObserver &observer,
+                                     std::chrono::steady_clock::time_point now,
+                                     const char *reason);
 
     void reassertLldpNeighbors(std::chrono::steady_clock::time_point now);
 
