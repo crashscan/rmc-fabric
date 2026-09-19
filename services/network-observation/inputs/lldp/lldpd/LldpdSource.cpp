@@ -332,7 +332,8 @@ public:
             return;
         }
 
-        const auto obs = makeLldpObservation(ifname, event, std::move(chassisId),std::move(portId), std::move(systemName));
+        const auto obs = makeLldpObservation(ifname, event, std::move(chassisId), std::move(portId),
+                                             std::move(systemName));
 
         // Deliberately NOT liveness-stamped: the seam is not backend contact.
         cacheAndForward(*callbackState_, obs);
@@ -486,8 +487,7 @@ private:
         // lldpctl transport has no timeout, so a hung lldpd would block the
         // supervision worker and in turn delay ObservationService::stop().
         try {
-            BoundedLldpConnection bounded(resolvedCtlPath(),
-                                          kProbeConnectTimeout, kProbeIoTimeout);
+            BoundedLldpConnection bounded(resolvedCtlPath(), kProbeConnectTimeout, kProbeIoTimeout);
 
             bool aborted = false;
             forEachInterfaceBounded(bounded, [&](const lldpcli::LldpAtom &iface) {
@@ -497,9 +497,7 @@ private:
                 if (!ifname) return;
 
                 if (!callbackState_->config.watchedInterfaces.empty()) {
-                    auto it = std::find(callbackState_->config.watchedInterfaces.begin(),
-                                        callbackState_->config.watchedInterfaces.end(),
-                                        *ifname);
+                    auto it = std::ranges::find(callbackState_->config.watchedInterfaces, *ifname);
                     if (it == callbackState_->config.watchedInterfaces.end()) return;
                 }
 
@@ -531,8 +529,7 @@ private:
             // A completed enumeration proves backend connectivity even when
             // zero neighbors were found (dispatchChange stamps per neighbor).
             // Only stamp on a full walk: an aborted one proves nothing.
-            callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(),
-                                                   std::memory_order_release);
+            callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(), std::memory_order_release);
         } catch (const std::exception &e) {
             LOG(ERROR) << "LLDP initial enumeration failed: " << e.what();
         }
@@ -576,8 +573,9 @@ private:
 
         const auto obs = makeLldpObservation(
             ifname,
-            change == lldpctl_c_deleted ? ObservationEvent::Removed
-                                        : ObservationEvent::Present,
+            change == lldpctl_c_deleted
+                ? ObservationEvent::Removed
+                : ObservationEvent::Present,
             std::move(chassisId), std::move(portId), std::move(systemName));
 
         cacheAndForward(state, obs);
@@ -629,5 +627,4 @@ std::chrono::steady_clock::time_point LldpdSource::lastEventAt() const { return 
 thread_safe::admission_gate &LldpdSource::admissionGateForTest() {
     return impl_->gate();
 }
-
 } // namespace RSCGroup
