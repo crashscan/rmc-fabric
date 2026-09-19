@@ -4,6 +4,7 @@
 #include <ManagedWorker.h>
 #include <ServiceBase.h>
 
+#include "PublicationQueue.h"
 #include "IObservationQueryService.h"
 #include "IObservationRuntime.h"
 #include "IObservationTransport.h"
@@ -17,6 +18,7 @@
 #include <optional>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <vector>
 
 
@@ -56,6 +58,21 @@ public:
     [[nodiscard]] std::string getPhase() const override;
 
 private:
+    void onStartFailedCleanUp();
+
+    void publicationLoop(std::stop_token st);
+
+    void onPublicationWorkerExit(const ManagedWorker::Exit &exit);
+
+    /// Applies one taken generation to every transport.
+    void publishBatch(const PendingPublication &pending);
+
+    /// Publish one operation to all transports, isolating failures per
+    /// transport and folding the issue-report/clear pair that was repeated
+    /// eight times in the old onModelEvent.
+    template<typename Publish>
+    void publishToAll(std::string_view operation, Publish &&publish);
+
     void agingLoop(std::stop_token st);
 
     void supervisionLoop(std::stop_token stopToken);
@@ -103,6 +120,9 @@ private:
 
     /// Serializes complete service-epoch transitions only.
     LifecycleCoordinator lifecycle_;
+    /// Model → transport hand-off. Producers mark; the publication worker
+    /// drains. Bounded by model cardinality, so no capacity or drop policy.
+    PublicationQueue publicationQueue_;
 
     // ------------------------------------------------------------------ //
     // Member destruction order
@@ -114,5 +134,6 @@ private:
     // they touch goes away.
     ManagedWorker supervisionWorker_;
     ManagedWorker agingWorker_;
+    ManagedWorker publicationWorker_;
 };
 } // namespace RSCGroup

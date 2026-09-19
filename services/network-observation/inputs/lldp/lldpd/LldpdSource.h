@@ -5,23 +5,32 @@
  * @file LldpdSource.h
  * @brief LLDP source backed by the lldpd daemon via liblldpctl.
  *
- * Wraps lldpcli::LldpWatch for push-based change notifications.
+ * Wraps LldpWatchSupervisor for push-based change notifications.
  * Implements ILldpSource — refresh methods are advisory (reconnect).
  *
  * @section callback-safety Callback-drain safety
  * The external LldpWatch callback captures only a weak_ptr to the internal
- * CallbackState.  stop() closes the admission gate, destroys the watch
- * handle, and waits for all active callback leases to drain before clearing
+ * CallbackState.  stop() closes the admission gate,
+ * and waits for all active callback leases to drain before clearing
  * cache state or returning.
  *
  * Postcondition of stop(): no LLDP callback is executing; no new callback
  * can be admitted; cache is cleared; the watch handle is released.
  *
+ * Unless a bounded wait times out — a concurrent refresh holding the watch
+ * lock, or a lease that never drains. That is logged, and the source
+ * latches itself unusable so start() refuses rather than stacking a second
+ * watch on a wedged one.
+ *
  * @section reentrancy Reentrancy
- * Downstream observation callbacks must not synchronously call stop(),
- * refreshAll(), or destroy the LldpdSource — doing so from within a
- * callback is a programming error.  Destructors are non-throwing; misuse
- * (destruction during a callback) is logged.
+ * A downstream callback must not call refreshAll() or destroy the
+ * LldpdSource: the first deadlocks against the supervisor lock held across
+ * the watch teardown, the second joins the thread it is running on.
+ *
+ * stop() IS supported from a callback dispatched during startup
+ * enumeration — the lifecycle coordinator detects the start-owner thread
+ * and switches to a non-waiting teardown. Destructors are non-throwing;
+ * misuse is logged.
  *
  * @section limitations v1 Limitations
  * Only MAC-like LLDP identities are cached and forwarded to the
@@ -33,13 +42,12 @@
 #pragma once
 #include "ILldpSource.h"
 #include "LldpObserverTypes.h"
+#include "AdmissionGate.h"
 #include <chrono>
 #include <memory>
 #include <optional>
 #include <string>
 #include <string_view>
-#include <tuple>
-#include <vector>
 
 namespace RSCGroup {
 class LldpdSource : public ILldpSource {
@@ -60,8 +68,9 @@ public:
     void stop() override;
 
     [[nodiscard]] bool isRunning() const override;
+    [[nodiscard]] bool isWatchAlive() const override;
 
-    void refreshAll() override;
+    [[nodiscard]] bool refreshAll() override;
 
     void refreshInterface(const std::string &ifname) override;
 
@@ -99,43 +108,10 @@ public:
                                      std::optional<std::string> portId,
                                      std::optional<std::string> systemName);
 
-    /**
-     * @brief Test seam: open the callback admission gate without a backend.
-     *
-     * While open, submitNeighborChangeForTest / reassertAll /
-     * removeInterface run exactly as with a live backend, enabling
-     * cache-level unit tests without lldpd. Does not change lifecycle
-     * state and does not stamp liveness. Not for production use.
-     */
-    void openAdmissionForTest();
-
-    /**
-     * @brief Test seam: close admission and drain active leases.
-     */
-    void closeAdmissionAndDrainForTest();
-
-    /**
-      * @brief Test seam: run the post-reconnect reconciliation pass directly.
-      *
-      * refreshAll() reaches reconcileAfterRefresh() only after a successful
-      * makeWatch() + enumerateInitialNeighbors(), both of which require a live
-      * lldpd. This seam supplies the pre-reconnect snapshot directly so the
-      * removal diff — and its deliberately unguarded delivery, the only
-      * generationGuard=false path in the source — can be exercised without a
-      * daemon.
-      *
-      * @param oldNeighbors Pre-reconnect neighbours as (ifname, chassisId,
-      *        portId). Entries whose identity is also present in the current
-      *        cache are treated as re-seen and produce no Removed. Entries
-      *        with a non-MAC identity are skipped, matching the caching rule
-      *        in cacheAndForward().
-      *
-      * Precondition: admission is open (openAdmissionForTest()). If admission
-      * is closed the call is a no-op, exactly as the real path would be.
-      *
-      * Unit tests only; do not call from production code.
-      */
-    void reconcileAfterRefreshForTest(const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors);
+    /// Test seam: the callback admission gate. Replaces the previous
+    /// open/close seam pair — the gate is a documented primitive with its
+    /// own tests, so wrapping it added vocabulary without adding safety.
+    [[nodiscard]] thread_safe::admission_gate &admissionGateForTest();
 
 private:
     class Impl;

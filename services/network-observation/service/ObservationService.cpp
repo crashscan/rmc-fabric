@@ -34,7 +34,8 @@ namespace {
 
 ObservationService::ObservationService(std::unique_ptr<IObservationRuntime> runtime,
                                        std::shared_ptr<IObservationTransport> transport,
-                                       std::chrono::steady_clock::duration agingInterval)
+                                       std::chrono::steady_clock::duration agingInterval
+)
     : ServiceBase("observation-service")
       , runtime_(std::move(runtime))
       , agingInterval_(agingInterval)
@@ -52,7 +53,13 @@ ObservationService::ObservationService(std::unique_ptr<IObservationRuntime> runt
                          std::scoped_lock agingLock(agingMutex_);
                          agingCv_.notify_all();
                      },
-                     [this](const ManagedWorker::Exit &exit) { onAgingWorkerExit(exit); }) {
+                     [this](const ManagedWorker::Exit &exit) { onAgingWorkerExit(exit); })
+      , publicationWorker_("observation-publication",
+                           [this](std::stop_token st) { publicationLoop(std::move(st)); },
+                           // Wake, not close: close() is one-way and would
+                           // leave the queue dead across a restart.
+                           [this] { publicationQueue_.wake(); },
+                           [this](const ManagedWorker::Exit &exit) { onPublicationWorkerExit(exit); }) {
     if (!runtime_) {
         throw std::invalid_argument("ObservationService: runtime is null");
     }
@@ -71,6 +78,20 @@ ObservationService::~ObservationService() {
         diagnostics::logError(name(), "service.lifecycle", "destroy", "service_stop_failed", "observation-service",
                               "stop() threw during destruction");
     }
+}
+
+void ObservationService::onPublicationWorkerExit(const ManagedWorker::Exit &exit) {
+    if (exit.reason != ManagedWorker::ExitReason::exception) return;
+    std::string detail = "unknown exception";
+    try {
+        if (exit.exception) std::rethrow_exception(exit.exception);
+    } catch (const std::exception &e) { detail = e.what(); } catch (...) {
+    }
+
+    reportIssue(std::string(contract::ISSUE_CODE_PUBLICATION_LOOP_STOPPED),
+                std::string(contract::SEVERITY_ERROR),
+                "worker.publication", "publish", "worker_loop_failed",
+                "publication", detail);
 }
 
 void ObservationService::addTransport(std::shared_ptr<IObservationTransport> transport) {
@@ -96,6 +117,15 @@ bool ObservationService::initializeComponents() {
     return true;
 }
 
+void ObservationService::onStartFailedCleanUp() {
+    supervisionWorker_.stop();
+    agingWorker_.stop();
+    runtime_->stop();
+    publicationQueue_.close();
+    publicationWorker_.stop();
+    ServiceBase::stop();
+}
+
 bool ObservationService::start() {
     auto transition = lifecycle_.beginStart();
     if (!transition) {
@@ -110,10 +140,28 @@ bool ObservationService::start() {
         transition.fail();
         return false;
     }
+    publicationQueue_.reopen();
+    try {
+        (void) publicationWorker_.start();
+    } catch (const std::exception &e) {
+        diagnostics::logError(name(), "worker.publication", "start", "worker_start_failed", "publication", e.what());
+        publicationQueue_.close();
+        ServiceBase::stop();
+        transition.fail();
+        return false;
+    } catch (...) {
+        diagnostics::logError(name(), "worker.publication", "start", "worker_start_failed", "publication",
+                              "unknown exception");
+        publicationQueue_.close();
+        ServiceBase::stop();
+        transition.fail();
+        return false;
+    }
+
     if (!runtime_->start()) {
         diagnostics::logError(name(), "runtime", "start", "runtime_start_failed", "runtime",
                               "runtime start returned failure");
-        ServiceBase::stop();
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     }
@@ -123,35 +171,27 @@ bool ObservationService::start() {
     try {
         (void) agingWorker_.start();
     } catch (const std::exception &e) {
-        runtime_->stop();
-        ServiceBase::stop();
         diagnostics::logError(name(), "worker.aging", "start", "worker_start_failed", "aging", e.what());
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     } catch (...) {
-        runtime_->stop();
-        ServiceBase::stop();
         diagnostics::logError(name(), "worker.aging", "start", "worker_start_failed", "aging", "unknown exception");
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     }
     try {
         (void) supervisionWorker_.start();
     } catch (const std::exception &e) {
-        supervisionWorker_.stop(); // idempotent; guards a partially-started worker
-        agingWorker_.stop();
-        runtime_->stop();
-        ServiceBase::stop();
         diagnostics::logError(name(), "worker.supervision", "start", "worker_start_failed", "supervision", e.what());
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     } catch (...) {
-        supervisionWorker_.stop();
-        agingWorker_.stop();
-        runtime_->stop();
-        ServiceBase::stop();
         diagnostics::logError(name(), "worker.supervision", "start", "worker_start_failed", "supervision",
                               "unknown exception");
+        onStartFailedCleanUp();
         transition.fail();
         return false;
     }
@@ -197,6 +237,12 @@ void ObservationService::stop() {
     } catch (...) {
         diagnostics::logError(name(), "runtime", "stop", "runtime_stop_failed", "runtime", "unknown exception");
     }
+
+    // Step 3a/3b: after runtime_->stop() no producer can mark again. Close
+    // first so already-marked publications still drain, then join. Outside
+    // the try above: a runtime stop failure must not strand the worker.
+    publicationQueue_.close();
+    publicationWorker_.stop();
 
     // Step 4: Clear runtime issue state.
     {
@@ -298,86 +344,26 @@ void ObservationService::supervisionLoop(std::stop_token st) {
     }
 }
 
+// Runs on a producer thread (netlink monitor, or the LLDP watch thread via
+// the engine). Must stay cheap and non-blocking: this is the boundary that
+// previously let a stalled D-Bus transport back-pressure into netlink
+// parsing. Marking is a map insert under a short mutex; all transport I/O
+// happens on the publication worker.
 void ObservationService::onModelEvent(const ModelEvent &event) {
-    const auto typedTransports = observationTransports(*this);
-
     switch (event.kind) {
         case ModelEventKind::LocalInterfaceChanged:
+        case ModelEventKind::LocalAddressChanged:
             if (event.ifname) {
-                for (const auto &transport: typedTransports) {
-                    try {
-                        transport->publishInterfaceChanged(*event.ifname);
-                        clearTransportPublishFailure(transport->name(), "publish_interface_changed");
-                    } catch (const std::exception &e) {
-                        noteTransportPublishFailure(transport->name(), "publish_interface_changed", e.what());
-                    } catch (...) {
-                        noteTransportPublishFailure(transport->name(), "publish_interface_changed",
-                                                    "unknown exception");
-                    }
-                }
+                publicationQueue_.markInterfaceChanged(*event.ifname);
             }
-            for (const auto &transport: typedTransports) {
-                try {
-                    transport->publishLocalStateChanged();
-                    clearTransportPublishFailure(transport->name(), "publish_local_state_changed");
-                } catch (const std::exception &e) {
-                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
-                } catch (...) {
-                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", "unknown exception");
-                }
-            }
+            publicationQueue_.markLocalStateChanged();
             break;
 
         case ModelEventKind::LocalInterfaceRemoved:
             if (event.ifname) {
-                for (const auto &transport: typedTransports) {
-                    try {
-                        transport->publishInterfaceRemoved(*event.ifname);
-                        clearTransportPublishFailure(transport->name(), "publish_interface_removed");
-                    } catch (const std::exception &e) {
-                        noteTransportPublishFailure(transport->name(), "publish_interface_removed", e.what());
-                    } catch (...) {
-                        noteTransportPublishFailure(transport->name(), "publish_interface_removed",
-                                                    "unknown exception");
-                    }
-                }
+                publicationQueue_.markInterfaceRemoved(*event.ifname);
             }
-            for (const auto &transport: typedTransports) {
-                try {
-                    transport->publishLocalStateChanged();
-                    clearTransportPublishFailure(transport->name(), "publish_local_state_changed");
-                } catch (const std::exception &e) {
-                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
-                } catch (...) {
-                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", "unknown exception");
-                }
-            }
-            break;
-
-        case ModelEventKind::LocalAddressChanged:
-            if (event.ifname) {
-                for (const auto &transport: typedTransports) {
-                    try {
-                        transport->publishInterfaceChanged(*event.ifname);
-                        clearTransportPublishFailure(transport->name(), "publish_interface_changed");
-                    } catch (const std::exception &e) {
-                        noteTransportPublishFailure(transport->name(), "publish_interface_changed", e.what());
-                    } catch (...) {
-                        noteTransportPublishFailure(transport->name(), "publish_interface_changed",
-                                                    "unknown exception");
-                    }
-                }
-            }
-            for (const auto &transport: typedTransports) {
-                try {
-                    transport->publishLocalStateChanged();
-                    clearTransportPublishFailure(transport->name(), "publish_local_state_changed");
-                } catch (const std::exception &e) {
-                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", e.what());
-                } catch (...) {
-                    noteTransportPublishFailure(transport->name(), "publish_local_state_changed", "unknown exception");
-                }
-            }
+            publicationQueue_.markLocalStateChanged();
             break;
 
         case ModelEventKind::CandidateAdded:
@@ -386,36 +372,67 @@ void ObservationService::onModelEvent(const ModelEvent &event) {
         case ModelEventKind::CandidateAged:
         case ModelEventKind::ClassificationChanged:
             if (event.mac) {
-                for (const auto &transport: typedTransports) {
-                    try {
-                        transport->publishCandidateChanged(*event.mac);
-                        clearTransportPublishFailure(transport->name(), "publish_candidate_changed");
-                    } catch (const std::exception &e) {
-                        noteTransportPublishFailure(transport->name(), "publish_candidate_changed", e.what());
-                    } catch (...) {
-                        noteTransportPublishFailure(transport->name(), "publish_candidate_changed",
-                                                    "unknown exception");
-                    }
-                }
+                publicationQueue_.markCandidateChanged(*event.mac);
             }
             break;
 
         case ModelEventKind::CandidateExpired:
         case ModelEventKind::CandidateRemoved:
             if (event.mac) {
-                for (const auto &transport: typedTransports) {
-                    try {
-                        transport->publishCandidateRemoved(*event.mac);
-                        clearTransportPublishFailure(transport->name(), "publish_candidate_removed");
-                    } catch (const std::exception &e) {
-                        noteTransportPublishFailure(transport->name(), "publish_candidate_removed", e.what());
-                    } catch (...) {
-                        noteTransportPublishFailure(transport->name(), "publish_candidate_removed",
-                                                    "unknown exception");
-                    }
-                }
+                publicationQueue_.markCandidateRemoved(*event.mac);
             }
             break;
+    }
+}
+
+void ObservationService::publicationLoop(std::stop_token st) {
+    // waitAndTake still drains a pending generation when stop is requested —
+    // it returns nullopt only when the set is empty. So a stop during
+    // shutdown does not strand already-marked publications.
+    while (auto pending = publicationQueue_.waitAndTake(st)) {
+        publishBatch(*pending);
+    }
+}
+
+void ObservationService::publishBatch(const PendingPublication &pending) {
+    dispatchPublication(
+        pending,
+        [this](const std::string &mac, PublicationIntent intent) {
+            if (intent == PublicationIntent::Changed) {
+                publishToAll("publish_candidate_changed",
+                             [&](IObservationTransport &t) { t.publishCandidateChanged(mac); });
+            } else {
+                publishToAll("publish_candidate_removed",
+                             [&](IObservationTransport &t) { t.publishCandidateRemoved(mac); });
+            }
+        },
+        [this](const std::string &ifname, PublicationIntent intent) {
+            if (intent == PublicationIntent::Changed) {
+                publishToAll("publish_interface_changed",
+                             [&](IObservationTransport &t) { t.publishInterfaceChanged(ifname); });
+            } else {
+                publishToAll("publish_interface_removed",
+                             [&](IObservationTransport &t) { t.publishInterfaceRemoved(ifname); });
+            }
+        },
+        [this] {
+            publishToAll("publish_local_state_changed",
+                         [](IObservationTransport &t) { t.publishLocalStateChanged(); });
+        });
+}
+
+template<typename Publish>
+void ObservationService::publishToAll(std::string_view operation, Publish &&publish) {
+    const auto op = std::string(operation);
+    for (const auto &transport: observationTransports(*this)) {
+        try {
+            publish(*transport);
+            clearTransportPublishFailure(transport->name(), op);
+        } catch (const std::exception &e) {
+            noteTransportPublishFailure(transport->name(), op, e.what());
+        } catch (...) {
+            noteTransportPublishFailure(transport->name(), op, "unknown exception");
+        }
     }
 }
 

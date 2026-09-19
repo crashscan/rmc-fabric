@@ -9,6 +9,23 @@
 #include <system_error>
 
 namespace RSCGroup {
+
+BoundedLldpWatch::BoundedLldpWatch(std::string_view ctlname,
+                                   std::chrono::milliseconds connectTimeout,
+                                   std::chrono::milliseconds ioTimeout)
+    : BoundedLldpWatch(ctlname, connectTimeout, ioTimeout, ChangeCallback{}) {
+}
+
+void BoundedLldpWatch::setCallback(ChangeCallback callback) {
+    std::scoped_lock lk(callbackMutex_);
+    callback_ = std::move(callback);
+}
+
+void BoundedLldpWatch::setExitHandler(ExitHandler onExit) {
+    std::scoped_lock lk(exitMutex_);
+    onExit_ = std::move(onExit);
+}
+
 BoundedLldpWatch::BoundedLldpWatch(std::string_view ctlname,
                                    std::chrono::milliseconds connectTimeout,
                                    std::chrono::milliseconds ioTimeout,
@@ -40,11 +57,16 @@ BoundedLldpWatch::BoundedLldpWatch(std::string_view ctlname,
                     // over — LldpdSource's liveness probe re-acquires.
                     if (!stop.stop_requested()) {
                         LOG(WARNING) << "BoundedLldpWatch: watch ended: "
-                                << ::lldpctl_strerror(
-                                    lldpctl_last_error(conn_->connection()));
+                                << ::lldpctl_strerror(lldpctl_last_error(conn_->connection()));
                     }
-                    return;
+                    break;
                 }
+            }
+            exited_.store(true, std::memory_order_release);
+            // Only for an unsolicited exit. A requested stop means the owner
+            // is already tearing this watch down and is about to join us.
+            if (!stop.stop_requested()) {
+                notifyExit();
             }
         }
     };
@@ -62,12 +84,43 @@ BoundedLldpWatch::~BoundedLldpWatch() {
     conn_.reset(); // only after the loop thread is gone
 }
 
+void BoundedLldpWatch::notifyExit() noexcept {
+    ExitHandler handler;
+    {
+        std::scoped_lock lk(exitMutex_);
+        handler = std::move(onExit_);   // one-shot
+    }
+    if (!handler) return;
+    try {
+        handler();
+    } catch (const std::exception &e) {
+        LOG(ERROR) << "BoundedLldpWatch: exit handler threw: " << e.what();
+    } catch (...) {
+        LOG(ERROR) << "BoundedLldpWatch: exit handler threw unknown exception";
+    }
+}
+
 void BoundedLldpWatch::trampoline(lldpctl_change_t change,
                                   lldpctl_atom_t *interface,
                                   lldpctl_atom_t *neighbor,
                                   void *userData) {
     auto *self = static_cast<BoundedLldpWatch *>(userData);
-    if (!self || !self->callback_) return;
+    if (!self) {
+        return;
+    }
+
+    // Copy under the lock, dispatch outside it. Holding callbackMutex_
+    // across the callback would deadlock a downstream handler that
+    // re-enters the owner and triggers a setCallback().
+    ChangeCallback callback;
+    {
+        std::scoped_lock lk(self->callbackMutex_);
+        callback = self->callback_;
+    }
+    if (!callback) {
+        return;   // detached — owner is mid-reconnect
+    }
+
     try {
         // Non-owning wrappers: the library owns these atoms for the duration
         // of the callback only. Callees must not retain them.
@@ -77,7 +130,7 @@ void BoundedLldpWatch::trampoline(lldpctl_change_t change,
         if (const char *n = ::lldpctl_atom_get_str(interface, lldpctl_k_interface_name)) {
             ifname = n;
         }
-        self->callback_(ifname, change, ifaceAtom, neighborAtom);
+        callback(ifname, change, ifaceAtom, neighborAtom);
     } catch (const std::exception &e) {
         // Must not propagate into the C library.
         LOG(ERROR) << "BoundedLldpWatch: callback exception: " << e.what();

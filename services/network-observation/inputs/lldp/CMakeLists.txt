@@ -5,6 +5,8 @@ add_library(lldp-observer STATIC
         lldpd/LldpdSource.cpp
         lldpd/BoundedLldpConnection.cpp
         lldpd/BoundedLldpWatch.cpp
+        lldpd/LldpNeighborCache.cpp
+        lldpd/LldpWatchSupervisor.cpp
 )
 target_compile_features(lldp-observer PUBLIC cxx_std_20)
 
@@ -29,6 +31,7 @@ endif ()
 target_link_libraries(lldp-observer
         PRIVATE
         rsc_util
+        rsc_util::service_runtime
         liblldpctl.so
 )
 
@@ -52,6 +55,8 @@ if (BUILD_TESTING)
                 GTest::gtest
                 GTest::gtest_main
                 glog
+                rsc_util
+                rsc_util::service_runtime
         )
         add_test(NAME lldp_observer_tests COMMAND lldp_observer_tests)
         set_tests_properties(lldp_observer_tests PROPERTIES LABELS "unit")

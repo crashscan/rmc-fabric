@@ -3,11 +3,15 @@
 //
 #include <algorithm>
 
+#include "LldpNeighborCache.h"
+#include "LldpUtils.h"
 #include "LldpdSource.h"
 #include <gtest/gtest.h>
 #include <atomic>
 #include <chrono>
 #include <mutex>
+#include <optional>
+#include <string>
 #include <thread>
 #include <vector>
 #include <condition_variable>
@@ -72,6 +76,28 @@ namespace {
         }
     };
 
+    /**
+     * @brief Build a NeighborCacheMap entry keyed exactly as the live path keys it.
+     *
+     * Mirrors LldpNeighborCache::apply() — same resolveLldpIdentity(), same
+     * non-MAC skip — so a map a test builds is indistinguishable from one the
+     * watch path produced. This is the keying the deleted
+     * reconcileAfterRefreshForTest() seam used to perform internally.
+    */
+    void putNeighbor(NeighborCacheMap &cache,
+                     const std::string &ifname,
+                     const std::string &chassisId,
+                     const std::string &portId) {
+        CachedLldpNeighbor entry{chassisId, portId, std::nullopt};
+        const std::string key = resolveLldpIdentity(entry.rawChassisId, entry.rawPortId);
+        if (key.empty()) {
+            // Non-MAC identities are never cached by the live path, so a test
+            // snapshot must not contain them either.
+            return;
+        }
+        cache[ifname][key] = std::move(entry);
+    }
+
     TEST(LldpdSourceTest, IdempotentStart) {
         TestSink sink;
         LldpdSource source({}, [&](const LldpObservation &o) { sink.onObservation(o); });
@@ -100,8 +126,10 @@ namespace {
     TEST(LldpdSourceTest, RefreshWhenNotRunning_NoOp) {
         TestSink sink;
         LldpdSource source({}, [&](const LldpObservation &o) { sink.onObservation(o); });
-        // refreshAll when not running should do nothing
-        source.refreshAll();
+        // refreshAll when not running does nothing AND reports that it did
+        // not resync — a caller repairing a known divergence must be able to
+        // tell, because nothing else will retry on its behalf.
+        EXPECT_FALSE(source.refreshAll());
     }
 
     // ---- Callback-admission gate tests (using test seam) ----
@@ -261,7 +289,7 @@ namespace {
     TEST(LldpdSourceTest, RefreshWhenNotRunningStillNoOp) {
         TestSink sink;
         LldpdSource source({}, [&](const LldpObservation &o) { sink.onObservation(o); });
-        source.refreshAll();
+        EXPECT_FALSE(source.refreshAll()) << "a stopped source cannot resync";
         EXPECT_EQ(sink.count(), 0);
         EXPECT_EQ(source.lastEventAt(), std::chrono::steady_clock::time_point::min());
     }
@@ -281,11 +309,11 @@ namespace {
                                                    if (o.keepalive) {
                                                        // First delivered keepalive flushes the interface. Safe
                                                        // re-entrantly: admission is a counted lease and
-                                                       // reassertAll released cacheMutex before delivery.
+                                                       // reassertAll released the cache lock before delivery.
                                                        source->removeInterface("eth0");
                                                    }
                                                });
-        source->openAdmissionForTest();
+        source->admissionGateForTest().open();
 
         source->submitNeighborChangeForTest("eth0", ObservationEvent::Present,
                                             "aa:bb:cc:dd:ee:ff", "p1", "h1");
@@ -314,7 +342,7 @@ namespace {
         EXPECT_EQ(keepalives, 1) << "exactly one keepalive, then the batch is abandoned";
         EXPECT_EQ(removals, 2);
 
-        source->closeAdmissionAndDrainForTest();
+        source->admissionGateForTest().close_and_drain();
     }
 
     // A hung lldpd (accepts, never replies) must fail the probe within the
@@ -377,7 +405,7 @@ namespace {
         TestSink sink;
         LldpdSource source(LldpSourceConfig{},
                            [&](const LldpObservation &o) { sink.onObservation(o); });
-        source.openAdmissionForTest();
+        source.admissionGateForTest().open();
 
         source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
                                            "aa:bb:cc:dd:ee:01", "p1", "h1");
@@ -399,7 +427,7 @@ namespace {
         TestSink sink;
         LldpdSource source(LldpSourceConfig{},
                            [&](const LldpObservation &o) { sink.onObservation(o); });
-        source.openAdmissionForTest();
+        source.admissionGateForTest().open();
         source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
                                            "aa:bb:cc:dd:ee:01", "p1", "h1");
         source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
@@ -413,58 +441,73 @@ namespace {
         << "a prior reassert must not leave the cache looking mutated";
     }
 
-    // The unguarded half of emitBatch's policy. A Removed stays correct even if
-    // the cache moves mid-delivery, so the batch must run to completion —
-    // abandoning it would strand the candidate until candidateAgeout. This is the
-    // exact inverse of ReassertAllDropsBatchWhenCacheMutatedMidDelivery.
-    TEST(LldpdSourceTest, ReconcileDeliversAllRemovalsDespiteMidDeliveryMutation) {
-        TestSink sink;
-        std::unique_ptr<LldpdSource> source;
-        source = std::make_unique<LldpdSource>(
-            LldpSourceConfig{},
-            [&](const LldpObservation &o) {
-                sink.onObservation(o);
-                if (o.event == ObservationEvent::Removed) {
-                    // Mutate the cache from inside delivery. Under the guarded
-                    // policy this would abandon the remainder; under the
-                    // unguarded policy every removal must still be emitted.
-                    source->submitNeighborChangeForTest("eth9", ObservationEvent::Present,
-                                                        "aa:bb:cc:dd:ee:99", "p9", "h9");
-                }
-            });
-        source->openAdmissionForTest();
+    // ---- Post-reconnect reconciliation ----
+    //
+    // These replace the tests that drove reconcileAfterRefreshForTest(). That
+    // seam existed only because the diff was unreachable without a live lldpd;
+    // the diff is now the pure free function diffRemovedNeighbors(), so it is
+    // tested directly.
+    //
+    // NOTE: the old ReconcileDeliversAllRemovalsDespiteMidDeliveryMutation also
+    // asserted the DELIVERY policy — that reconciliation runs unguarded, so a
+    // cache mutation mid-batch does not abandon the remaining removals. That
+    // policy now lives in reconcileAfterRefresh(), which no longer routes
+    // through emitBatch() and is reachable only via a real reconnect. The
+    // assertion is not reproduced here; covering it needs a fake ILldpSource
+    // backend or a live daemon.
 
-        // Fresh cache is empty, so all three old neighbours reconcile as Removed.
-        source->reconcileAfterRefreshForTest({
-            {"eth0", "aa:bb:cc:dd:ee:01", "p1"},
-            {"eth0", "aa:bb:cc:dd:ee:02", "p2"},
-            {"eth1", "aa:bb:cc:dd:ee:03", "p3"},
-        });
+    // Neighbours absent from the post-reconnect cache are reported Removed.
+    TEST(LldpNeighborCacheTest, DiffReportsNeighboursMissingAfterReconnect) {
+        NeighborCacheMap oldCache;
+        putNeighbor(oldCache, "eth0", "aa:bb:cc:dd:ee:01", "p1");
+        putNeighbor(oldCache, "eth0", "aa:bb:cc:dd:ee:02", "p2");
+        putNeighbor(oldCache, "eth1", "aa:bb:cc:dd:ee:03", "p3");
 
-        EXPECT_EQ(sink.removedCount(), 3)
-        << "unguarded batch delivers every removal even as the cache mutates";
+        // Fresh cache is empty — nothing was re-observed after the reconnect.
+        const NeighborCacheMap fresh;
+
+        const auto removed = diffRemovedNeighbors(oldCache, fresh);
+        EXPECT_EQ(removed.size(), 3u)
+            << "every neighbour absent from the fresh cache reconciles as Removed";
     }
 
-    // Neighbours still present after the reconnect must NOT be reported Removed —
-    // the diff, not the guard, decides membership.
-    TEST(LldpdSourceTest, ReconcileSuppressesRemovalForReSeenNeighbours) {
-        TestSink sink;
-        LldpdSource source(LldpSourceConfig{},
-                           [&](const LldpObservation &o) { sink.onObservation(o); });
-        source.openAdmissionForTest();
+    // the diff decides membership.
+    TEST(LldpNeighborCacheTest, DiffSuppressesRemovalForReSeenNeighbours) {
+        NeighborCacheMap oldCache;
+        putNeighbor(oldCache, "eth0", "aa:bb:cc:dd:ee:01", "p1"); // re-seen
+        putNeighbor(oldCache, "eth0", "aa:bb:cc:dd:ee:02", "p2"); // gone
 
         // Simulates what enumerateInitialNeighbors() re-observed post-reconnect.
-        source.submitNeighborChangeForTest("eth0", ObservationEvent::Present,
-                                           "aa:bb:cc:dd:ee:01", "p1", "h1");
-        sink.clear();
+        NeighborCacheMap fresh;
+        putNeighbor(fresh, "eth0", "aa:bb:cc:dd:ee:01", "p1");
 
-        source.reconcileAfterRefreshForTest({
-            {"eth0", "aa:bb:cc:dd:ee:01", "p1"}, // re-seen — no removal
-            {"eth0", "aa:bb:cc:dd:ee:02", "p2"}, // gone — removal
-        });
+        const auto removed = diffRemovedNeighbors(oldCache, fresh);
+        ASSERT_EQ(removed.size(), 1u);
+        EXPECT_EQ(removed.front().first, "eth0");
+        EXPECT_EQ(removed.front().second.rawChassisId, "aa:bb:cc:dd:ee:02");
+    }
+    // Membership is scoped per interface: the same identity on a different
+    // interface is NOT a re-sighting. Without this, a neighbour that moved
+    // ports would never be reported as removed from the old one.
+    TEST(LldpNeighborCacheTest, DiffIsScopedPerInterface) {
+        NeighborCacheMap oldCache;
+        putNeighbor(oldCache, "eth0", "aa:bb:cc:dd:ee:01", "p1");
 
-        EXPECT_EQ(sink.removedCount(), 1);
-        EXPECT_EQ(sink.lastRemovedChassisId(), "aa:bb:cc:dd:ee:02");
+        NeighborCacheMap fresh;
+        putNeighbor(fresh, "eth1", "aa:bb:cc:dd:ee:01", "p1"); // same identity, other iface
+
+        const auto removed = diffRemovedNeighbors(oldCache, fresh);
+        ASSERT_EQ(removed.size(), 1u);
+        EXPECT_EQ(removed.front().first, "eth0")
+            << "a neighbour seen on another interface is not a re-sighting";
+    }
+
+    // An empty old cache produces nothing regardless of what is currently held.
+    TEST(LldpNeighborCacheTest, DiffOnEmptyOldCacheYieldsNoRemovals) {
+        NeighborCacheMap fresh;
+        putNeighbor(fresh, "eth0", "aa:bb:cc:dd:ee:01", "p1");
+
+        EXPECT_TRUE(diffRemovedNeighbors(NeighborCacheMap{}, fresh).empty());
     }
 } // namespace
 } // namespace RSCGroup

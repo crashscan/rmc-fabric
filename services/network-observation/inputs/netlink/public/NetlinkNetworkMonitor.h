@@ -52,6 +52,44 @@ public:
     void stop();
 
     /**
+     * @brief Re-request the full kernel snapshot and replay it through the
+     *        callbacks.
+     *
+     * For consumers repairing model divergence after dropping observations.
+     * Runs a fresh NETLINK_ROUTE dump on its own socket and feeds the
+     * results through the normal callback path.
+     *
+     * @section semantics What a redump does and does not restore
+     * Internal dedup state is cleared first, so every entry the kernel
+     * reports is re-emitted as a change — otherwise the redump would
+     * deduplicate against the stale state and emit nothing.
+     *
+     * A consequence: entries that were REMOVED during the blind window are
+     * not reported as removed. Clearing discards the knowledge that they
+     * ever existed, so they are simply absent from the replay. Consumers
+     * must rely on their own ageout to retire them. Additions and
+     * modifications are fully restored.
+     *
+     * @section threading Threading
+     * Runs synchronously on the calling thread and may take as long as five
+     * netlink round-trips. Callbacks fire on the calling thread,
+     * CONCURRENTLY with the monitor's I/O thread — callbacks must be
+     * thread-safe.
+     *
+     * Must not be called from a callback (it would deadlock against its own
+     * replay) and is rejected if called from the monitor I/O thread.
+     *
+     * Concurrent calls are rejected rather than serialised: overlapping
+     * dumps would interleave two clear-then-replay sequences and leave
+     * state matching neither.
+     *
+     * @return true if a full dump completed; false if the monitor is not
+     *         running, a redump is already in flight, the caller is the I/O
+     *         thread, or the dump failed or was interrupted by stop().
+     */
+    [[nodiscard]] bool requestRedump();
+
+    /**
      * True when the lifecycle epoch is running and the live producer is
      * healthy.
      *

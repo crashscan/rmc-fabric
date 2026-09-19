@@ -30,6 +30,7 @@
 #include <stop_token>
 #include <string>
 #include <system_error>
+#include <thread>
 #include <utility>
 #include <vector>
 
@@ -89,6 +90,9 @@ public:
 
         try {
             stopSignal_.emplace();
+            // Separate eventfd for redumps; see the member declaration for
+            // why it must not share stopSignal_.
+            redumpStopSignal_.emplace();
 
             /*
              * Bind the subscribed live socket before starting the initial
@@ -266,6 +270,12 @@ public:
          */
         workerFailed_.store(false, std::memory_order_release);
 
+        // Wait out an in-flight redump before destroying the signal it is
+        // polling. Bounded: it was just interrupted and only has to unwind.
+        while (redumpInFlight_.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
+
         closeResources();
         netlinkState_.clear();
         transition.complete();
@@ -286,6 +296,61 @@ public:
         return netlinkState_.getLinksSnapshot();
     }
 
+    bool requestRedump() {
+        if (worker_.isCurrentThread()) {
+            LOG(ERROR) << "requestRedump() must not be called from a netlink callback";
+            return false;
+        }
+        if (!lifecycle_.isRunning()) {
+            LOG(WARNING) << "requestRedump() while monitor is not running";
+            return false;
+        }
+
+        // Reject rather than serialise: two overlapping clear-then-replay
+        // sequences leave netlinkState_ matching neither dump.
+        bool expected = false;
+        if (!redumpInFlight_.compare_exchange_strong(expected, true, std::memory_order_acq_rel)) {
+            LOG(WARNING) << "requestRedump() ignored: a redump is already in flight";
+            return false;
+        }
+        struct Clear {
+            std::atomic<bool> &flag;
+            ~Clear() { flag.store(false, std::memory_order_release); }
+        } clear{redumpInFlight_};
+
+        // Uses its own eventfd, not stopSignal_ — see the member declaration. stop() signals both.
+        if (!redumpStopSignal_) {
+            return false;
+        }
+
+        try {
+            // Clear BEFORE the dump: NetlinkState dedups, so replaying
+            // against live state would suppress every message and the
+            // resync would emit nothing at all.
+            netlinkState_.clear();
+
+            NetlinkInitialDump dump(*redumpStopSignal_,
+                                    [this](const nlmsghdr *message) {
+                                        processSingleMessage(message);
+                                    });
+            const auto result = dump.run();
+            if (!result.completed()) {
+                LOG(ERROR) << "netlink redump failed: status="
+                        << NetlinkInitialDump::statusName(result.status)
+                        << ", error=" << result.error;
+                return false;
+            }
+            LOG(INFO) << "netlink redump completed";
+            return true;
+        } catch (const std::exception &error) {
+            LOG(ERROR) << "netlink redump threw: " << error.what();
+            return false;
+        } catch (...) {
+            LOG(ERROR) << "netlink redump threw an unknown exception";
+            return false;
+        }
+    }
+
 private:
     using StartTransition = LifecycleCoordinator::CancellableStart;
 
@@ -304,9 +369,17 @@ private:
     }
 
     void closeResources() {
+        // Wait out an in-flight redump before destroying the signal it is
+        // polling. Bounded: signalStop() already interrupted it, so it only
+        // has to unwind. Placed here rather than in stop() so the startup
+        // rollback paths are covered too.
+        while (redumpInFlight_.load(std::memory_order_acquire)) {
+            std::this_thread::yield();
+        }
         // NetlinkEventLoop borrows stopSignal_.
         liveLoop_.reset();
         stopSignal_.reset();
+        redumpStopSignal_.reset();
     }
 
     void signalStop() noexcept {
@@ -319,7 +392,11 @@ private:
             LOG(FATAL) << "netlink stop eventfd is unavailable during teardown";
             return;
         }
-
+        // Interrupt an in-flight redump too — otherwise stop() waits out
+        // the full five round-trips before the supervision thread returns.
+        if (redumpStopSignal_) {
+            (void) redumpStopSignal_->signal();
+        }
         for (;;) {
             const int error = stopSignal_->signal();
 
@@ -464,6 +541,14 @@ private:
      * liveLoop_ borrows stopSignal_, so liveLoop_ must be destroyed first.
      */
     std::optional<EventFdSignal> stopSignal_;
+    /*
+     * Separate from stopSignal_ on purpose. waitForNetlinkDataOrStop()
+     * DRAINS the signal it observes, so sharing one eventfd between the
+     * live worker and a concurrent redump lets whichever wakes first
+     * consume the other's wake — leaving the live worker blocked in
+     * poll(-1) with no further signal coming, and stop() hung on the join.
+     */
+    std::optional<EventFdSignal> redumpStopSignal_;
     std::optional<NetlinkEventLoop> liveLoop_;
 
     LifecycleCoordinator lifecycle_;
@@ -473,6 +558,8 @@ private:
     /// only and intentionally does not transition itself on worker exit; this
     /// flag records loss of the live producer while the epoch remains running.
     std::atomic<bool> workerFailed_{false};
+    /// Excludes concurrent redumps; see requestRedump().
+    std::atomic<bool> redumpInFlight_{false};
 
     // Pre-bound handlers: constructed once, no per-message binding.
     std::function<void(const LinkEvent &)> onLinkHandler_;
@@ -480,7 +567,6 @@ private:
     std::function<void(const FdbEvent &)> onFdbHandler_;
     std::function<void(const NeighborEvent &)> onNeighHandler_;
     std::function<void(const DeviceEvent &)> onDeviceHandler_;
-
     /*
      * Must remain last. Its work, wake, and exit callbacks capture this and
      * access every relevant member above. Reverse member destruction therefore
@@ -526,5 +612,9 @@ std::vector<DeviceEvent> NetlinkNetworkMonitor::getDevicesSnapshot() const {
 
 std::vector<LinkEvent> NetlinkNetworkMonitor::getLinksSnapshot() const {
     return impl_->getLinksSnapshot();
+}
+
+bool NetlinkNetworkMonitor::requestRedump() {
+    return impl_->requestRedump();
 }
 } // namespace RSCGroup
