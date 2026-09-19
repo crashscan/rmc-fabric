@@ -372,6 +372,11 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
         // reported Removed instead of stranded until candidateAgeout.
         // Dropping the observer would discard that cache unreconciled.
         if (!observer->isWatchAlive()) {
+            // Throttled like the retry path: refreshAll() costs a bounded
+            // connect, and a down daemon would otherwise pay it every tick.
+            if (now - lastLldpAttempt_ < kLldpRetryInterval)
+                return;
+            lastLldpAttempt_ = now;
             LOG(WARNING) << "LLDP watch died — reconnecting in place";
             observer->refreshAll();
             return;   // probe on the next tick; the reconnect just proved contact

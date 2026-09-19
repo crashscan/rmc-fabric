@@ -31,6 +31,7 @@ public:
         std::vector<bool> startResults;     // consumed in order; past end = true
         std::size_t       startCalls{0};
         std::atomic<bool> running{false};
+        std::atomic<bool> watchAlive{false};
         std::atomic<bool> backendAlive{true};
         std::atomic<int>  refreshAllCalls{0};
         std::atomic<int>  reassertCalls{0};
@@ -49,6 +50,7 @@ public:
     }
     void stop() override { s_->running = false; }
     [[nodiscard]] bool isRunning() const override { return s_->running; }
+    [[nodiscard]] bool isWatchAlive() const override { return s_->watchAlive; }
 
     void refreshAll() override {
         ++s_->refreshAllCalls;
