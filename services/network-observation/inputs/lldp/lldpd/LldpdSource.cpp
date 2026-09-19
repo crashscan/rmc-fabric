@@ -218,8 +218,10 @@ public:
      * Admission is never closed, so isRunning() stays true throughout and the
      * runtime does not drop and re-acquire the observer.
      */
-    void refreshAll() {
-        if (!lifecycle_.isRunning()) return;
+    [[ nodiscard ]] bool refreshAll() {
+        if (!lifecycle_.isRunning()) {
+            return false;
+        }
 
         NeighborCacheMap oldCache;
         const bool ok = watchSupervisor_.refresh(
@@ -235,7 +237,7 @@ public:
 
         if (!ok) {
             LOG(ERROR) << "LldpdSource: reconnect failed; existing watch retained";
-            return;
+            return false;
         }
 
         callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(), std::memory_order_release);
@@ -246,6 +248,7 @@ public:
         reconcileAfterRefresh(oldCache);
 
         LOG(INFO) << "LldpdSource reconnected";
+        return true;
     }
 
     /// No-op by contract: lldpd is push-based and already notifies
@@ -589,7 +592,7 @@ bool LldpdSource::start() { return impl_->start(); }
 void LldpdSource::stop() { impl_->stop(); }
 bool LldpdSource::isRunning() const { return impl_->isRunning(); }
 bool LldpdSource::isWatchAlive() const { return impl_->isWatchAlive(); }
-void LldpdSource::refreshAll() { impl_->refreshAll(); }
+bool LldpdSource::refreshAll() { return impl_->refreshAll(); }
 void LldpdSource::refreshInterface(const std::string &ifname) { impl_->refreshInterface(ifname); }
 void LldpdSource::removeInterface(const std::string &ifname) { impl_->removeInterface(ifname); }
 

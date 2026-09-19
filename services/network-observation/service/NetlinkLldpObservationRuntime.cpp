@@ -324,7 +324,7 @@ void NetlinkLldpObservationRuntime::tick(std::chrono::steady_clock::time_point n
  * which backs the queue up and drops more, raising the very bit it is trying
  * to clear. The tick cadence also supplies the retry throttle for free.
  */
-void NetlinkLldpObservationRuntime::performResync(std::chrono::steady_clock::time_point /*now*/) {
+void NetlinkLldpObservationRuntime::performResync(std::chrono::steady_clock::time_point now) {
     const auto mask = observationQueue_.takeResyncMask();
     if (mask == 0) return;
 
@@ -342,14 +342,20 @@ void NetlinkLldpObservationRuntime::performResync(std::chrono::steady_clock::tim
     }
 
     if (mask & sourceBit(ObservationSource::Lldp)) {
-        // refreshAll() reconnects, re-enumerates, and — unlike the netlink
-        // redump — reconciles removals via reconcileAfterRefresh(). On
-        // failure the source stops and superviseLldp() re-acquires it next
-        // tick, so this path is self-healing and needs no re-raise.
-        if (auto observer = lldpObserver_.load()) {
-            observer->refreshAll();
-        } else {
+        // Mirrors the netlink branch: the bit is consumed by takeResyncMask(),
+        // so anything that does not actually repair must put it back. A failed
+        // refreshAll() no longer stops the source, so superviseLldp() will not
+        // re-acquire and nothing else owns the retry.
+        auto observer = lldpObserver_.load();
+        if (!observer) {
+            // No re-raise: the retry path creates a fresh observer whose
+            // start() enumerates from scratch. That IS the repair.
             LOG(WARNING) << "LLDP resync skipped: no observer; retry path owns recovery";
+        } else if (!reconnectLldp(*observer, now, "observation queue drop")) {
+            observationQueue_.raiseResync(ObservationSource::Lldp);
+            LOG(WARNING) << "LLDP resync deferred; retrying next tick";
+        } else {
+            LOG(INFO) << "LLDP resync completed";
         }
     }
 }
@@ -372,21 +378,19 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
         // reported Removed instead of stranded until candidateAgeout.
         // Dropping the observer would discard that cache unreconciled.
         if (!observer->isWatchAlive()) {
-            // Throttled like the retry path: refreshAll() costs a bounded
-            // connect, and a down daemon would otherwise pay it every tick.
-            if (now - lastLldpAttempt_ < kLldpRetryInterval)
-                return;
-            lastLldpAttempt_ = now;
-            LOG(WARNING) << "LLDP watch died — reconnecting in place";
-            observer->refreshAll();
-            return;   // probe on the next tick; the reconnect just proved contact
+            // Repairable in place: refreshAll() rebuilds the connection
+            // without closing admission and reconciles the pre-reconnect
+            // cache, so neighbours that really went away are reported
+            // Removed rather than stranded until candidateAgeout. Dropping
+            // the observer would discard that cache unreconciled.
+            (void) reconnectLldp(*observer, now, "watch died");
+            return;   // probe next tick; a fresh reconnect just proved contact
         }
 
         if (now - lastLldpProbe_ >= kLldpProbeInterval) {
             lastLldpProbe_ = now;
             if (!observer->isBackendAlive()) {
-                LOG(WARNING) << "LLDP backend unreachable — reconnecting";
-                observer->refreshAll();
+                (void) reconnectLldp(*observer, now, "backend unreachable");
             }
         }
         return;
@@ -410,6 +414,37 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
     lldpObserver_.store(std::move(candidate));
     LOG(INFO) << "LLDP observer acquired after " << lldpRetryCount_ << " failed attempt(s)";
     lldpRetryCount_ = 0;
+}
+
+/**
+ * @brief The single entry point for LLDP reconnects.
+ *
+ * Every trigger — dead watch, failed probe, queue-drop resync — routes here
+ * so they share one throttle and one failure policy. performResync()
+ * previously called refreshAll() directly and bypassed the supervision
+ * throttle entirely, so a down daemon paid a bounded connect every tick.
+ *
+ * @return false if throttled OR the reconnect failed. Callers repairing a
+ *         known divergence must treat false as unrepaired: a failed
+ *         refreshAll() retains the existing watch and leaves the epoch
+ *         running, so superviseLldp() will not re-acquire on their behalf.
+ */
+bool NetlinkLldpObservationRuntime::reconnectLldp(
+    LldpObserver &observer,
+    std::chrono::steady_clock::time_point now,
+    const char *reason) {
+    if (now - lastLldpReconnect_ < kLldpRetryInterval) {
+        VLOG(1) << "LLDP reconnect throttled (" << reason << ")";
+        return false;
+    }
+    lastLldpReconnect_ = now;
+
+    LOG(WARNING) << "LLDP reconnecting: " << reason;
+    if (!observer.refreshAll()) {
+        LOG(WARNING) << "LLDP reconnect failed (" << reason << ")";
+        return false;
+    }
+    return true;
 }
 
 void NetlinkLldpObservationRuntime::reassertLldpNeighbors(std::chrono::steady_clock::time_point now) {

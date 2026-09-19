@@ -42,15 +42,21 @@ public:
     /**
      * @brief Trigger a full resync from the source.
      *
-     * For push-based backends (e.g. lldpd), this performs an advisory
-     * reconnect — the existing watch is torn down, the local neighbor
-     * cache is cleared, and a new watch is created. The daemon will
-     * re-emit current neighbors as added events on reconnect.
-     *
+     * reconnect: a replacement watch is built, the old one retired, and
+     * the pre-reconnect cache diffed against what re-enumeration observes
+     * so neighbours that genuinely went away are reported Removed. The
+     * cache is exchanged and reconciled, NOT cleared.     *
      * For snapshot or packet-based backends, this triggers an active
      * resync of all interfaces.
+     *
+     * @return false if the resync did not happen. For lldpd this means the
+     *         replacement watch could not be built, or the source was
+     *         stopped concurrently — in both cases the existing watch is
+     *         retained and the source keeps running. Callers repairing a
+     *         known divergence MUST treat false as "still diverged": no
+     *         other path will retry on their behalf.
      */
-    virtual void refreshAll() = 0;
+    [[nodiscard]] virtual bool refreshAll() = 0;
 
     /**
      * @brief Trigger a targeted refresh for one local interface.

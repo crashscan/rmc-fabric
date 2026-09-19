@@ -64,7 +64,7 @@ public:
     [[nodiscard]] bool isRunning() const override;
     [[nodiscard]] bool isWatchAlive() const override;
 
-    void refreshAll() override;
+    [[nodiscard]] bool refreshAll() override;
 
     void refreshInterface(const std::string &ifname) override;
 

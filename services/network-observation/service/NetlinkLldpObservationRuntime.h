@@ -133,6 +133,8 @@ private:
 
     void superviseLldp(std::chrono::steady_clock::time_point now);
 
+    [[nodiscard]] bool reconnectLldp(LldpObserver &observer,std::chrono::steady_clock::time_point now,const char *reason);
+
     void reassertLldpNeighbors(std::chrono::steady_clock::time_point now);
 
     /**
@@ -165,7 +167,13 @@ private:
 
     // LLDP supervision state — touched only on the tick() thread.
     std::chrono::steady_clock::time_point lastReassert_{};
+    /// Throttles observer RE-ACQUIRE (create + start a new observer).
     std::chrono::steady_clock::time_point lastLldpAttempt_{};
+    /// Throttles in-place RECONNECT. Separate from lastLldpAttempt_: repair
+    /// and replacement are different failures with different costs, and
+    /// sharing one counter let a refresh starve a re-acquire for a full
+    /// retry interval.
+    std::chrono::steady_clock::time_point lastLldpReconnect_{};
     std::chrono::steady_clock::time_point lastLldpProbe_{};
     unsigned lldpRetryCount_ = 0;
 

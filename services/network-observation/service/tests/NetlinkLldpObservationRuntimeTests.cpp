@@ -52,9 +52,13 @@ public:
     [[nodiscard]] bool isRunning() const override { return s_->running; }
     [[nodiscard]] bool isWatchAlive() const override { return s_->watchAlive; }
 
-    void refreshAll() override {
+    bool refreshAll() override {
         ++s_->refreshAllCalls;
-        if (s_->stopOnRefresh) s_->running = false;
+        if (s_->stopOnRefresh) {
+            s_->running = false;
+            return false;
+        }
+        return true;
     }
     void refreshInterface(const std::string& i) override { s_->interfacesUp.push_back(i); }
     void removeInterface(const std::string& i)  override { s_->interfacesDown.push_back(i); }

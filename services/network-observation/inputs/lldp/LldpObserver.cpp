@@ -15,7 +15,7 @@ public:
     bool isRunning() const { return source_->isRunning(); }
     bool isWatchAlive() const { return source_->isWatchAlive(); }
 
-    void refreshAll() { source_->refreshAll(); }
+    [[nodiscard]] bool refreshAll() { return source_->refreshAll(); }
     void refreshInterface(const std::string &ifname) { source_->refreshInterface(ifname); }
 
     void onInterfaceUp(const std::string &ifname) {
@@ -57,7 +57,7 @@ void LldpObserver::stop() { impl_->stop(); }
 bool LldpObserver::isRunning() const { return impl_->isRunning(); }
 bool LldpObserver::isWatchAlive() const { return impl_->isWatchAlive(); }
 
-void LldpObserver::refreshAll() { impl_->refreshAll(); }
+bool LldpObserver::refreshAll() { return impl_->refreshAll(); }
 void LldpObserver::refreshInterface(const std::string &ifname) { impl_->refreshInterface(ifname); }
 
 void LldpObserver::onInterfaceUp(const std::string &ifname) { impl_->onInterfaceUp(ifname); }
