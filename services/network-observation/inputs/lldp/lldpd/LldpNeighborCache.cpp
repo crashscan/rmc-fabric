@@ -34,7 +34,7 @@ bool LldpNeighborCache::apply(const LldpObservation &obs) {
             obs.remoteChassisId, obs.remotePortId, obs.remoteSystemName
         };
     }
-    ++generation_;
+    generation_.fetch_add(1,std::memory_order_relaxed);
     return true;
 }
 
@@ -54,7 +54,7 @@ LldpNeighborCache::flushInterface(const std::string &ifname) {
         removed.push_back(std::move(entry));
     }
     byInterface_.erase(it);
-    ++generation_;
+    generation_.fetch_add(1,std::memory_order_relaxed);
     return removed;
 }
 
@@ -62,7 +62,7 @@ NeighborCacheMap LldpNeighborCache::exchange(NeighborCacheMap replacement) {
     std::scoped_lock lk(mutex_);
     NeighborCacheMap previous = std::move(byInterface_);
     byInterface_ = std::move(replacement);
-    ++generation_;
+    generation_.fetch_add(1,std::memory_order_relaxed);
     return previous;
 }
 
@@ -72,7 +72,7 @@ void LldpNeighborCache::clear() {
         return;
     }
     byInterface_.clear();
-    ++generation_;
+    generation_.fetch_add(1,std::memory_order_relaxed);
 }
 
 std::pair<NeighborCacheMap, std::uint64_t> LldpNeighborCache::snapshot() const {
@@ -80,12 +80,11 @@ std::pair<NeighborCacheMap, std::uint64_t> LldpNeighborCache::snapshot() const {
     // Map and generation must be read together — a caller comparing a
     // separately-fetched generation could not tell whether it preceded or
     // followed the copy.
-    return {byInterface_, generation_};
+    return {byInterface_, generation_.load()};
 }
 
 std::uint64_t LldpNeighborCache::generation() const {
-    std::scoped_lock lk(mutex_);
-    return generation_;
+    return generation_.load();
 }
 
 std::vector<std::pair<std::string, CachedLldpNeighbor> >

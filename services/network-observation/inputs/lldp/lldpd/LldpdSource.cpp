@@ -12,10 +12,8 @@
 #include <condition_variable>
 #include <mutex>
 #include <string>
-#include <unordered_map>
 #include <vector>
 #include <optional>
-#include <cstdint>
 
 #include "BoundedLldpConnection.h"
 #include "BoundedLldpWatch.h"
@@ -65,14 +63,6 @@ namespace {
         }
     };
 
-    /**
-     * @brief Cache-update + downstream delivery shared by the watch path
-     *        (dispatchChange) and the test seam.
-     *
-     * The cache lock is released before
-     * the downstream callback. Does not stamp liveness — callers stamp
-     * themselves when backend-originated.
-     */
     void cacheAndForward(CallbackState &state, const LldpObservation &obs) {
         // Non-cacheable identities are still delivered — see the v1
         // limitation in LldpNeighborCache::apply().
@@ -225,7 +215,7 @@ public:
         const bool ok = makeWatch();
         if (ok) {
             enumerateInitialNeighbors();
-            reconcileAfterRefresh(std::move(oldCache));
+            reconcileAfterRefresh(oldCache);
         } else {
             callbackState_->gate.close_and_drain();
         }
@@ -305,8 +295,7 @@ public:
     /**
      * @brief Re-emit every cached neighbor as a keepalive Present.
      *
-     * The batch is built under cacheMutex, then delivered after the lock is
-     * released. Does NOT stamp lastWatchEventAt — keepalives must not count
+     * Does NOT stamp lastWatchEventAt — keepalives must not count
      * as backend liveness for the watchdog.
      */
     void reassertAll() {
@@ -359,10 +348,6 @@ public:
         if (!lease) {
             return;
         }
-        // Deliberately unguarded: a Removed stays correct even if the cache
-        // moves mid-delivery, and abandoning the batch would strand the
-        // candidate until candidateAgeout. That is why this does not use
-        // emitBatch(), which is now keepalive-only.
         const auto [fresh, _] = callbackState_->cache.snapshot();
         for (const auto &[ifname, entry]: diffRemovedNeighbors(oldCache, fresh)) {
             deliver(makeLldpObservation(ifname, ObservationEvent::Removed, entry));
@@ -394,7 +379,6 @@ public:
         return callbackState_->lastWatchEventAt.load(std::memory_order_acquire);
     }
 
-    // In Impl, near lastEventAt():
     [[nodiscard]] thread_safe::admission_gate &gate() {
         return callbackState_->gate;
     }
@@ -537,8 +521,6 @@ private:
 
     /**
      * @brief Process a single parsed change event against the given state.
-     *
-     * Cache locks are released before the downstream callback.
      */
     static void dispatchChange(CallbackState &state,
                                std::string_view ifname,
@@ -623,7 +605,6 @@ void LldpdSource::reassertAll() { impl_->reassertAll(); }
 bool LldpdSource::isBackendAlive() const { return impl_->isBackendAlive(); }
 std::chrono::steady_clock::time_point LldpdSource::lastEventAt() const { return impl_->lastEventAt(); }
 
-// With the other forwarders:
 thread_safe::admission_gate &LldpdSource::admissionGateForTest() {
     return impl_->gate();
 }
