@@ -5,17 +5,18 @@
  * @file LldpdSource.h
  * @brief LLDP source backed by the lldpd daemon via liblldpctl.
  *
- * Wraps lldpcli::LldpWatch for push-based change notifications.
+ * Wraps LldpWatchSupervisor for push-based change notifications.
  * Implements ILldpSource — refresh methods are advisory (reconnect).
  *
  * @section callback-safety Callback-drain safety
  * The external LldpWatch callback captures only a weak_ptr to the internal
- * CallbackState.  stop() closes the admission gate, destroys the watch
- * handle, and waits for all active callback leases to drain before clearing
+ * CallbackState.  stop() closes the admission gate,
+ * and waits for all active callback leases to drain before clearing
  * cache state or returning.
  *
  * Postcondition of stop(): no LLDP callback is executing; no new callback
- * can be admitted; cache is cleared; the watch handle is released.
+ * can be admitted; cache is cleared; the watch handle is released. unless teardown timed out,
+ * which is logged and latches the source unusable.
  *
  * @section reentrancy Reentrancy
  * Downstream observation callbacks must not synchronously call stop(),

@@ -79,7 +79,7 @@ class LldpdSource::Impl {
 public:
     Impl(LldpSourceConfig config, LldpObservationCallback cb)
         : callbackState_(
-        std::make_shared<CallbackState>(std::move(config), std::move(cb)))
+              std::make_shared<CallbackState>(std::move(config), std::move(cb)))
           // Resolved once here rather than per-start: the default transport
           // is a compile-time constant in liblldpctl and the configured path
           // is immutable after construction.
@@ -135,17 +135,19 @@ public:
         // legitimately fail or abort while the watch stays live — leaving the
         // watchdog looking at a pre-reconnect timestamp and re-refreshing a
         // source that just connected.
-        callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(),std::memory_order_release);
+        callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(), std::memory_order_release);
 
         // Runs on this thread and dispatches downstream, so a concurrent
         // stop() can request cancellation partway through.
         enumerateInitialNeighbors(transition.stopToken());
 
         if (!transition.tryComplete()) {
-            // Rollback: unbounded is correct here. Nothing else holds the
-            // supervisor lock — this thread owns the startup transition and
-            // no refresh can run against a non-running epoch.
-            (void) watchSupervisor_.stop(kStopDrainTimeout);
+            // Bounded like stop(): a concurrent refresh cannot run against a
+            // non-running epoch, so this should never time out — but if it
+            // does, the watch is leaked and the source must not be reused.
+            if (!watchSupervisor_.stop(kStopDrainTimeout)) {
+                teardownIncomplete_.store(true, std::memory_order_release);
+            }
             callbackState_->gate.close_and_drain();
             callbackState_->cache.clear();
             transition.fail();
@@ -422,7 +424,7 @@ private:
     /// The weak_ptr capture is what keeps a delayed callback from touching
     /// freed state; the admission lease is what keeps stop() from returning
     /// while one is running.
-    [[nodiscard]] BoundedLldpWatch::ChangeCallback makeChangeCallback() {
+    [[nodiscard]] BoundedLldpWatch::ChangeCallback makeChangeCallback() const {
         std::weak_ptr<CallbackState> weakState = callbackState_;
         return [weakState](std::string_view ifname,
                            lldpctl_change_t change,
