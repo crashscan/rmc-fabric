@@ -54,6 +54,19 @@ public:
                                               const lldpcli::LldpAtom &interface,
                                               const lldpcli::LldpAtom &neighbor)>;
 
+    /**
+     * @brief Invoked once when the watch loop terminates on its own.
+     *
+     * Runs ON the loop thread as its final act, so it must not block and must
+     * not destroy this watch — that would join the thread from itself.
+     * Post a request; do not act inline.
+     *
+     * NOT invoked during destruction: a caller destroying the watch already
+     * knows it is gone. This fires only for the unsolicited case — lldpd
+     * died, the socket closed, lldpctl_watch() returned an error.
+     */
+    using ExitHandler = std::function<void()>;
+
     /// Subscribes immediately; discards events until setCallback().
     BoundedLldpWatch(std::string_view ctlname,
                      std::chrono::milliseconds connectTimeout,
@@ -82,6 +95,11 @@ public:
      */
     void setCallback(ChangeCallback callback);
 
+    /// Must be set before the loop can exit meaningfully; safe concurrently.
+    void setExitHandler(ExitHandler onExit);
+
+    /// True once the loop thread has left its dispatch loop.
+    [[nodiscard]] bool hasExited() const noexcept { return exited_.load(); }
 private:
     /// Matches lldpctl_change_callback2 — note there is NO leading
     /// lldpctl_conn_t* (that is the older lldpctl_change_callback).
@@ -89,6 +107,12 @@ private:
                            lldpctl_atom_t *interface,
                            lldpctl_atom_t *neighbor,
                            void *userData);
+
+    void notifyExit() noexcept;
+
+    mutable std::mutex exitMutex_;
+    ExitHandler onExit_;
+    std::atomic<bool> exited_{false};
 
     /// Guards callback_ against concurrent setCallback() and dispatch.
     /// A mutex, not an atomic<shared_ptr>: dispatch is low-frequency and

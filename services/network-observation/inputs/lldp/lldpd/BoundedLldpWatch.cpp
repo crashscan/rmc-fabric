@@ -21,6 +21,11 @@ void BoundedLldpWatch::setCallback(ChangeCallback callback) {
     callback_ = std::move(callback);
 }
 
+void BoundedLldpWatch::setExitHandler(ExitHandler onExit) {
+    std::scoped_lock lk(exitMutex_);
+    onExit_ = std::move(onExit);
+}
+
 BoundedLldpWatch::BoundedLldpWatch(std::string_view ctlname,
                                    std::chrono::milliseconds connectTimeout,
                                    std::chrono::milliseconds ioTimeout,
@@ -54,8 +59,14 @@ BoundedLldpWatch::BoundedLldpWatch(std::string_view ctlname,
                         LOG(WARNING) << "BoundedLldpWatch: watch ended: "
                                 << ::lldpctl_strerror(lldpctl_last_error(conn_->connection()));
                     }
-                    return;
+                    break;
                 }
+            }
+            exited_.store(true, std::memory_order_release);
+            // Only for an unsolicited exit. A requested stop means the owner
+            // is already tearing this watch down and is about to join us.
+            if (!stop.stop_requested()) {
+                notifyExit();
             }
         }
     };
@@ -71,6 +82,22 @@ BoundedLldpWatch::~BoundedLldpWatch() {
     }
     if (thread_.joinable()) thread_.join();
     conn_.reset(); // only after the loop thread is gone
+}
+
+void BoundedLldpWatch::notifyExit() noexcept {
+    ExitHandler handler;
+    {
+        std::scoped_lock lk(exitMutex_);
+        handler = std::move(onExit_);   // one-shot
+    }
+    if (!handler) return;
+    try {
+        handler();
+    } catch (const std::exception &e) {
+        LOG(ERROR) << "BoundedLldpWatch: exit handler threw: " << e.what();
+    } catch (...) {
+        LOG(ERROR) << "BoundedLldpWatch: exit handler threw unknown exception";
+    }
 }
 
 void BoundedLldpWatch::trampoline(lldpctl_change_t change,

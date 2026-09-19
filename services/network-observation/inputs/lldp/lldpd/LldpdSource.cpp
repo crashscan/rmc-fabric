@@ -19,7 +19,7 @@
 #include <service_runtime/LifecycleCoordinator.h>
 
 #include "BoundedLldpConnection.h"
-#include "BoundedLldpWatch.h"
+#include "LldpWatchSupervisor.h"
 #include "LldpObservationFactory.h"
 #include "LldpNeighborCache.h"
 
@@ -165,10 +165,8 @@ public:
         auto transition = lifecycle_.beginStop(waitPolicy);
         if (!transition) return; // stopped; another stop owns it; or startup rollback does
         callbackState_->gate.close();
-        {
-            std::scoped_lock lk(watchMutex_);
-            // Joins the loop thread: no watch callback is running on return.
-            watch_.reset();
+        if (!watchSupervisor_.stop(kStopDrainTimeout)) {
+            LOG(ERROR) << "LldpdSource: watch teardown incomplete";
         }
         // The gate's remaining job is the SUPERVISION-thread callers —
         // removeInterface() and reassertAll() — which the watch destructor
@@ -217,21 +215,17 @@ public:
      * callback instead.
      */
     void refreshAll() {
+        if (!lifecycle_.isRunning()) {
+            return;
+        }
+
         NeighborCacheMap oldCache;
-        {
-            std::scoped_lock lk(watchMutex_);
-            if (!lifecycle_.isRunning()) {
-                return;
-            }
-            auto newWatch = makeWatch(/*attachCallback=*/false);
-            if (!newWatch) {
-                LOG(ERROR) << "LldpdSource: reconnect failed; keeping existing watch";
-                return;
-            }
-            oldCache = callbackState_->cache.exchange({});
-            watch_.reset();
-            newWatch->setCallback(makeChangeCallback());
-            watch_ = std::move(newWatch);
+        const bool ok = watchSupervisor_.refresh(
+            [this] { return makeChangeCallback(); },
+            [&] { oldCache = callbackState_->cache.exchange({}); });
+        if (!ok) {
+            LOG(ERROR) << "LldpdSource: reconnect failed; existing watch retained";
+            return;
         }
 
         // Same reasoning as start(): the reconnect is proven at this point.
@@ -580,7 +574,7 @@ private:
     std::unique_ptr<BoundedLldpWatch> watch_;
 
     LifecycleCoordinator lifecycle_;
-    std::mutex watchMutex_;
+    LldpWatchSupervisor watchSupervisor_;
 };
 
 // ---------------------------------------------------------------------------
