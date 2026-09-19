@@ -94,11 +94,15 @@ public:
     bool start() {
         std::unique_lock lk(lifecycleMutex_);
         if (state_ == State::Running || state_ == State::Starting) return true;
-        // pendingDrain_ means abandoned leases are still in flight from a
-        // timed-out refreshAll(); reopening admission now would let them
-        // coexist with fresh watch callbacks and break the drain
-        // accounting. Caller must stop() (or drop the source) first.
-        if (state_ != State::Stopped || pendingDrain_) return false;
+        if (state_ != State::Stopped) return false;
+        // Leases outstanding means a previous refreshAll() abandoned its
+        // drain. Reopening admission now would let those callbacks coexist
+        // with fresh watch callbacks against a cache stop() never cleared.
+        // Caller must stop() (or drop the source) first.
+        if (callbackState_->gate.active() != 0) {
+            LOG(WARNING) << "LldpdSource: start() refused; leases outstanding";
+            return false;
+        }
         state_ = State::Starting;
         lk.unlock();
 
@@ -123,13 +127,20 @@ public:
     void stop() {
         // 1. Claim stopping under lifecycleMutex_
         std::unique_lock lk(lifecycleMutex_);
-        // pendingDrain_ means a refreshAll() timed out with leases still
-        // outstanding: state_ is Stopped but the drain postcondition has
-        // not been met, so stop() must still run it.
-        if (state_ == State::Stopped && !pendingDrain_) return;
         if (state_ == State::Stopping) {
-            // Another thread is already stopping — wait for it
             lifecycleCv_.wait(lk, [this] { return state_ == State::Stopped; });
+            return;
+        }
+        if (state_ == State::Stopped) {
+            // Already stopped, but a previous refreshAll() may have
+            // abandoned its drain and left the cache populated. Completing
+            // the drain and the clear here is what pendingDrain_ used to
+            // force; doing it unconditionally removes the flag without
+            // weakening the postcondition. Both operations are cheap no-ops
+            // on a cleanly stopped source.
+            lk.unlock();
+            callbackState_->gate.close_and_drain();
+            callbackState_->cache.clear();
             return;
         }
         state_ = State::Stopping;
@@ -155,7 +166,6 @@ public:
         // 8. Commit stopped and notify lifecycle waiters
         lk.lock();
         state_ = State::Stopped;
-        pendingDrain_ = false;
         lk.unlock();
         lifecycleCv_.notify_all();
 
@@ -199,7 +209,6 @@ public:
             LOG(ERROR) << "LldpdSource: reconnect drain timed out; abandoning refresh";
             lk.lock();
             state_ = State::Stopped;
-            pendingDrain_ = true;
             lk.unlock();
             lifecycleCv_.notify_all();
             return;
@@ -571,9 +580,6 @@ private:
     mutable std::mutex lifecycleMutex_;
     std::condition_variable lifecycleCv_;
     State state_ = State::Stopped;
-    /// Set when refreshAll() gave up on the lease drain; forces stop() to
-    /// complete the drain even though state_ is already Stopped.
-    bool pendingDrain_ = false;
 };
 
 // ---------------------------------------------------------------------------

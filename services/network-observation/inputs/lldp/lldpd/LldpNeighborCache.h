@@ -81,8 +81,7 @@ public:
 private:
     mutable std::mutex mutex_;
     NeighborCacheMap byInterface_;
-    /// Atomic so emitBatch's per-observation guard check stays lock-free;
-    /// all writes still happen under mutex_.
+    /// Reads are lock-free and all writes still happen under mutex_.
     std::atomic<std::uint64_t> generation_{0};
 };
 
