@@ -20,6 +20,7 @@
 #include "BoundedLldpConnection.h"
 #include "BoundedLldpWatch.h"
 #include "LldpObservationFactory.h"
+#include "LldpNeighborCache.h"
 
 namespace RSCGroup {
 namespace {
@@ -34,8 +35,6 @@ namespace {
     // removeInterface(). stop() has no such bound because the monitor is
     // already stopped by then.
     constexpr auto kRefreshDrainTimeout = std::chrono::seconds{3};
-
-    using NeighborCache = std::unordered_map<std::string, std::unordered_map<std::string, CachedLldpNeighbor> >;
 
     /**
      * @brief Shared callback state owned by shared_ptr.
@@ -52,14 +51,8 @@ namespace {
         /// Guards the callback region. Starts closed.
         thread_safe::admission_gate gate;
 
-        // Neighbor cache
-        mutable std::mutex cacheMutex;
-        NeighborCache byInterface;
-        // Bumped on EVERY cache mutation (cacheAndForward, removeInterface,
-        // stop() clear, refreshAll() swap) while cacheMutex is held. Read
-        // lock-free by reassertAll() to detect a stale snapshot mid-delivery.
-        std::atomic<std::uint64_t> cacheGeneration{0};
-
+        /// Owns its own lock and generation counter; see LldpNeighborCache.
+        LldpNeighborCache cache;
         // Backend liveness: stamped ONLY by backend-originated paths (watch
         // callbacks, initial enumeration). reassertAll() and removeInterface()
         // deliberately bypass stamping — keepalives must not feed the watchdog.
@@ -81,21 +74,9 @@ namespace {
      * themselves when backend-originated.
      */
     void cacheAndForward(CallbackState &state, const LldpObservation &obs) {
-        const std::string key = resolveLldpIdentity(obs.remoteChassisId, obs.remotePortId);
-        if (key.empty()) {
-            VLOG(1) << "LLDP neighbor on " << obs.localIfname << " — non-MAC identity, not cached";
-        } else {
-            std::unique_lock cacheLk(state.cacheMutex);
-            auto &ifaceCache = state.byInterface[obs.localIfname];
-            if (obs.event == ObservationEvent::Removed) {
-                VLOG(1) << "LLDP cache erase: ifname=" << obs.localIfname << " key=" << key;
-                ifaceCache.erase(key);
-            } else {
-                VLOG(1) << "LLDP cache insert: ifname=" << obs.localIfname << " key=" << key;
-                ifaceCache[key] = CachedLldpNeighbor{obs.remoteChassisId, obs.remotePortId, obs.remoteSystemName};
-            }
-            state.cacheGeneration.fetch_add(1, std::memory_order_release);
-        }
+        // Non-cacheable identities are still delivered — see the v1
+        // limitation in LldpNeighborCache::apply().
+        (void) state.cache.apply(obs);
         if (state.downstream)
             state.downstream(obs);
     }
@@ -177,14 +158,9 @@ public:
 
         // 6. Wait for active callback leases to drain
         callbackState_->gate.drain();
-        callbackState_->cacheGeneration.fetch_add(1, std::memory_order_release);
 
         // 7. Clear cache only after drain completes
-        {
-            std::unique_lock cacheLk(callbackState_->cacheMutex);
-            callbackState_->byInterface.clear();
-            callbackState_->cacheGeneration.fetch_add(1, std::memory_order_release);
-        }
+        callbackState_->cache.clear();
 
         // 8. Commit stopped and notify lifecycle waiters
         lk.lock();
@@ -240,12 +216,7 @@ public:
         }
 
         // 6. Snapshot old cache for post-reconnect reconciliation
-        NeighborCache oldCache;
-        {
-            std::unique_lock cacheLk(callbackState_->cacheMutex);
-            oldCache = std::move(callbackState_->byInterface);
-            callbackState_->byInterface.clear();
-        }
+        NeighborCacheMap oldCache = callbackState_->cache.exchange({});
 
         // 7. Reopen admission
         callbackState_->gate.open();
@@ -291,48 +262,34 @@ public:
             return; // stop/refresh in progress; discard batch
         }
 
-        std::vector<CachedLldpNeighbor> toRemove;
-        {
-            std::unique_lock cacheLk(callbackState_->cacheMutex);
-            auto it = callbackState_->byInterface.find(ifname);
-            if (it == callbackState_->byInterface.end()) {
-                return;
-            }
-            for (const auto &[_, entry]: it->second)
-                toRemove.push_back(entry);
-            callbackState_->byInterface.erase(it);
-            callbackState_->cacheGeneration.fetch_add(1, std::memory_order_release);
-        }
-
-        for (const auto &entry: toRemove) {
+        // Flush returns the entries so delivery stays outside the cache
+        // lock while the lease is still held.
+        for (const auto &entry: callbackState_->cache.flushInterface(ifname)) {
             deliver(makeLldpObservation(ifname, ObservationEvent::Removed, entry));
         }
     }
 
     /**
-     * @brief Build a batch under cacheMutex, then deliver it unlocked.
+     * @brief Build a keepalive batch from a cache snapshot and deliver it.
      *
-     * @param select        Invoked with the locked cache; appends to `out`.
-     * @param generationGuard When true, abandon the remainder of the batch if
-     *        the cache moves mid-delivery. Required for keepalives, which
-     *        would otherwise resurrect a candidate removed between snapshot
-     *        and emit. NOT wanted for removals: a Removed is still correct
-     *        even if the cache has since changed, and dropping one would
-     *        strand the candidate until ageout.
+     * Always generation-guarded: reassertAll() is now the only caller, and a
+     * keepalive emitted after the cache moved would resurrect a candidate
+     * removed between snapshot and emit. The former unguarded caller,
+     * reconcileAfterRefresh(), no longer routes through here — a Removed
+     * stays correct regardless of cache movement.
+     *
+     * `select` runs over a COPY, outside the cache lock. Costs one map copy
+     * per keepalive cycle; buys a cache that never runs caller-supplied
+     * code under its own mutex.
      */
     template<typename Select>
-    void emitBatch(Select &&select, bool generationGuard) {
+    void emitBatch(Select &&select) {
+        auto [cache, generation] = callbackState_->cache.snapshot();
         std::vector<LldpObservation> batch;
-        std::uint64_t generation = 0;
-        {
-            std::unique_lock cacheLk(callbackState_->cacheMutex);
-            generation = callbackState_->cacheGeneration.load(std::memory_order_acquire);
-            select(callbackState_->byInterface, batch);
-        }
+        select(cache, batch);
 
         for (std::size_t i = 0; i < batch.size(); ++i) {
-            if (generationGuard &&
-                callbackState_->cacheGeneration.load(std::memory_order_acquire) != generation) {
+            if (callbackState_->cache.generation() != generation) {
                 VLOG(1) << "emitBatch: cache mutated during delivery; dropping "
                         << (batch.size() - i) << " remaining observation(s)";
                 return;
@@ -358,12 +315,11 @@ public:
             return; // stop/refresh in progress; keepalive dropped
         }
 
-        emitBatch([](const NeighborCache &cache, std::vector<LldpObservation> &out) {
+        emitBatch([](const NeighborCacheMap &cache, std::vector<LldpObservation> &out) {
             for (const auto &[ifname, neighbors]: cache)
                 for (const auto &[_, entry]: neighbors)
-                    out.push_back(makeLldpObservation(
-                        ifname, ObservationEvent::Present, entry, /*keepalive=*/true));
-        }, /*generationGuard=*/true);
+                    out.push_back(makeLldpObservation(ifname, ObservationEvent::Present, entry, true));
+        });
     }
 
     void submitNeighborChangeForTest(std::string_view ifname,
@@ -397,25 +353,19 @@ public:
      * strand the candidate until candidateAgeout. Keepalives are the opposite
      * case — see reassertAll().
      */
-    void reconcileAfterRefresh(NeighborCache oldCache) {
+    void reconcileAfterRefresh(const NeighborCacheMap &oldCache) {
         const auto lease = callbackState_->gate.try_acquire();
         if (!lease) {
             return;
         }
-
-        emitBatch([&oldCache](const NeighborCache &fresh,
-                              std::vector<LldpObservation> &out) {
-            for (const auto &[ifname, neighbors]: oldCache) {
-                const auto freshIt = fresh.find(ifname);
-                for (const auto &[key, entry]: neighbors) {
-                    const bool reSeen = freshIt != fresh.end() &&
-                                        freshIt->second.contains(key);
-                    if (reSeen) continue;
-                    out.push_back(makeLldpObservation(
-                        ifname, ObservationEvent::Removed, entry));
-                }
-            }
-        }, /*generationGuard=*/false);
+        // Deliberately unguarded: a Removed stays correct even if the cache
+        // moves mid-delivery, and abandoning the batch would strand the
+        // candidate until candidateAgeout. That is why this does not use
+        // emitBatch(), which is now keepalive-only.
+        const auto [fresh, _] = callbackState_->cache.snapshot();
+        for (const auto &[ifname, entry]: diffRemovedNeighbors(oldCache, fresh)) {
+            deliver(makeLldpObservation(ifname, ObservationEvent::Removed, entry));
+        }
         // lease released here
     }
 
@@ -446,31 +396,6 @@ public:
     // In Impl, near lastEventAt():
     [[nodiscard]] thread_safe::admission_gate &gate() {
         return callbackState_->gate;
-    }
-
-    /**
-     * @brief Build a NeighborCache from loose triples and run the real
-     *        reconciliation pass over it.
-     *
-     * The rebuild mirrors cacheAndForward()'s keying exactly — same
-     * resolveLldpIdentity(), same non-MAC skip — so the snapshot a test
-     * supplies is indistinguishable from one the watch path produced.
-     */
-    void reconcileAfterRefreshForTest(
-        const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors) {
-        NeighborCache oldCache;
-        for (const auto &[ifname, chassisId, portId]: oldNeighbors) {
-            CachedLldpNeighbor entry{chassisId, portId, std::nullopt};
-            const std::string key = resolveLldpIdentity(entry.rawChassisId, entry.rawPortId);
-            if (key.empty()) {
-                // Non-MAC identities are never cached by the live path, so a
-                // test snapshot must not contain them either — silently
-                // skipping keeps the two in step.
-                continue;
-            }
-            oldCache[ifname][key] = std::move(entry);
-        }
-        reconcileAfterRefresh(std::move(oldCache));
     }
 
 private:
@@ -699,11 +624,6 @@ void LldpdSource::submitNeighborChangeForTest(std::string_view ifname,
 void LldpdSource::reassertAll() { impl_->reassertAll(); }
 bool LldpdSource::isBackendAlive() const { return impl_->isBackendAlive(); }
 std::chrono::steady_clock::time_point LldpdSource::lastEventAt() const { return impl_->lastEventAt(); }
-
-void LldpdSource::reconcileAfterRefreshForTest(
-    const std::vector<std::tuple<std::string, std::string, std::string> > &oldNeighbors) {
-    impl_->reconcileAfterRefreshForTest(oldNeighbors);
-}
 
 // With the other forwarders:
 thread_safe::admission_gate &LldpdSource::admissionGateForTest() {

@@ -5,6 +5,7 @@ add_library(lldp-observer STATIC
         lldpd/LldpdSource.cpp
         lldpd/BoundedLldpConnection.cpp
         lldpd/BoundedLldpWatch.cpp
+        lldpd/LldpNeighborCache.cpp
 )
 target_compile_features(lldp-observer PUBLIC cxx_std_20)
 

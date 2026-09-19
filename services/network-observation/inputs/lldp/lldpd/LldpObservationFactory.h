@@ -4,6 +4,7 @@
 #pragma once
 
 #include "ObservationTypes.h"
+#include "CachedLldpNeighbor.h"
 
 #include <cassert>
 #include <chrono>
@@ -12,15 +13,6 @@
 #include <string_view>
 
 namespace RSCGroup {
-
-/// Cached neighbour identity. Defined here so the factory can build both
-/// Present and Removed observations from a cache entry without the cache
-/// type leaking into every call site.
-struct CachedLldpNeighbor {
-    std::optional<std::string> rawChassisId;
-    std::optional<std::string> rawPortId;
-    std::optional<std::string> rawSystemName;
-};
 
 /**
  * @brief Single construction point for LldpObservation.
