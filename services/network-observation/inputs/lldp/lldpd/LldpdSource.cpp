@@ -131,7 +131,10 @@ public:
         if (!transition.tryComplete()) {
             // Cancellation won. Ownership is RETAINED — roll back fully,
             // then resolve. The epoch stays `starting` until fail().
-            watch_.reset();
+            {
+                std::scoped_lock lk(watchMutex_);
+                watch_.reset();
+            }
             callbackState_->gate.close_and_drain();
             callbackState_->cache.clear();
             transition.fail();
@@ -153,23 +156,22 @@ public:
 
         auto transition = lifecycle_.beginStop(waitPolicy);
         if (!transition) return; // stopped; another stop owns it; or startup rollback does
-
+        callbackState_->gate.close();
         {
-            callbackState_->gate.close();
             std::scoped_lock lk(watchMutex_);
             // Joins the loop thread: no watch callback is running on return.
             watch_.reset();
-
-            // The gate's remaining job is the SUPERVISION-thread callers —
-            // removeInterface() and reassertAll() — which the watch destructor
-            // knows nothing about. Bounded because ~Impl runs on that same
-            // supervision thread and must not hang service shutdown.
-            if (callbackState_->gate.drain(kStopDrainTimeout)) {
-                callbackState_->cache.clear();
-            } else {
-                LOG(ERROR) << "LldpdSource: stop drain timed out; cache left intact";
-            }
         }
+        // The gate's remaining job is the SUPERVISION-thread callers —
+        // removeInterface() and reassertAll() — which the watch destructor
+        // knows nothing about. Bounded because ~Impl runs on that same
+        // supervision thread and must not hang service shutdown.
+        if (callbackState_->gate.drain(kStopDrainTimeout)) {
+            callbackState_->cache.clear();
+        } else {
+            LOG(ERROR) << "LldpdSource: stop drain timed out; cache left intact";
+        }
+
         transition.complete();
         LOG(INFO) << "LldpdSource stopped";
     }
@@ -207,23 +209,22 @@ public:
      * callback instead.
      */
     void refreshAll() {
-        std::scoped_lock lk(watchMutex_);
-
-        // Re-check: a stop() may have claimed teardown since the
-        // isRunning() check above. Abandon rather than resurrect a
-        // watch on a stopped epoch.
-        if (!lifecycle_.isRunning()) {
-            return;
+        NeighborCacheMap oldCache;
+        {
+            std::scoped_lock lk(watchMutex_);
+            if (!lifecycle_.isRunning()) {
+                return;
+            }
+            auto newWatch = makeWatch(/*attachCallback=*/false);
+            if (!newWatch) {
+                LOG(ERROR) << "LldpdSource: reconnect failed; keeping existing watch";
+                return;
+            }
+            oldCache = callbackState_->cache.exchange({});
+            watch_.reset();
+            newWatch->setCallback(makeChangeCallback());
+            watch_ = std::move(newWatch);
         }
-        auto newWatch = makeWatch(/*attachCallback=*/false);
-        if (!newWatch) {
-            LOG(ERROR) << "LldpdSource: reconnect failed; keeping existing watch";
-            return;
-        }
-        NeighborCacheMap oldCache = callbackState_->cache.exchange({});
-        watch_.reset();
-        newWatch->setCallback(makeChangeCallback());
-        watch_ = std::move(newWatch);
 
         enumerateInitialNeighbors({});
         reconcileAfterRefresh(oldCache);
@@ -242,8 +243,7 @@ public:
      * @brief Flush all cached neighbors for a removed interface.
      *
      * Holds one admission lease for the entire batch so stop() cannot
-     * interleave between partial removals.  If admission is closed
-     * (stop/refresh in progress) the batch is discarded.
+     * interleave between partial removals.
      */
     void removeInterface(const std::string &ifname) {
         auto lease = callbackState_->gate.try_acquire();
