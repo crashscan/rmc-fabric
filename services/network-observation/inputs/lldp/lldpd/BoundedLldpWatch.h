@@ -39,7 +39,7 @@ namespace RSCGroup {
  * without one subscribes to lldpd and drains its socket, but DISCARDS every
  * event until setCallback() attaches a handler.
  *
- * This exists for the reconnect in LldpdSource::refreshAll(): the new watch
+ * This exists for the reconnect in LldpWatchSupervisor::refreshAll(): the new watch
  * is subscribed while the old one is still delivering, so both are connected
  * and no event is missed at the daemon, but only one of them is ever
  * dispatching. The owner destroys the old watch — which joins its loop thread
@@ -95,7 +95,9 @@ public:
      */
     void setCallback(ChangeCallback callback);
 
-    /// Must be set before the loop can exit meaningfully; safe concurrently.
+    /// Safe to call concurrently with a running loop. A handler attached
+    /// after the loop has already exited is never invoked — notifyExit()
+    /// is one-shot and has already run. Check hasExited() if that matters.
     void setExitHandler(ExitHandler onExit);
 
     /// True once the loop thread has left its dispatch loop.

@@ -8,6 +8,7 @@
  * Each backend (lldpd daemon, raw socket, synthetic) implements this
  * interface. The LldpObserver owns one source and bridges its
  * observations to the observation model.
+ *
  */
 #pragma once
 #include <chrono>
@@ -30,6 +31,10 @@ public:
      *  - cached neighbor state is cleared;
      *  - destruction is safe.
      *
+     * Implementations that bound these waits may fail to meet them. A
+     * backend that does so must log it and refuse to restart rather than
+     * report success — see LldpdSource, which latches itself unusable.
+     *
      * Must be idempotent: calling stop() on an already-stopped source is
      * a no-op.
      */
@@ -37,15 +42,31 @@ public:
 
     [[nodiscard]] virtual bool isRunning() const = 0;
 
+    /**
+     * @brief Whether the backend's push subscription is still live.
+     *
+     * Distinct from both neighbours: isRunning() reports the lifecycle
+     * epoch, isBackendAlive() actively probes. This is a cheap, passive
+     * read of a subscription that may have died without the epoch ending —
+     * for lldpd, a watch loop thread that exited when the daemon restarted.
+     *
+     * The runtime uses it to choose repair over replacement: a dead watch
+     * is reconnected in place, preserving the cache that reconciliation
+     * diffs against.
+     *
+     * Backends with no persistent subscription should return isRunning().
+     */
     [[nodiscard]] virtual bool isWatchAlive() const = 0;
 
     /**
      * @brief Trigger a full resync from the source.
      *
+     * For push-based backends (e.g. lldpd), this performs an advisory
      * reconnect: a replacement watch is built, the old one retired, and
      * the pre-reconnect cache diffed against what re-enumeration observes
      * so neighbours that genuinely went away are reported Removed. The
-     * cache is exchanged and reconciled, NOT cleared.     *
+     * cache is exchanged and reconciled, NOT cleared.
+     *
      * For snapshot or packet-based backends, this triggers an active
      * resync of all interfaces.
      *

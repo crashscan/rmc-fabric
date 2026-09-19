@@ -15,14 +15,22 @@
  * cache state or returning.
  *
  * Postcondition of stop(): no LLDP callback is executing; no new callback
- * can be admitted; cache is cleared; the watch handle is released. unless teardown timed out,
- * which is logged and latches the source unusable.
+ * can be admitted; cache is cleared; the watch handle is released.
+ *
+ * Unless a bounded wait times out — a concurrent refresh holding the watch
+ * lock, or a lease that never drains. That is logged, and the source
+ * latches itself unusable so start() refuses rather than stacking a second
+ * watch on a wedged one.
  *
  * @section reentrancy Reentrancy
- * Downstream observation callbacks must not synchronously call stop(),
- * refreshAll(), or destroy the LldpdSource — doing so from within a
- * callback is a programming error.  Destructors are non-throwing; misuse
- * (destruction during a callback) is logged.
+ * A downstream callback must not call refreshAll() or destroy the
+ * LldpdSource: the first deadlocks against the supervisor lock held across
+ * the watch teardown, the second joins the thread it is running on.
+ *
+ * stop() IS supported from a callback dispatched during startup
+ * enumeration — the lifecycle coordinator detects the start-owner thread
+ * and switches to a non-waiting teardown. Destructors are non-throwing;
+ * misuse is logged.
  *
  * @section limitations v1 Limitations
  * Only MAC-like LLDP identities are cached and forwarded to the
@@ -40,8 +48,6 @@
 #include <optional>
 #include <string>
 #include <string_view>
-#include <tuple>
-#include <vector>
 
 namespace RSCGroup {
 class LldpdSource : public ILldpSource {
