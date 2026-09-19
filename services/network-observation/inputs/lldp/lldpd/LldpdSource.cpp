@@ -132,15 +132,20 @@ public:
             return;
         }
         if (state_ == State::Stopped) {
-            // Already stopped, but a previous refreshAll() may have
-            // abandoned its drain and left the cache populated. Completing
-            // the drain and the clear here is what pendingDrain_ used to
-            // force; doing it unconditionally removes the flag without
-            // weakening the postcondition. Both operations are cheap no-ops
-            // on a cleanly stopped source.
+            // Claim Stopping so a concurrent start() cannot open admission
+            // while this branch closes and clears. A previous refreshAll()
+            // may have abandoned its drain and left the cache populated;
+            // completing both here is what pendingDrain_ used to force.
+            state_ = State::Stopping;
             lk.unlock();
+
             callbackState_->gate.close_and_drain();
             callbackState_->cache.clear();
+
+            lk.lock();
+            state_ = State::Stopped;
+            lk.unlock();
+            lifecycleCv_.notify_all();
             return;
         }
         state_ = State::Stopping;
@@ -199,18 +204,10 @@ public:
         oldWatch.reset();
 
         // 5. Drain old callbacks — BOUNDED. See kRefreshDrainTimeout.
-        if (const bool drained = callbackState_->gate.drain(kRefreshDrainTimeout); !drained) {
-            // Abandon the reconnect rather than block shutdown. Admission
-            // stays closed, the cache is left intact (the outstanding
-            // callback may still be mutating it), and the source goes
-            // Stopped so the runtime's next tick() drops and re-acquires
-            // the observer. pendingDrain_ keeps stop()'s drain obligation
-            // alive for the leases we did not wait out.
-            LOG(ERROR) << "LldpdSource: reconnect drain timed out; abandoning refresh";
-            lk.lock();
-            state_ = State::Stopped;
-            lk.unlock();
-            lifecycleCv_.notify_all();
+        if (!callbackState_->gate.drain(kRefreshDrainTimeout)) {
+            LOG(ERROR) << "LldpdSource: stop drain timed out; leases outstanding";
+            // Do NOT clear the cache — an outstanding callback may still
+            // be mutating it.
             return;
         }
 
@@ -341,16 +338,6 @@ public:
     /**
      * @brief Emit Removed for neighbors present before a reconnect but not
      *        re-observed during re-enumeration.
-     *
-     * Precondition: admission open; called after enumerateInitialNeighbors()
-     * so callbackState_->byInterface holds the fresh set. Enumeration already
-     * emitted Present for everything currently known; this pass emits the
-     * removals the old silent cache clear used to swallow.
-     *
-     * Unguarded on purpose (generationGuard=false): a Removed stays correct
-     * even if the cache moves mid-delivery, and abandoning the batch would
-     * strand the candidate until candidateAgeout. Keepalives are the opposite
-     * case — see reassertAll().
      */
     void reconcileAfterRefresh(const NeighborCacheMap &oldCache) {
         const auto lease = callbackState_->gate.try_acquire();
