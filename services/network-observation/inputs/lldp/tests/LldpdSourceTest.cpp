@@ -126,8 +126,10 @@ namespace {
     TEST(LldpdSourceTest, RefreshWhenNotRunning_NoOp) {
         TestSink sink;
         LldpdSource source({}, [&](const LldpObservation &o) { sink.onObservation(o); });
-        // refreshAll when not running should do nothing
-        source.refreshAll();
+        // refreshAll when not running does nothing AND reports that it did
+        // not resync — a caller repairing a known divergence must be able to
+        // tell, because nothing else will retry on its behalf.
+        EXPECT_FALSE(source.refreshAll());
     }
 
     // ---- Callback-admission gate tests (using test seam) ----
@@ -287,7 +289,7 @@ namespace {
     TEST(LldpdSourceTest, RefreshWhenNotRunningStillNoOp) {
         TestSink sink;
         LldpdSource source({}, [&](const LldpObservation &o) { sink.onObservation(o); });
-        source.refreshAll();
+        EXPECT_FALSE(source.refreshAll()) << "a stopped source cannot resync";
         EXPECT_EQ(sink.count(), 0);
         EXPECT_EQ(source.lastEventAt(), std::chrono::steady_clock::time_point::min());
     }
