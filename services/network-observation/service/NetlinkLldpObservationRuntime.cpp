@@ -27,6 +27,13 @@ namespace {
     constexpr auto kLldpRetryInterval = std::chrono::seconds{30};
     constexpr auto kLldpProbeInterval = std::chrono::seconds{60};
 
+    /// Consecutive in-place reconnect failures before giving up on the
+    /// observer and re-acquiring a fresh one. At kLldpRetryInterval per
+    /// attempt this is ~90s of repair attempts before escalating —
+    /// comfortably longer than an lldpd restart, short enough that a
+    /// wedged source does not persist indefinitely.
+    constexpr unsigned kLldpReconnectFailureLimit = 5;
+
     /// Keepalive period for LLDP re-assertion. Must stay below candidateAgeout
     /// (default 60s) so stable LLDP-only candidates are never aged out.
     std::chrono::steady_clock::duration deriveReassertInterval(std::chrono::seconds candidateAgeout) {
@@ -179,6 +186,7 @@ bool NetlinkLldpObservationRuntime::start() {
     // so a failed candidate is destroyed here and never observed elsewhere.
     if (auto observer = createLldpObserver(); observer->start()) {
         lldpObserver_.store(std::move(observer));
+        lldpReconnectFailures_ = 0;
     } else {
         LOG(WARNING) << "LLDP observer failed to start — LLDP unavailable (tick() will retry)";
     }
@@ -378,15 +386,32 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
         // reported Removed instead of stranded until candidateAgeout.
         // Dropping the observer would discard that cache unreconciled.
         if (!observer->isWatchAlive()) {
-            // Repairable in place: refreshAll() rebuilds the connection
-            // without closing admission and reconciles the pre-reconnect
-            // cache, so neighbours that really went away are reported
-            // Removed rather than stranded until candidateAgeout. Dropping
-            // the observer would discard that cache unreconciled.
-            (void) reconnectLldp(*observer, now, "watch died");
-            return;   // probe next tick; a fresh reconnect just proved contact
+            if (reconnectLldp(*observer, now, "watch died")) {
+                return;   // probe next tick; the reconnect just proved contact
+            }
+            // Throttled, or failed. Only repeated FAILURES escalate — a
+            // throttled call did not attempt anything.
+            if (lldpReconnectFailures_ < kLldpReconnectFailureLimit) {
+                return;
+            }
+            // In-place repair has not worked. Give up on this observer and
+            // fall through to the retry path, which builds a fresh one.
+            //
+            // The cost is real: dropping destroys the source, so its cache
+            // is cleared without reconciliation and stale candidates linger
+            // until candidateAgeout. That is why this is the escalation and
+            // not the first response.
+            LOG(ERROR) << "LLDP reconnect failed " << lldpReconnectFailures_ << " times — dropping observer for re-acquire";
+            lldpObserver_.store(nullptr);
+            observer.reset();
+            lldpReconnectFailures_ = 0;
+            // Clear the retry throttle: the escalation already waited
+            // kLldpReconnectFailureLimit intervals, so the replacement
+            // attempt should not wait another one.
+            lastLldpAttempt_ = {};
         }
-
+    }
+    if (observer) {
         if (now - lastLldpProbe_ >= kLldpProbeInterval) {
             lastLldpProbe_ = now;
             if (!observer->isBackendAlive()) {
@@ -414,6 +439,7 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
     lldpObserver_.store(std::move(candidate));
     LOG(INFO) << "LLDP observer acquired after " << lldpRetryCount_ << " failed attempt(s)";
     lldpRetryCount_ = 0;
+    lldpReconnectFailures_ = 0;
 }
 
 /**
@@ -435,15 +461,22 @@ bool NetlinkLldpObservationRuntime::reconnectLldp(
     const char *reason) {
     if (now - lastLldpReconnect_ < kLldpRetryInterval) {
         VLOG(1) << "LLDP reconnect throttled (" << reason << ")";
+        // Deliberately NOT a failure: no attempt was made. Counting it
+        // would make the escalation a function of elapsed time rather
+        // than of attempts that actually failed.
         return false;
     }
     lastLldpReconnect_ = now;
 
     LOG(WARNING) << "LLDP reconnecting: " << reason;
     if (!observer.refreshAll()) {
-        LOG(WARNING) << "LLDP reconnect failed (" << reason << ")";
+        ++lldpReconnectFailures_;
+        LOG(WARNING) << "LLDP reconnect failed (" << reason << "), " << lldpReconnectFailures_ << " consecutive";
         return false;
     }
+    // A successful reconnect proves the backend is reachable and the
+    // source is repairable, so prior failures no longer justify replacing it.
+    lldpReconnectFailures_ = 0;
     return true;
 }
 

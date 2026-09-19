@@ -175,6 +175,11 @@ private:
     /// retry interval.
     std::chrono::steady_clock::time_point lastLldpReconnect_{};
     std::chrono::steady_clock::time_point lastLldpProbe_{};
+
+    /// Consecutive reconnect FAILURES. Reset on any success. A throttled
+    /// call is not a failure and does not count — otherwise the escalation
+    /// would fire on elapsed time rather than on attempts.
+    unsigned lldpReconnectFailures_ = 0;
     unsigned lldpRetryCount_ = 0;
 
     /// Drains observationQueue_ into model_. Declared before monitor_ so
