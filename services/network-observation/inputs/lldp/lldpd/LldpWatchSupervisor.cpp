@@ -10,10 +10,9 @@ namespace RSCGroup {
 
 LldpWatchSupervisor::LldpWatchSupervisor(std::string ctlPath,
                                          std::chrono::milliseconds connectTimeout,
-                                         std::chrono::milliseconds ioTimeout,
-                                         WatchDiedHandler onWatchDied)
+                                         std::chrono::milliseconds ioTimeout)
     : ctlPath_(std::move(ctlPath)), connectTimeout_(connectTimeout),
-      ioTimeout_(ioTimeout), onWatchDied_(std::move(onWatchDied)) {
+      ioTimeout_(ioTimeout) {
 }
 
 LldpWatchSupervisor::~LldpWatchSupervisor() {
@@ -43,7 +42,6 @@ void LldpWatchSupervisor::armExitHandler(BoundedLldpWatch &watch) {
         // mutex_ here would deadlock against a refresh joining this thread.
         watchDied_.store(true, std::memory_order_release);
         LOG(WARNING) << "LldpWatchSupervisor: watch died unsolicited";
-        if (onWatchDied_) onWatchDied_();
     });
 }
 
@@ -52,11 +50,14 @@ bool LldpWatchSupervisor::start(const CallbackFactory &makeCallback) {
     if (!fresh) return false;
 
     std::scoped_lock lk(mutex_);
-    if (watch_) {
+    // A dead watch is replaceable: its loop thread has already exited, so
+    // resetting here joins an exited thread. Only a LIVE watch is a
+    // programming error.
+    if (watch_ && !watchDied_.load(std::memory_order_acquire)) {
         LOG(WARNING) << "LldpWatchSupervisor: start() with a watch installed";
         return false;
     }
-
+    watch_.reset();
     watchDied_.store(false, std::memory_order_release);
     armExitHandler(*fresh);
 

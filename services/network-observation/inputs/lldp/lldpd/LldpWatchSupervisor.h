@@ -42,14 +42,9 @@ class LldpWatchSupervisor {
 public:
     using CallbackFactory = std::function<BoundedLldpWatch::ChangeCallback()>;
 
-    /// Invoked when a watch dies unsolicited. Runs on the dying loop thread —
-    /// must not block and must not call back into this supervisor.
-    using WatchDiedHandler = std::function<void()>;
-
     LldpWatchSupervisor(std::string ctlPath,
                         std::chrono::milliseconds connectTimeout,
-                        std::chrono::milliseconds ioTimeout,
-                        WatchDiedHandler onWatchDied = {});
+                        std::chrono::milliseconds ioTimeout);
 
     ~LldpWatchSupervisor();
 
@@ -95,7 +90,6 @@ private:
     const std::string ctlPath_;
     const std::chrono::milliseconds connectTimeout_;
     const std::chrono::milliseconds ioTimeout_;
-    const WatchDiedHandler onWatchDied_;
 
     /// timed_mutex so stop() can bound its wait: a refresh may hold this
     /// across a teardown blocked on an in-flight downstream callback.
