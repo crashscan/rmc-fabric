@@ -32,6 +32,8 @@ public:
 
     [[nodiscard]] bool isRunning() const;
 
+    [[nodiscard]] bool isWatchAlive() const;
+
     void refreshAll();
 
     void refreshInterface(const std::string &ifname);

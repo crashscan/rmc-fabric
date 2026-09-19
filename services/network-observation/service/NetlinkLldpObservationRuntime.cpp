@@ -366,13 +366,22 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
     }
 
     if (observer) {
-        // Liveness probe. Watch silence is NOT a liveness signal: lldpd only
-        // notifies on changes, so a stable network is legitimately silent.
+        // A dead watch is repairable IN PLACE: refreshAll() rebuilds the
+        // connection without closing admission and reconciles the
+        // pre-reconnect cache, so neighbours that really went away are
+        // reported Removed instead of stranded until candidateAgeout.
+        // Dropping the observer would discard that cache unreconciled.
+        if (!observer->isWatchAlive()) {
+            LOG(WARNING) << "LLDP watch died — reconnecting in place";
+            observer->refreshAll();
+            return;   // probe on the next tick; the reconnect just proved contact
+        }
+
         if (now - lastLldpProbe_ >= kLldpProbeInterval) {
             lastLldpProbe_ = now;
             if (!observer->isBackendAlive()) {
                 LOG(WARNING) << "LLDP backend unreachable — reconnecting";
-                observer->refreshAll(); // on failure source stops; dropped next tick
+                observer->refreshAll();
             }
         }
         return;

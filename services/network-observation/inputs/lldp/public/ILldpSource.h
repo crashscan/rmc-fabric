@@ -37,6 +37,8 @@ public:
 
     [[nodiscard]] virtual bool isRunning() const = 0;
 
+    [[nodiscard]] virtual bool isWatchAlive() const = 0;
+
     /**
      * @brief Trigger a full resync from the source.
      *

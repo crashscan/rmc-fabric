@@ -13,6 +13,7 @@ public:
     bool start() { return source_->start(); }
     void stop() { source_->stop(); }
     bool isRunning() const { return source_->isRunning(); }
+    bool isWatchAlive() const { return source_->isWatchAlive(); }
 
     void refreshAll() { source_->refreshAll(); }
     void refreshInterface(const std::string &ifname) { source_->refreshInterface(ifname); }
@@ -54,6 +55,7 @@ LldpObserver::~LldpObserver() = default;
 bool LldpObserver::start() { return impl_->start(); }
 void LldpObserver::stop() { impl_->stop(); }
 bool LldpObserver::isRunning() const { return impl_->isRunning(); }
+bool LldpObserver::isWatchAlive() const { return impl_->isWatchAlive(); }
 
 void LldpObserver::refreshAll() { impl_->refreshAll(); }
 void LldpObserver::refreshInterface(const std::string &ifname) { impl_->refreshInterface(ifname); }

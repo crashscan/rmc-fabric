@@ -62,6 +62,7 @@ public:
     void stop() override;
 
     [[nodiscard]] bool isRunning() const override;
+    [[nodiscard]] bool isWatchAlive() const override;
 
     void refreshAll() override;
 

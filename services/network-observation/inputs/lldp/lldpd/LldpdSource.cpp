@@ -195,10 +195,15 @@ public:
     }
 
     [[nodiscard]] bool isRunning() const {
-        // A watch that died unsolicited leaves the epoch running but the
-        // source deaf. Reporting that honestly is what lets the runtime
-        // re-acquire instead of waiting for the liveness probe.
-        return lifecycle_.isRunning() && watchSupervisor_.isWatchAlive();
+        // Epoch state only. Watch health is reported by isWatchAlive() so the
+        // runtime can tell "this source is finished" from "this source needs
+        // a reconnect" — the second is repairable in place by refreshAll(),
+        // and repairing preserves the cache that reconciliation diffs against.
+        return lifecycle_.isRunning();
+    }
+
+    [[nodiscard]] bool isWatchAlive() const {
+        return watchSupervisor_.isWatchAlive();
     }
 
     /**
@@ -583,6 +588,7 @@ LldpdSource::~LldpdSource() = default;
 bool LldpdSource::start() { return impl_->start(); }
 void LldpdSource::stop() { impl_->stop(); }
 bool LldpdSource::isRunning() const { return impl_->isRunning(); }
+bool LldpdSource::isWatchAlive() const { return impl_->isWatchAlive(); }
 void LldpdSource::refreshAll() { impl_->refreshAll(); }
 void LldpdSource::refreshInterface(const std::string &ifname) { impl_->refreshInterface(ifname); }
 void LldpdSource::removeInterface(const std::string &ifname) { impl_->removeInterface(ifname); }
