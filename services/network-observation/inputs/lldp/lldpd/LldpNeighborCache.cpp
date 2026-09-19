@@ -11,9 +11,7 @@
 
 namespace RSCGroup {
 bool LldpNeighborCache::apply(const LldpObservation &obs) {
-    // Identity rule lives here so every writer keys identically. The old
-    // reconcileAfterRefreshForTest() had to duplicate this to build a
-    // comparable snapshot; with one owner it cannot drift.
+    // Identity rule lives here so every writer keys identically.
     const std::string key = resolveLldpIdentity(obs.remoteChassisId, obs.remotePortId);
     if (key.empty()) {
         // v1 limitation: non-MAC identities are forwarded downstream but not

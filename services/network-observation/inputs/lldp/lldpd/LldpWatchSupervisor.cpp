@@ -38,7 +38,7 @@ std::unique_ptr<BoundedLldpWatch> LldpWatchSupervisor::buildSilent() const {
 
 void LldpWatchSupervisor::armExitHandler(BoundedLldpWatch &watch) {
     watch.setExitHandler([this] {
-        // Runs on the dying loop thread. Record and notify only — taking
+        // Runs on the dying loop thread. Record — taking
         // mutex_ here would deadlock against a refresh joining this thread.
         watchDied_.store(true, std::memory_order_release);
         LOG(WARNING) << "LldpWatchSupervisor: watch died unsolicited";

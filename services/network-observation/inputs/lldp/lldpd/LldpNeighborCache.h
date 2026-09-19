@@ -89,8 +89,7 @@ private:
  * @brief Neighbours present in @p oldCache but absent from @p fresh.
  *
  * Free function on purpose: the reconcile diff is pure, so it needs no
- * source, no admission gate, and no daemon to test. This is what replaces
- * LldpdSource::reconcileAfterRefreshForTest().
+ * source, no admission gate, and no daemon to test.
  */
 [[nodiscard]] std::vector<std::pair<std::string, CachedLldpNeighbor> >
 diffRemovedNeighbors(const NeighborCacheMap &oldCache, const NeighborCacheMap &fresh);

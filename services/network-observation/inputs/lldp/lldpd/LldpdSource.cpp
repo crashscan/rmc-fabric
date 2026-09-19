@@ -79,7 +79,11 @@ class LldpdSource::Impl {
 public:
     Impl(LldpSourceConfig config, LldpObservationCallback cb)
         : callbackState_(
-            std::make_shared<CallbackState>(std::move(config), std::move(cb))) {
+        std::make_shared<CallbackState>(std::move(config), std::move(cb)))
+          // Resolved once here rather than per-start: the default transport
+          // is a compile-time constant in liblldpctl and the configured path
+          // is immutable after construction.
+          , watchSupervisor_(resolvedCtlPath(), kProbeConnectTimeout, kProbeIoTimeout) {
     }
 
     ~Impl() {
@@ -109,19 +113,20 @@ public:
             return false;
         }
 
+        if (teardownIncomplete_.load(std::memory_order_acquire)) {
+            LOG(WARNING) << "LldpdSource: start() refused; prior teardown incomplete";
+            transition.fail();
+            return false;
+        }
+
         // Open BEFORE the watch exists: lldpd can dispatch synchronously from
         // the subscribe round-trip.
         callbackState_->gate.open();
 
-        {
-            std::scoped_lock lk(watchMutex_);
-            auto newWatch = makeWatch(/*attachCallback=*/true);
-            if (!newWatch) {
-                callbackState_->gate.close_and_drain();
-                transition.fail();
-                return false;
-            }
-            watch_ = std::move(newWatch);
+        if (!watchSupervisor_.start([this] { return makeChangeCallback(); })) {
+            callbackState_->gate.close_and_drain();
+            transition.fail();
+            return false;
         }
 
         // A subscribed watch is proven backend contact: makeWatch() completed
@@ -137,12 +142,10 @@ public:
         enumerateInitialNeighbors(transition.stopToken());
 
         if (!transition.tryComplete()) {
-            // Cancellation won. Ownership is RETAINED — roll back fully,
-            // then resolve. The epoch stays `starting` until fail().
-            {
-                std::scoped_lock lk(watchMutex_);
-                watch_.reset();
-            }
+            // Rollback: unbounded is correct here. Nothing else holds the
+            // supervisor lock — this thread owns the startup transition and
+            // no refresh can run against a non-running epoch.
+            (void) watchSupervisor_.stop(kStopDrainTimeout);
             callbackState_->gate.close_and_drain();
             callbackState_->cache.clear();
             transition.fail();
@@ -165,9 +168,16 @@ public:
         auto transition = lifecycle_.beginStop(waitPolicy);
         if (!transition) return; // stopped; another stop owns it; or startup rollback does
         callbackState_->gate.close();
+
+        // False means a concurrent refresh held the supervisor lock past the
+        // timeout: the watch is leaked and may still dispatch. The gate is
+        // closed so those callbacks are discarded, but the postcondition in
+        // LldpdSource.h no longer holds — latch it so start() refuses.
         if (!watchSupervisor_.stop(kStopDrainTimeout)) {
-            LOG(ERROR) << "LldpdSource: watch teardown incomplete";
+            teardownIncomplete_.store(true, std::memory_order_release);
+            LOG(ERROR) << "LldpdSource: watch teardown incomplete; source unusable";
         }
+
         // The gate's remaining job is the SUPERVISION-thread callers —
         // removeInterface() and reassertAll() — which the watch destructor
         // knows nothing about. Bounded because ~Impl runs on that same
@@ -183,57 +193,48 @@ public:
     }
 
     [[nodiscard]] bool isRunning() const {
-        return lifecycle_.isRunning();
+        // A watch that died unsolicited leaves the epoch running but the
+        // source deaf. Reporting that honestly is what lets the runtime
+        // re-acquire instead of waiting for the liveness probe.
+        return lifecycle_.isRunning() && watchSupervisor_.isWatchAlive();
     }
 
     /**
      * @brief Reconnect without ever closing admission.
      *
-     * Ordering is the whole design:
-     *
-     *  1. Build the new watch SILENT. It subscribes to lldpd immediately, so
-     *     from here both connections receive events — but only the old one
-     *     dispatches. A build failure leaves the old watch untouched and the
-     *     epoch Running: a failed reconnect must not tear down a working watch.
-     *  2. Capture the pre-reconnect cache, then DESTROY the old watch.
-     *     ~BoundedLldpWatch joins its loop thread, and that thread is the only
-     *     one that can invoke its callback, so on return no old-watch callback
-     *     is executing or ever will be. This is the drain — scoped to exactly
-     *     the watch being retired. gate.drain() cannot do this: the new watch
-     *     is live and its leases would keep the counter above zero.
-     *  3. Attach the callback. From here exactly one watch dispatches, and
-     *     nothing from the old epoch can interleave — so no duplicate Present
-     *     and no late Removed flapping a candidate the new watch just
-     *     reported.
-     *  4. Re-enumerate to recover what was dropped in 1-3, then reconcile.
+     * The ordering that makes this safe — build silent, retire the old watch
+     * (joining its loop thread), snapshot, then attach — now lives in
+     * LldpWatchSupervisor::refresh(). The onSwap hook runs in the gap where
+     * nothing is dispatching, which is the only point at which the cache can
+     * be captured without racing a fresh event.
      *
      * Admission is never closed, so isRunning() stays true throughout and the
      * runtime does not drop and re-acquire the observer.
-     *
-     * There is no drain timeout here any more. The old bound existed because
-     * the drain waited on lldpd's liveness; step 2 is bounded by one in-flight
-     * callback instead.
      */
     void refreshAll() {
-        if (!lifecycle_.isRunning()) {
-            return;
-        }
+        if (!lifecycle_.isRunning()) return;
 
         NeighborCacheMap oldCache;
         const bool ok = watchSupervisor_.refresh(
             [this] { return makeChangeCallback(); },
-            [&] { oldCache = callbackState_->cache.exchange({}); });
+            [&] {
+                // Under the supervisor lock, between teardown and attach.
+                // MUST happen here: capturing after attach would let the new
+                // watch repopulate the cache first, and diffRemovedNeighbors
+                // would then see re-enumerated entries as fresh and emit no
+                // removals at all.
+                oldCache = callbackState_->cache.exchange({});
+            });
+
         if (!ok) {
             LOG(ERROR) << "LldpdSource: reconnect failed; existing watch retained";
             return;
         }
 
-        // Same reasoning as start(): the reconnect is proven at this point.
-        // The silent window (build -> reset -> attach) produces no
-        // dispatchChange calls, so without this the watchdog would judge a
-        // healthy new watch by the old one's last event.
-        callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(),std::memory_order_release);
+        callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(), std::memory_order_release);
 
+        // Outside the supervisor lock: both dispatch downstream, and a
+        // handler re-entering stop() would deadlock against a held lock.
         enumerateInitialNeighbors({});
         reconcileAfterRefresh(oldCache);
 
@@ -418,23 +419,6 @@ private:
         }
     }
 
-    /// @param attachCallback false builds a subscribed-but-silent watch —
-    ///        see BoundedLldpWatch's deferred-attachment contract.
-    [[nodiscard]] std::unique_ptr<BoundedLldpWatch> makeWatch(bool attachCallback) {
-        try {
-            auto watch = std::make_unique<BoundedLldpWatch>(
-                resolvedCtlPath(), kProbeConnectTimeout, kProbeIoTimeout);
-            if (attachCallback) watch->setCallback(makeChangeCallback());
-            return watch;
-        } catch (const std::exception &e) {
-            LOG(ERROR) << "Lldpd watch creation failed: " << e.what();
-            return nullptr;
-        } catch (...) {
-            LOG(ERROR) << "Lldpd watch creation failed: unknown exception";
-            return nullptr;
-        }
-    }
-
     /// The weak_ptr capture is what keeps a delayed callback from touching
     /// freed state; the admission lease is what keeps stop() from returning
     /// while one is running.
@@ -571,10 +555,17 @@ private:
     }
 
     std::shared_ptr<CallbackState> callbackState_;
-    std::unique_ptr<BoundedLldpWatch> watch_;
+    /// Owns all watch lifetime: build, reconnect sequencing, teardown, and
+    /// dead-watch detection. Declared after callbackState_ so the change
+    /// callbacks it holds are destroyed before the state they capture.
+    LldpWatchSupervisor watchSupervisor_;
+    /// Latched when supervisor stop() times out. That leaves a watch alive
+    /// with stop()'s no-callback-executing postcondition unmet, so the
+    /// source is terminal — start() must refuse rather than stack a second
+    /// watch on top of a wedged one.
+    std::atomic<bool> teardownIncomplete_{false};
 
     LifecycleCoordinator lifecycle_;
-    LldpWatchSupervisor watchSupervisor_;
 };
 
 // ---------------------------------------------------------------------------
