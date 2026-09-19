@@ -9,6 +9,18 @@
 #include <system_error>
 
 namespace RSCGroup {
+
+BoundedLldpWatch::BoundedLldpWatch(std::string_view ctlname,
+                                   std::chrono::milliseconds connectTimeout,
+                                   std::chrono::milliseconds ioTimeout)
+    : BoundedLldpWatch(ctlname, connectTimeout, ioTimeout, ChangeCallback{}) {
+}
+
+void BoundedLldpWatch::setCallback(ChangeCallback callback) {
+    std::scoped_lock lk(callbackMutex_);
+    callback_ = std::move(callback);
+}
+
 BoundedLldpWatch::BoundedLldpWatch(std::string_view ctlname,
                                    std::chrono::milliseconds connectTimeout,
                                    std::chrono::milliseconds ioTimeout,
@@ -40,8 +52,7 @@ BoundedLldpWatch::BoundedLldpWatch(std::string_view ctlname,
                     // over — LldpdSource's liveness probe re-acquires.
                     if (!stop.stop_requested()) {
                         LOG(WARNING) << "BoundedLldpWatch: watch ended: "
-                                << ::lldpctl_strerror(
-                                    lldpctl_last_error(conn_->connection()));
+                                << ::lldpctl_strerror(lldpctl_last_error(conn_->connection()));
                     }
                     return;
                 }
@@ -67,7 +78,22 @@ void BoundedLldpWatch::trampoline(lldpctl_change_t change,
                                   lldpctl_atom_t *neighbor,
                                   void *userData) {
     auto *self = static_cast<BoundedLldpWatch *>(userData);
-    if (!self || !self->callback_) return;
+    if (!self) {
+        return;
+    }
+
+    // Copy under the lock, dispatch outside it. Holding callbackMutex_
+    // across the callback would deadlock a downstream handler that
+    // re-enters the owner and triggers a setCallback().
+    ChangeCallback callback;
+    {
+        std::scoped_lock lk(self->callbackMutex_);
+        callback = self->callback_;
+    }
+    if (!callback) {
+        return;   // detached — owner is mid-reconnect
+    }
+
     try {
         // Non-owning wrappers: the library owns these atoms for the duration
         // of the callback only. Callees must not retain them.
@@ -77,7 +103,7 @@ void BoundedLldpWatch::trampoline(lldpctl_change_t change,
         if (const char *n = ::lldpctl_atom_get_str(interface, lldpctl_k_interface_name)) {
             ifname = n;
         }
-        self->callback_(ifname, change, ifaceAtom, neighborAtom);
+        callback(ifname, change, ifaceAtom, neighborAtom);
     } catch (const std::exception &e) {
         // Must not propagate into the C library.
         LOG(ERROR) << "BoundedLldpWatch: callback exception: " << e.what();
