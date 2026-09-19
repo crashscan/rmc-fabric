@@ -145,7 +145,7 @@ private:
      * which backs the queue up and drops more, raising the very bit it is trying
      * to clear. The tick cadence also supplies the retry throttle for free.
      */
-    void performResync(std::chrono::steady_clock::time_point);
+    void performResync(std::chrono::steady_clock::time_point now);
 
     /// Keepalive period, derived from ModelConfig::candidateAgeout.
     std::chrono::steady_clock::duration reassertInterval_{std::chrono::seconds{30}};

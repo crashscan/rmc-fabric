@@ -446,6 +446,8 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
     LOG(INFO) << "LLDP observer acquired after " << lldpRetryCount_ << " failed attempt(s)";
     lldpRetryCount_ = 0;
     lldpReconnectFailures_ = 0;
+    // A fresh observer must not inherit the discarded one's throttle.
+    lastLldpReconnect_ = {};
 }
 
 /**
