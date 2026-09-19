@@ -9,9 +9,11 @@
 #include <chrono>
 #include <algorithm>
 #include <atomic>
-#include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <string>
+#include <string_view>
+#include <stop_token>
 #include <vector>
 #include <optional>
 #include <service_runtime/LifecycleCoordinator.h>
@@ -91,6 +93,9 @@ public:
     bool start() {
         auto transition = lifecycle_.beginCancellableStart();
         if (!transition) {
+            // Unowned means the epoch is already running — start() is
+            // idempotent by ILldpSource contract, so that is success.
+            if (lifecycle_.isRunning()) return true;
             LOG(WARNING) << "start() called while LldpdSource epoch is not stopped";
             return false;
         }
@@ -108,13 +113,16 @@ public:
         // the subscribe round-trip.
         callbackState_->gate.open();
 
-        auto newWatch = makeWatch(/*attachCallback=*/true);
-        if (!newWatch) {
-            callbackState_->gate.close_and_drain();
-            transition.fail();
-            return false;
+        {
+            std::scoped_lock lk(watchMutex_);
+            auto newWatch = makeWatch(/*attachCallback=*/true);
+            if (!newWatch) {
+                callbackState_->gate.close_and_drain();
+                transition.fail();
+                return false;
+            }
+            watch_ = std::move(newWatch);
         }
-        watch_ = std::move(newWatch);
 
         // Runs on this thread and dispatches downstream, so a concurrent
         // stop() can request cancellation partway through.
@@ -144,23 +152,24 @@ public:
                                     : LifecycleCoordinator::WaitPolicy::wait;
 
         auto transition = lifecycle_.beginStop(waitPolicy);
-        if (!transition) return;  // stopped; another stop owns it; or startup rollback does
+        if (!transition) return; // stopped; another stop owns it; or startup rollback does
 
-        callbackState_->gate.close();
+        {
+            callbackState_->gate.close();
+            std::scoped_lock lk(watchMutex_);
+            // Joins the loop thread: no watch callback is running on return.
+            watch_.reset();
 
-        // Joins the loop thread: no watch callback is running on return.
-        watch_.reset();
-
-        // The gate's remaining job is the SUPERVISION-thread callers —
-        // removeInterface() and reassertAll() — which the watch destructor
-        // knows nothing about. Bounded because ~Impl runs on that same
-        // supervision thread and must not hang service shutdown.
-        if (callbackState_->gate.drain(kStopDrainTimeout)) {
-            callbackState_->cache.clear();
-        } else {
-            LOG(ERROR) << "LldpdSource: stop drain timed out; cache left intact";
+            // The gate's remaining job is the SUPERVISION-thread callers —
+            // removeInterface() and reassertAll() — which the watch destructor
+            // knows nothing about. Bounded because ~Impl runs on that same
+            // supervision thread and must not hang service shutdown.
+            if (callbackState_->gate.drain(kStopDrainTimeout)) {
+                callbackState_->cache.clear();
+            } else {
+                LOG(ERROR) << "LldpdSource: stop drain timed out; cache left intact";
+            }
         }
-
         transition.complete();
         LOG(INFO) << "LldpdSource stopped";
     }
@@ -198,28 +207,21 @@ public:
      * callback instead.
      */
     void refreshAll() {
-        if (!lifecycle_.isRunning()) return;
+        std::scoped_lock lk(watchMutex_);
 
-        // Not an epoch transition, so the coordinator does not cover it.
-        // Two concurrent reconnects would race on watch_.
-        std::unique_lock refreshLk(refreshMutex_, std::try_to_lock);
-        if (!refreshLk) {
-            VLOG(1) << "LldpdSource: refresh already in progress";
+        // Re-check: a stop() may have claimed teardown since the
+        // isRunning() check above. Abandon rather than resurrect a
+        // watch on a stopped epoch.
+        if (!lifecycle_.isRunning()) {
             return;
         }
-
         auto newWatch = makeWatch(/*attachCallback=*/false);
         if (!newWatch) {
             LOG(ERROR) << "LldpdSource: reconnect failed; keeping existing watch";
             return;
         }
-
-        // oldCache MUST be taken before the new watch repopulates the cache,
-        // or diffRemovedNeighbors sees re-enumerated entries as fresh and
-        // emits no removals at all.
         NeighborCacheMap oldCache = callbackState_->cache.exchange({});
         watch_.reset();
-
         newWatch->setCallback(makeChangeCallback());
         watch_ = std::move(newWatch);
 
@@ -246,7 +248,7 @@ public:
     void removeInterface(const std::string &ifname) {
         auto lease = callbackState_->gate.try_acquire();
         if (!lease) {
-            return; // stop/refresh in progress; discard batch
+            return;
         }
 
         // Flush returns the entries so delivery stays outside the cache
@@ -298,7 +300,7 @@ public:
     void reassertAll() {
         const auto lease = callbackState_->gate.try_acquire();
         if (!lease) {
-            return; // stop/refresh in progress; keepalive dropped
+            return;
         }
 
         emitBatch([](const NeighborCacheMap &cache, std::vector<LldpObservation> &out) {
@@ -451,7 +453,7 @@ private:
     }
 
     void enumerateInitialNeighbors(std::stop_token cancelled) {
-        // Precondition: admission is open; lifecycleMutex_ NOT held here.
+        // Precondition: admission is open;
         // Uses BoundedLldpConnection rather than lldpcli::LldpCtl: this runs
         // on the supervision (tick) thread via refreshAll(), and the default
         // lldpctl transport has no timeout, so a hung lldpd would block the
@@ -498,7 +500,7 @@ private:
             });
 
             if (aborted) {
-                VLOG(1) << "LLDP initial enumeration aborted (admission closed)";
+                VLOG(1) << "LLDP initial enumeration aborted";
                 return;
             }
 
@@ -562,9 +564,7 @@ private:
     std::unique_ptr<BoundedLldpWatch> watch_;
 
     LifecycleCoordinator lifecycle_;
-    /// Serializes refreshes against each other. A refresh is not an epoch
-    /// transition, so the coordinator does not cover it.
-    std::mutex refreshMutex_;
+    std::mutex watchMutex_;
 };
 
 // ---------------------------------------------------------------------------
