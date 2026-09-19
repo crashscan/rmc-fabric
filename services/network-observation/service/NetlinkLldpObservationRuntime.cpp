@@ -187,6 +187,9 @@ bool NetlinkLldpObservationRuntime::start() {
     if (auto observer = createLldpObserver(); observer->start()) {
         lldpObserver_.store(std::move(observer));
         lldpReconnectFailures_ = 0;
+        // Also clear the reconnect throttle: it belongs to the observer
+        // being discarded, and a fresh one must not inherit its budget.
+        lastLldpReconnect_ = {};
     } else {
         LOG(WARNING) << "LLDP observer failed to start — LLDP unavailable (tick() will retry)";
     }
@@ -405,6 +408,9 @@ void NetlinkLldpObservationRuntime::superviseLldp(std::chrono::steady_clock::tim
             lldpObserver_.store(nullptr);
             observer.reset();
             lldpReconnectFailures_ = 0;
+            // Also clear the reconnect throttle: it belongs to the observer
+            // being discarded, and a fresh one must not inherit its budget.
+            lastLldpReconnect_ = {};
             // Clear the retry throttle: the escalation already waited
             // kLldpReconnectFailureLimit intervals, so the replacement
             // attempt should not wait another one.
