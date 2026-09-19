@@ -124,6 +124,14 @@ public:
             watch_ = std::move(newWatch);
         }
 
+        // A subscribed watch is proven backend contact: makeWatch() completed
+        // a bounded connect AND the lldpctl_watch_callback2 round-trip. Stamp
+        // here rather than relying on enumerateInitialNeighbors(), which may
+        // legitimately fail or abort while the watch stays live — leaving the
+        // watchdog looking at a pre-reconnect timestamp and re-refreshing a
+        // source that just connected.
+        callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(),std::memory_order_release);
+
         // Runs on this thread and dispatches downstream, so a concurrent
         // stop() can request cancellation partway through.
         enumerateInitialNeighbors(transition.stopToken());
@@ -225,6 +233,12 @@ public:
             newWatch->setCallback(makeChangeCallback());
             watch_ = std::move(newWatch);
         }
+
+        // Same reasoning as start(): the reconnect is proven at this point.
+        // The silent window (build -> reset -> attach) produces no
+        // dispatchChange calls, so without this the watchdog would judge a
+        // healthy new watch by the old one's last event.
+        callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(),std::memory_order_release);
 
         enumerateInitialNeighbors({});
         reconcileAfterRefresh(oldCache);
@@ -505,9 +519,11 @@ private:
             }
 
             VLOG(1) << "LLDP initial enumeration complete";
-            // A completed enumeration proves backend connectivity even when
-            // zero neighbors were found (dispatchChange stamps per neighbor).
-            // Only stamp on a full walk: an aborted one proves nothing.
+            // Refreshes the stamp its callers already set after a successful
+            // watch subscribe. Redundant on the reconnect paths, but this
+            // function is the only backend contact when neither ran — and an
+            // aborted or failed walk proves nothing, so it stays inside the
+            // success branch.
             callbackState_->lastWatchEventAt.store(std::chrono::steady_clock::now(), std::memory_order_release);
         } catch (const std::exception &e) {
             LOG(ERROR) << "LLDP initial enumeration failed: " << e.what();
