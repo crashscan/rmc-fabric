@@ -139,8 +139,15 @@ public:
             state_ = State::Stopping;
             lk.unlock();
 
-            callbackState_->gate.close_and_drain();
-            callbackState_->cache.clear();
+            // Bounded: this path exists precisely because a previous
+            // refreshAll() abandoned its drain, so the lease it is waiting on
+            // may never be released. Blocking here would hang the supervision
+            // thread and, through it, service shutdown.
+            if (callbackState_->gate.close_and_drain(kRefreshDrainTimeout)) {
+                callbackState_->cache.clear();
+            } else {
+                LOG(ERROR) << "LldpdSource: stop drain timed out; cache left intact";
+            }
 
             lk.lock();
             state_ = State::Stopped;
