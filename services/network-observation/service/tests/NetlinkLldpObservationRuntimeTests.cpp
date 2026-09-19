@@ -31,11 +31,20 @@ public:
         std::vector<bool> startResults;     // consumed in order; past end = true
         std::size_t       startCalls{0};
         std::atomic<bool> running{false};
+        /// Push-subscription liveness, independent of `running`. Set by
+        /// start()/refreshAll(), cleared by stop() or by a test simulating
+        /// a daemon restart. Defaulting this to false made every healthy
+        /// tick take the dead-watch repair branch.
         std::atomic<bool> watchAlive{false};
         std::atomic<bool> backendAlive{true};
         std::atomic<int>  refreshAllCalls{0};
         std::atomic<int>  reassertCalls{0};
-        std::atomic<bool> stopOnRefresh{false};   // simulate a failed reconnect
+        /// A failed reconnect. Production refreshAll() RETAINS the existing
+        /// watch and leaves the epoch running — only the return value says it
+        /// failed. The old stopOnRefresh flag also cleared `running`, which
+        /// no longer happens and would route the next tick down the drop
+        /// branch instead of the escalation.
+        std::atomic<bool> failRefresh{false};
         std::vector<std::string> interfacesDown;
         std::vector<std::string> interfacesUp;
     };
@@ -46,18 +55,22 @@ public:
         const auto i = s_->startCalls++;
         const bool ok = i < s_->startResults.size() ? s_->startResults[i] : true;
         s_->running = ok;
+        // A started source holds a live subscription.
+        s_->watchAlive = ok;
         return ok;
     }
-    void stop() override { s_->running = false; }
+    void stop() override {
+        s_->running    = false;
+        s_->watchAlive = false;
+    }
     [[nodiscard]] bool isRunning() const override { return s_->running; }
     [[nodiscard]] bool isWatchAlive() const override { return s_->watchAlive; }
 
     bool refreshAll() override {
         ++s_->refreshAllCalls;
-        if (s_->stopOnRefresh) {
-            s_->running = false;
-            return false;
-        }
+        // Failure retains the watch and the epoch; only the result reports it.
+        if (s_->failRefresh) return false;
+        s_->watchAlive = true;   // a successful reconnect repairs the watch
         return true;
     }
     void refreshInterface(const std::string& i) override { s_->interfacesUp.push_back(i); }
@@ -190,7 +203,7 @@ void testProbeFailureReconnectsAndDropsStoppedObserver() {
     expect(rt->health().lldpAvailable, "observer acquired");
 
     f.shared->backendAlive  = false;
-    f.shared->stopOnRefresh = true;     // reconnect fails, source stops
+    f.shared->failRefresh = true;     // reconnect fails, source stops
     rt->tick(t0 + 61s);                 // past the 60s probe interval
     expect(f.shared->refreshAllCalls == 1, "probe failure triggers refreshAll");
 
@@ -225,15 +238,131 @@ void testKeepaliveHonoursInjectedInterval() {
 
 void testFactorySeamRejectedAfterStart() { /* asserts the precondition throws */ }
 
+void testDeadWatchEscalatesAfterRepeatedFailures() {
+    Fixture f;
+    auto rt = f.make();
+    const auto t0 = std::chrono::steady_clock::now();
+    rt->tick(t0);                        // acquire
+
+    f.shared->watchAlive  = false;       // watch dies
+    f.shared->failRefresh = true;        // and repair keeps failing
+
+    const auto before = f.factoryCalls;
+    for (int i = 1; i <= 5; ++i) {
+        rt->tick(t0 + std::chrono::seconds{31 * i});
+    }
+    expect(f.shared->refreshAllCalls == 5, "one attempt per retry interval");
+    expect(f.factoryCalls == before, "not yet escalated");
+
+    rt->tick(t0 + 186s);
+    expect(f.factoryCalls == before + 1, "escalates to re-acquire after the limit");
+}
+
+// A failed probe reconnects IN PLACE. The observer is not dropped: a failed
+// refreshAll() retains the watch and leaves the epoch running, so recovery
+// runs through the escalation path rather than an immediate re-acquire.
+//
+// Replaces testProbeFailureReconnectsAndDropsStoppedObserver, which asserted
+// the pre-supervisor contract where a failed reconnect stopped the source.
+void testProbeFailureReconnectsInPlace() {
+    Fixture f;
+    auto rt = f.make();
+    const auto t0 = std::chrono::steady_clock::now();
+
+    rt->tick(t0);
+    expect(rt->health().lldpAvailable, "observer acquired");
+
+    const auto before = f.factoryCalls;
+    f.shared->backendAlive = false;
+    f.shared->failRefresh  = true;
+
+    rt->tick(t0 + 61s);                 // past the 60s probe interval
+    expect(f.shared->refreshAllCalls == 1, "probe failure triggers a reconnect");
+    expect(f.factoryCalls == before, "the observer is retained, not replaced");
+    expect(rt->health().lldpAvailable, "a failed reconnect does not end the epoch");
+}
+
+// A dead watch is repaired in place — refreshAll(), not a re-acquire — so the
+// neighbour cache survives to be reconciled.
+void testDeadWatchReconnectsInPlace() {
+    Fixture f;
+    auto rt = f.make();
+    const auto t0 = std::chrono::steady_clock::now();
+    rt->tick(t0);
+
+    const auto before = f.factoryCalls;
+    f.shared->watchAlive = false;       // lldpd restarted; loop thread exited
+
+    rt->tick(t0 + 31s);
+    expect(f.shared->refreshAllCalls == 1, "dead watch triggers a reconnect");
+    expect(f.factoryCalls == before, "repaired in place, not re-acquired");
+    expect(f.shared->watchAlive.load(), "a successful reconnect restores the watch");
+}
+
+// Every reconnect trigger shares one throttle, so a daemon that is down does
+// not cost a bounded connect on every tick.
+void testDeadWatchRepairIsThrottled() {
+    Fixture f;
+    auto rt = f.make();
+    const auto t0 = std::chrono::steady_clock::now();
+    rt->tick(t0);
+
+    f.shared->watchAlive  = false;
+    f.shared->failRefresh = true;       // stays dead, so every tick would retry
+
+    rt->tick(t0 + 1s);
+    expect(f.shared->refreshAllCalls == 1, "first attempt");
+    rt->tick(t0 + 2s);
+    rt->tick(t0 + 29s);
+    expect(f.shared->refreshAllCalls == 1, "throttled below the 30s interval");
+    rt->tick(t0 + 32s);
+    expect(f.shared->refreshAllCalls == 2, "attempted again past the interval");
+}
+
+// In-place repair is preferred, but not forever: after the failure limit the
+// observer is dropped and re-acquired. Throttled ticks are not failures and
+// must not count toward the limit.
+void testDeadWatchEscalatesToReacquireAfterFailureLimit() {
+    Fixture f;
+    auto rt = f.make();
+    const auto t0 = std::chrono::steady_clock::now();
+    rt->tick(t0);
+
+    const auto before = f.factoryCalls;
+    f.shared->watchAlive  = false;
+    f.shared->failRefresh = true;
+
+    // Five attempts, one per retry interval. The extra sub-interval ticks
+    // are throttled and must not advance the failure count.
+    for (int i = 1; i <= 5; ++i) {
+        const auto at = t0 + std::chrono::seconds{31 * i};
+        rt->tick(at);
+        rt->tick(at + 1s);              // throttled: not a failure
+    }
+    expect(f.shared->refreshAllCalls == 5, "one attempt per interval");
+    expect(f.factoryCalls == before, "not escalated before the limit");
+
+    // The escalation fires on the tick following the limiting failure.
+    f.shared->failRefresh = false;      // replacement can start cleanly
+    rt->tick(t0 + 186s);
+    expect(f.factoryCalls == before + 1, "observer dropped and re-acquired");
+    expect(rt->health().lldpAvailable, "the replacement is live");
+}
+
 } // namespace
 
 int main() {
     testLinkEventReachesObserverCreatedAfterCallbacks();
     testRetryAcquiresAfterRepeatedFailures();
     testRetryIsThrottled();
-    testProbeFailureReconnectsAndDropsStoppedObserver();
+    testProbeFailureReconnectsInPlace();
     testProbeSuccessDoesNotReconnect();
+    testDeadWatchReconnectsInPlace();
+    testDeadWatchRepairIsThrottled();
+    testDeadWatchEscalatesToReacquireAfterFailureLimit();
     testKeepaliveHonoursInjectedInterval();
     testFactorySeamRejectedAfterStart();
+    testDeadWatchRepairIsThrottled();
+    testDeadWatchEscalatesAfterRepeatedFailures();
     return EXIT_SUCCESS;
 }
